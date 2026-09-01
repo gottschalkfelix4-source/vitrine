@@ -1,0 +1,22 @@
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlalchemy==2.0.52
+alembic==1.19.1
+pydantic==2.13.5
+pydantic-settings==2.15.0
+httpx==0.28.1
+python-multipart==0.0.32
+anyio==4.14.2
+
+# yt-dlp ist bewusst NICHT hart gepinnt: YouTube bricht die Extraktoren regelmaessig,
+# ein festes Pin macht das Archiv nach wenigen Wochen funktionsunfaehig.
+# Beispiel: Als YouTube am 17.08.2026 den android_vr-Client abschaltete, lieferte
+# die damalige Stable fuer JEDES Format nur noch 403 - zwei Tage lang, bis
+# 2026.08.19 erschien. Update-Pfad siehe docs/betrieb.md
+#
+# Das [default]-Extra ist NICHT optional: Es zieht yt-dlp-ejs nach, die
+# Challenge-Solver-Skripte. Ohne sie laeuft yt-dlp scheinbar normal, liefert
+# aber stillschweigend nur eine reduzierte Formatauswahl - im schlimmsten Fall
+# 360p. Zusaetzlich wird eine JavaScript-Laufzeit im Container gebraucht (Deno),
+# siehe Dockerfile.
+yt-dlp[default]>=2026.8.19

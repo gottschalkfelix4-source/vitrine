@@ -1,0 +1,202 @@
+"""Tests der Wiedergabe-Entscheidung.
+
+Zwei Fehlerrichtungen, beide unangenehm:
+- Zu optimistisch entschieden -> der Nutzer bekommt ein schwarzes Bild.
+- Zu pessimistisch entschieden -> es wird staendig unnoetig transkodiert und
+  der Heissspeicher laeuft voll, obwohl direkt gestreamt werden koennte.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.services.bundle import BundleManifest
+from app.services.playback import (
+    FALLBACK_SUPPORT,
+    Mode,
+    decide,
+    normalize_audio_codec,
+    normalize_video_codec,
+    parse_client_support,
+)
+
+MODERN = frozenset({"mp4", "webm", "av01", "vp09", "h264", "opus", "aac"})
+ALT = frozenset({"mp4", "h264", "aac"})
+
+
+def _m(media: str, vcodec: str | None = "av1", acodec: str | None = "opus") -> BundleManifest:
+    return BundleManifest(
+        schema_version=1, video_id="v", channel_id="c", title="t",
+        media_name=f"media/{media}", media_bytes=1, mime_type="",
+        video_codec=vcodec, audio_codec=acodec,
+    )
+
+
+# ---------------------------------------------------------------- Direktstream
+
+
+def test_av1_webm_laeuft_direkt_auf_modernem_browser():
+    d = decide(_m("v.webm", "av1", "opus"), MODERN)
+    assert d.mode is Mode.DIRECT and d.variant is None
+
+
+def test_h264_mp4_laeuft_ueberall_direkt():
+    assert decide(_m("v.mp4", "h264", "aac"), ALT).mode is Mode.DIRECT
+
+
+def test_codec_schreibweisen_werden_erkannt():
+    """ffmpeg meldet 'libsvtav1', ffprobe 'av1', Manifeste teils 'av01' -
+    alle drei muessen zum selben Ergebnis fuehren."""
+    for schreibweise in ("av1", "av01", "libsvtav1", "AV1", "av01.0.08M"):
+        assert decide(_m("v.webm", schreibweise, "opus"), MODERN).mode is Mode.DIRECT
+
+
+# ------------------------------------------------------------------ Transkodieren
+
+
+def test_mkv_geht_nie_direkt():
+    """Der teuerste denkbare Fehler waere ein MKV-Archiv: Kein Browser spielt
+    das ab, also muesste jede einzelne Wiedergabe transkodiert werden."""
+    d = decide(_m("v.mkv", "h264", "aac"), MODERN)
+    assert d.mode is Mode.TRANSCODE
+    assert "Container" in d.reason
+
+
+def test_alter_client_bekommt_av1_transkodiert():
+    d = decide(_m("v.webm", "av1", "opus"), ALT)
+    assert d.mode is Mode.TRANSCODE and d.variant == "h264"
+
+
+def test_container_ohne_client_unterstuetzung():
+    d = decide(_m("v.webm", "h264", "aac"), ALT)  # ALT kennt kein webm
+    assert d.mode is Mode.TRANSCODE and "webm" in d.reason
+
+
+def test_nur_der_ton_passt_nicht():
+    """Video passt, Ton nicht - trotzdem transkodieren, sonst laeuft ein
+    stummes Video."""
+    d = decide(_m("v.mp4", "h264", "opus"), ALT)
+    assert d.mode is Mode.TRANSCODE and "Ton" in d.reason
+
+
+def test_unbekannter_codec_geht_auf_nummer_sicher():
+    d = decide(_m("v.mp4", "irgendwas-neues", "aac"), MODERN)
+    assert d.mode is Mode.TRANSCODE
+
+
+def test_fehlender_codec_geht_auf_nummer_sicher():
+    assert decide(_m("v.mp4", None, "aac"), MODERN).mode is Mode.TRANSCODE
+
+
+def test_fehlender_tonspur_eintrag_blockiert_nicht():
+    """Ein Video ohne Tonspur (oder ohne erfassten Toncodec) darf nicht
+    grundlos in den Transkodierpfad rutschen."""
+    assert decide(_m("v.mp4", "h264", None), ALT).mode is Mode.DIRECT
+
+
+# ------------------------------------------------------- Faehigkeitsmeldung
+
+
+@pytest.mark.parametrize("raw", [None, "", "   ", ","])
+def test_ohne_meldung_konservative_annahme(raw):
+    assert parse_client_support(raw) == FALLBACK_SUPPORT
+
+
+def test_meldung_wird_normalisiert():
+    assert parse_client_support(" MP4 , WebM ,AV01 ") == frozenset({"mp4", "webm", "av01"})
+
+
+def test_client_ohne_meldung_bekommt_av1_transkodiert():
+    """Zusammenspiel: Meldet ein Client nichts, darf er kein AV1 bekommen."""
+    d = decide(_m("v.webm", "av1", "opus"), parse_client_support(None))
+    assert d.mode is Mode.TRANSCODE
+
+
+# ------------------------------------------------------------- Normalisierung
+
+
+@pytest.mark.parametrize(
+    "roh,erwartet",
+    [("h264", "h264"), ("avc1", "h264"), ("libx264", "h264"), ("avc1.640028", "h264"),
+     ("vp9", "vp09"), ("hevc", "hevc"), ("hvc1", "hevc"), ("bloedsinn", None), (None, None)],
+)
+def test_videocodec_normalisierung(roh, erwartet):
+    assert normalize_video_codec(roh) == erwartet
+
+
+@pytest.mark.parametrize(
+    "roh,erwartet",
+    [("opus", "opus"), ("libopus", "opus"), ("aac", "aac"), ("mp4a", "aac"),
+     ("mp4a.40.2", "aac"), ("quatsch", None)],
+)
+def test_audiocodec_normalisierung(roh, erwartet):
+    assert normalize_audio_codec(roh) == erwartet
+
+
+# ------------------------------------------- Recodier-Entscheidung (media.py)
+
+
+def test_recode_nur_wo_es_sich_lohnt():
+    """Die wirtschaftlich wichtigste Entscheidung des ganzen Projekts: Eine
+    VP9- oder AV1-Quelle nochmal durch SVT-AV1 zu schicken kostet rund eine
+    Stunde Rechenzeit je Stunde Video und bringt fast nichts."""
+    from app.config import ArchiveCodec
+    from app.services.media import MediaInfo, should_recode
+
+    def info(codec: str, hoehe: int = 1080) -> MediaInfo:
+        return MediaInfo(
+            duration_s=60.0, width=1920, height=hoehe, fps=30.0,
+            video_codec=codec, audio_codec="aac", bitrate=3_000_000, size_bytes=10**7,
+        )
+
+    # Lohnt sich: H.264 ist der ineffizienteste der drei YouTube-Codecs.
+    assert should_recode(info("h264"), ArchiveCodec.AV1)[0] is True
+    assert should_recode(info("avc1"), ArchiveCodec.AV1)[0] is True
+
+    # Lohnt sich nicht: schon effizient kodiert.
+    for codec in ("vp9", "vp09", "av1", "av01"):
+        lohnt, grund = should_recode(info(codec), ArchiveCodec.AV1)
+        assert lohnt is False, f"{codec} sollte nicht recodiert werden"
+        assert "bereits" in grund
+
+    # Kleine Quellen ebenfalls nicht.
+    assert should_recode(info("h264", hoehe=360), ArchiveCodec.AV1)[0] is False
+    # Abgeschaltet heisst abgeschaltet.
+    assert should_recode(info("h264"), ArchiveCodec.COPY)[0] is False
+
+
+def test_kanal_sammelplaylists():
+    """Der Abgleich laeuft ueber die abgeleiteten UU-Playlists, nicht ueber die
+    Tab-Seiten - die sind vollstaendiger."""
+    from app.services.ytdlp import YtdlpError, channel_auto_playlist
+
+    kanal = "UCuAXFkgsw1L7xaCfnd5JJOw"
+    rest = kanal[2:]
+    assert channel_auto_playlist(kanal) == f"https://www.youtube.com/playlist?list=UU{rest}"
+    assert channel_auto_playlist(kanal, "shorts") == f"https://www.youtube.com/playlist?list=UUSH{rest}"
+    assert channel_auto_playlist(kanal, "live") == f"https://www.youtube.com/playlist?list=UULV{rest}"
+    assert channel_auto_playlist(kanal, "videos") == f"https://www.youtube.com/playlist?list=UULF{rest}"
+
+    with pytest.raises(YtdlpError):
+        channel_auto_playlist("@handleStattID")
+
+
+def test_stiller_360p_rueckfall_wird_erkannt():
+    """Der gefaehrlichste Fehler im Betrieb: yt-dlp meldet Erfolg, hat aber nur
+    die Notfassung geholt. Ohne Pruefung archiviert man wochenlang 360p."""
+    from app.services.ytdlp import DegradedDownload, check_not_degraded
+
+    # Guter Fall
+    check_not_degraded({"height": 1080, "format_id": "303+251", "vcodec": "vp09", "acodec": "opus"})
+
+    # Format 18 - der klassische Rueckfall bei fehlenden PO-Tokens
+    with pytest.raises(DegradedDownload, match="Format 18"):
+        check_not_degraded({"height": 360, "format_id": "18", "vcodec": "avc1", "acodec": "mp4a"})
+
+    # Zu niedrige Aufloesung ohne Format 18
+    with pytest.raises(DegradedDownload, match="360p"):
+        check_not_degraded({"height": 360, "format_id": "134+140", "vcodec": "avc1"})
+
+    # Nur Ton statt Video
+    with pytest.raises(DegradedDownload, match="Tonspur"):
+        check_not_degraded({"height": None, "format_id": "251", "vcodec": "none", "acodec": "opus"})

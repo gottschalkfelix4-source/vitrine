@@ -1,0 +1,41 @@
+services:
+  vitrine:
+    build:
+      context: .
+      args:
+        # Auf Unraid gehoeren die Dateien ueblicherweise nobody:users.
+        UID: ${PUID:-1000}
+        GID: ${PGID:-1000}
+    image: vitrine:latest
+    container_name: vitrine
+    restart: unless-stopped
+    ports:
+      - "${YTA_PORT:-8000}:8000"
+    volumes:
+      # Ein einziges Datenverzeichnis. Darunter liegen bundles/ (Kaltspeicher),
+      # cache/ (Heisskopien), thumbs/ und die SQLite-Datei.
+      - ${DATA_DIR:-./data}:/data
+    environment:
+      YTA_DATA_DIR: /data
+      YTA_TIMEZONE: ${TZ:-Europe/Berlin}
+      YTA_LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Kaltspeicher
+      YTA_ARCHIVE_CODEC: ${ARCHIVE_CODEC:-av1}
+      YTA_AV1_PRESET: ${AV1_PRESET:-6}
+      YTA_AV1_CRF: ${AV1_CRF:-30}
+      # Heissspeicher
+      YTA_HOT_TTL_HOURS: ${HOT_TTL_HOURS:-24}
+      YTA_HOT_TTL_AFTER_PLAYBACK_MINUTES: ${HOT_TTL_AFTER_PLAYBACK_MINUTES:-30}
+      YTA_HOT_MAX_BYTES: ${HOT_MAX_BYTES:-53687091200}
+      # Nebenlaeufigkeit - beim Download bewusst niedrig, YouTube drosselt pro IP.
+      YTA_DOWNLOAD_CONCURRENCY: ${DOWNLOAD_CONCURRENCY:-1}
+      YTA_ENCODE_CONCURRENCY: ${ENCODE_CONCURRENCY:-1}
+    # Encodes sollen den Rest des Systems nicht lahmlegen. Ohne Begrenzung
+    # zieht SVT-AV1 zuverlaessig jeden verfuegbaren Kern.
+    cpus: ${CPU_LIMIT:-0}
+    devices: []
+      # Fuer Hardware-Transkodierung auf Intel-iGPU einkommentieren und
+      # YTA_HWACCEL=qsv setzen. Achtung: Intel 11.-13. Generation (UHD 730/770)
+      # kann AV1 nur dekodieren, NICHT enkodieren - dort bringt das nur fuer den
+      # H.264-Wiedergabepfad etwas.
+      # - /dev/dri:/dev/dri

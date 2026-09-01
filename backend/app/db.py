@@ -1,0 +1,75 @@
+"""Datenbankanbindung.
+
+SQLite wird hier von mehreren Seiten gleichzeitig benutzt: die Web-Requests und
+die Hintergrund-Worker (Download, Encode, Reaper). Ohne WAL-Modus und ein
+gesetztes ``busy_timeout`` fuehrt das zuverlaessig zu "database is locked".
+Beides wird deshalb bei jeder neuen Verbindung erzwungen.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.config import settings
+from app.models import Base
+
+
+def _create_engine() -> Engine:
+    engine = create_engine(
+        settings.database_url,
+        # check_same_thread=False, weil die Worker in eigenen Threads laufen.
+        connect_args={"check_same_thread": False, "timeout": 30},
+        pool_pre_ping=True,
+        future=True,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_pragmas(dbapi_conn, _record) -> None:
+        cur = dbapi_conn.cursor()
+        # WAL: Leser blockieren den Schreiber nicht. Entscheidend, weil ein
+        # laufender Encode-Job minutenlang schreiben kann, waehrend das UI liest.
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.execute("PRAGMA temp_store=MEMORY")
+        cur.close()
+
+    return engine
+
+
+engine = _create_engine()
+SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
+
+
+def init_db() -> None:
+    """Legt Verzeichnisse und Schema an. Idempotent."""
+    settings.ensure_dirs()
+    Base.metadata.create_all(engine)
+
+
+@contextmanager
+def session_scope() -> Iterator[Session]:
+    """Transaktionsklammer fuer Worker und Skripte."""
+    s = SessionLocal()
+    try:
+        yield s
+        s.commit()
+    except Exception:
+        s.rollback()
+        raise
+    finally:
+        s.close()
+
+
+def get_db() -> Iterator[Session]:
+    """FastAPI-Abhaengigkeit."""
+    s = SessionLocal()
+    try:
+        yield s
+    finally:
+        s.close()

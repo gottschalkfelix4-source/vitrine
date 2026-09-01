@@ -1,0 +1,155 @@
+/*
+ * Gestaltungsgrundlagen.
+ *
+ * Der Wiedererkennungswert von YouTube haengt an ueberraschend wenigen harten
+ * Konstanten: 56 px hohe Kopfleiste, 240 px breite Seitenleiste (72 px
+ * eingeklappt), 16:9-Vorschaubilder mit 12 px Radius, Dauer unten rechts, ein
+ * roter Fortschrittsbalken und ein sehr dunkler, fast schwarzer Grund. Die
+ * werden hier uebernommen.
+ *
+ * Alles andere ist eigene Handschrift: ruhigere Abstaende, mehr Kontrast in der
+ * Typografie, deutlich weniger gleichzeitig sichtbare Bedienelemente. Und ein
+ * paar Dinge, die YouTube gar nicht braucht, ein Archiv aber schon - vor allem
+ * Zustandskennzeichnungen fuer "archiviert", "in Arbeit" und "fehlt".
+ */
+
+:root {
+  /* --- Flaechen, von unten nach oben ------------------------------------ */
+  --grund: #0f0f0f;
+  --flaeche: #181818;
+  --flaeche-hoch: #212121;
+  --flaeche-schwebend: #282828;
+  --rand: #303030;
+  --rand-zart: #242424;
+
+  /* --- Schrift ---------------------------------------------------------- */
+  --text: #f1f1f1;
+  --text-gedaempft: #aaaaaa;
+  --text-schwach: #717171;
+
+  /* --- Akzent ----------------------------------------------------------- */
+  /* Bewusst nur EIN Akzent. Er markiert den Fortschrittsbalken und die aktive
+     Auswahl - sonst nichts. Die Zurueckhaltung ist der halbe Unterschied zu
+     einer ueberladenen Oberflaeche. */
+  --akzent: #ff0033;
+  --akzent-matt: rgba(255, 0, 51, 0.15);
+
+  /* --- Zustaende (im Archiv-Kontext, YouTube kennt sie nicht) ------------ */
+  --zu-archiviert: #4ade80;
+  --zu-arbeit: #fbbf24;
+  --zu-wartet: #60a5fa;
+  --zu-fehler: #f87171;
+  --zu-fehlt: #6b7280;
+
+  /* --- Masse ------------------------------------------------------------ */
+  --kopf-hoehe: 56px;
+  --leiste-breite: 240px;
+  --leiste-schmal: 72px;
+  --radius-klein: 8px;
+  --radius: 12px;
+  --radius-gross: 16px;
+  --radius-rund: 999px;
+
+  --spalt: 16px;
+  --spalt-gross: 24px;
+
+  /* --- Typografie ------------------------------------------------------- */
+  --schrift: Roboto, "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --schrift-zahl: "Roboto Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --schatten: 0 4px 24px rgba(0, 0, 0, 0.55);
+  --uebergang: 120ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+/* Helles Thema. Bewusst als Ausnahme gefuehrt - ein Medienarchiv wird
+   ueberwiegend abends und im Dunkeln benutzt. */
+:root[data-thema="hell"] {
+  --grund: #ffffff;
+  --flaeche: #f9f9f9;
+  --flaeche-hoch: #f2f2f2;
+  --flaeche-schwebend: #ffffff;
+  --rand: #e0e0e0;
+  --rand-zart: #ededed;
+  --text: #0f0f0f;
+  --text-gedaempft: #606060;
+  --text-schwach: #909090;
+  --akzent-matt: rgba(255, 0, 51, 0.1);
+  --schatten: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--grund);
+  color: var(--text);
+  font-family: var(--schrift);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* Sichtbarer Fokus fuer Tastaturbedienung - ohne das ist die Oberflaeche
+   ohne Maus praktisch unbenutzbar. Nur bei Tastatur, nicht bei Mausklick. */
+:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  border-radius: var(--radius-klein);
+}
+
+::selection {
+  background: var(--akzent-matt);
+}
+
+/* Schlanke Bildlaufleisten, damit die Gitter nicht zerschnitten wirken. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rand) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--rand);
+  border-radius: var(--radius-rund);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
