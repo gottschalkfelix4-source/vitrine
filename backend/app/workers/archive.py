@@ -167,6 +167,11 @@ def _in_suche_aufnehmen(
         log.warning("%s konnte nicht in den Suchindex aufgenommen werden", video.id, exc_info=True)
 
 
+class ShortUebersprungen(Exception):
+    """Das Video ist ein Short, der Kanal will aber keine. Kein Fehler -
+    eine bewusste Entscheidung, die als 'uebersprungen' vermerkt wird."""
+
+
 @jobs.register(JobType.VIDEO_ARCHIVE)
 def archivieren(db: Session, job: Job) -> None:
     video_id = job.target_id
@@ -209,6 +214,18 @@ def archivieren(db: Session, job: Job) -> None:
         if info_medien.width and info_medien.height and info_medien.height > info_medien.width:
             video.is_short = True
             db.commit()
+
+        # Letzte Sperre gegen Shorts, direkt an der Datei statt an der Liste:
+        # Die Kennzeichnung beim Abgleich kann luecken (YouTube liefert die
+        # Shorts-Liste nicht immer vollstaendig), und der "Laden"-Knopf auf der
+        # Kachel kennt die Kanalregeln nicht. Hier ist der Punkt, an dem das
+        # Video nachweislich hochkant ist - und wenn der Kanal keine Shorts
+        # will, wird es jetzt verworfen, nicht erst gebuendelt.
+        if video.is_short and kanal is not None and not kanal.archive_shorts:
+            raise ShortUebersprungen(
+                f"hochkantiges Video ({info_medien.width}x{info_medien.height}) - "
+                "Shorts sind fuer diesen Kanal abgeschaltet"
+            )
 
         # ---- 3. In einen browsertauglichen Behaelter umpacken (60 bis 80 %)
         plan = media.plan_container(info_medien)
@@ -293,6 +310,12 @@ def archivieren(db: Session, job: Job) -> None:
 
         jobs.erledigt(db, job, f"archiviert, {video.bundle_bytes / 1e6:.1f} MB")
 
+    except ShortUebersprungen as e:
+        # Bewusst uebersprungen, kein Fehlschlag: Auftrag gilt als erledigt,
+        # das Video bleibt mit Begruendung sichtbar und laesst sich holen,
+        # sobald der Kanal Shorts erlaubt.
+        _fehler_vermerken(db, video_id, VideoStatus.SKIPPED, str(e))
+        jobs.erledigt(db, job, f"uebersprungen: {e}")
     except ytdlp.VideoUnavailable as e:
         # Kein Grund zum Wiederholen - das Video ist bei der Quelle weg.
         _fehler_vermerken(db, video_id, VideoStatus.UNAVAILABLE, str(e))

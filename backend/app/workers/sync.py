@@ -156,6 +156,22 @@ def _sammlung_abgleichen(
     return neu
 
 
+def _offene_einreihen(db: Session, kanal: Channel) -> int:
+    """Reiht alle noch unarchivierten Videos des Kanals ein, die den Regeln
+    des Kanals entsprechen. Laeuft bewusst erst NACH der Kennzeichnung von
+    Shorts und Livestreams."""
+    anzahl = 0
+    for video in db.scalars(
+        select(Video).where(Video.channel_id == kanal.id, Video.status == VideoStatus.NEW)
+    ):
+        if _soll_archiviert_werden(kanal, video):
+            video.status = VideoStatus.QUEUED
+            jobs.enqueue_archive(db, video.id)
+            anzahl += 1
+    db.commit()
+    return anzahl
+
+
 @jobs.register(JobType.CHANNEL_SYNC)
 def kanal_abgleichen(db: Session, job: Job) -> None:
     kanal_id = job.target_id
@@ -192,7 +208,10 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
             jobs.erledigt(db, job, "keine Aenderung (RSS)")
             return
 
-        # ---- Vollabgleich ueber die Sammelplaylists
+        # ---- Vollabgleich ueber die Sammelplaylists.
+        # Die Uploads-Liste ist die vollstaendige Quelle, reiht aber noch nichts
+        # ein: Erst muessen Shorts und Livestreams gekennzeichnet sein, sonst
+        # wuerde ein Short aus den Uploads als normales Video geladen.
         jobs.fortschritt(db, job, 0.2, "Uploads werden gelesen")
         neu = _sammlung_abgleichen(
             db, kanal,
@@ -200,20 +219,18 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
             titel="Alle Uploads",
             art=PlaylistKind.UPLOADS,
             url=ytdlp.channel_auto_playlist(kanal_id, "uploads"),
-            einreihen=True,
+            einreihen=False,
         )
 
-        # Shorts und Livestreams nur, wenn der Kanal sie ueberhaupt archivieren
-        # soll - sonst waeren es teure Requests fuer Videos, die niemand will.
+        # Shorts- und Livestream-Listen werden IMMER gelesen, auch wenn der
+        # Kanal sie nicht archivieren soll - gerade dann. Sie sind die einzige
+        # verlaessliche Kennzeichnung; ohne sie liesse sich "keine Shorts"
+        # gar nicht einhalten. Der Preis sind zwei Requests je Abgleich.
         schritt = 0.5
         for art, schluessel, praefix, titel in (
             (PlaylistKind.SHORTS, "shorts", "UUSH", "Shorts"),
             (PlaylistKind.LIVE, "live", "UULV", "Livestreams"),
         ):
-            if art == PlaylistKind.SHORTS and not kanal.archive_shorts:
-                continue
-            if art == PlaylistKind.LIVE and not kanal.archive_live:
-                continue
             schritt += 0.15
             jobs.fortschritt(db, job, schritt, f"{titel} werden gelesen")
             try:
@@ -223,11 +240,15 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
                     titel=titel,
                     art=art,
                     url=ytdlp.channel_auto_playlist(kanal_id, schluessel),
-                    einreihen=True,
+                    einreihen=False,
                 )
             except ytdlp.YtdlpError as e:
                 # Nicht jeder Kanal hat Shorts oder Streams - kein Fehler.
                 log.info("%s fuer %s nicht vorhanden: %s", titel, kanal_id, e)
+
+        # Jetzt, mit vollstaendiger Kennzeichnung, einreihen.
+        eingereiht = _offene_einreihen(db, kanal)
+        log.info("%s: %d Videos zum Archivieren eingereiht", kanal_id, eingereiht)
 
         # ---- Die vom Kanal angelegten Playlists
         jobs.fortschritt(db, job, 0.8, "Playlists werden gelesen")

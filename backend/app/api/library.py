@@ -554,6 +554,70 @@ def video(video_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     }
 
 
+@router.delete("/videos/{video_id}")
+def video_aus_archiv_entfernen(video_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Nimmt ein einzelnes Video wieder aus dem Archiv.
+
+    Der Datensatz bleibt - das Video gehoert weiter zum Kanal und zu seinen
+    Playlists, nur die Dateien verschwinden. Der Zustand wird auf
+    "uebersprungen" gesetzt, nicht auf "neu": Ein "neu" wuerde der naechste
+    Abgleich sofort wieder einreihen, und wer ein Video bewusst entfernt hat,
+    will das nicht. Der "Laden"-Knopf auf der Kachel holt es bei Bedarf zurueck.
+    """
+    from pathlib import Path as _Path
+
+    from sqlalchemy import delete as sa_delete
+
+    from app.models import Chapter, HotCopy, Subtitle
+
+    v = db.get(Video, video_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video unbekannt")
+    if v.status != VideoStatus.ARCHIVED and not v.bundle_file:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Video ist nicht archiviert (Status: {v.status})")
+
+    frei = 0
+    pfade = [_Path(h.path) for h in db.scalars(select(HotCopy).where(HotCopy.video_id == video_id))]
+    if v.bundle_file:
+        pfade.append(_Path(v.bundle_file))
+    if v.thumb_file:
+        pfade.append(settings.thumb_dir / v.thumb_file)
+
+    # Erst die Datenbank, dann die Platte - siehe kanal_entfernen.
+    db.execute(
+        sa_delete(Job).where(
+            Job.target_id == video_id, Job.status.in_([JobStatus.PENDING, JobStatus.FAILED])
+        )
+    )
+    db.execute(sa_delete(HotCopy).where(HotCopy.video_id == video_id))
+    db.execute(sa_delete(Chapter).where(Chapter.video_id == video_id))
+    db.execute(sa_delete(Subtitle).where(Subtitle.video_id == video_id))
+    volltext.entfernen(db, video_id)
+
+    v.status = VideoStatus.SKIPPED
+    v.status_message = "aus dem Archiv entfernt"
+    v.bundle_file = None
+    v.bundle_bytes = None
+    v.source_bytes = None
+    v.media_name = None
+    v.thumb_file = None
+    v.recoded = False
+    v.archived_at = None
+    v.progress_s = 0.0
+    db.commit()
+
+    for p in pfade:
+        try:
+            if p.is_file():
+                frei += p.stat().st_size
+                p.unlink()
+        except OSError as e:
+            log.warning("Datei %s liess sich nicht loeschen: %s", p, e)
+
+    log.info("Video %s aus dem Archiv entfernt, %.1f MB frei", video_id, frei / 1e6)
+    return {"video_id": video_id, "bytes_freigegeben": frei, "status": v.status}
+
+
 class Fortschritt(BaseModel):
     sekunden: float = Field(ge=0)
     gesehen: bool | None = None

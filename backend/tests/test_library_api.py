@@ -358,3 +358,41 @@ def test_kanal_entfernen_kann_buendel_behalten(umgebung):
 def test_unbekannten_kanal_entfernen(umgebung):
     client, _ = umgebung
     assert client.delete("/api/channels/UCnix").status_code == 404
+
+
+# ------------------------------------------------------ Video aus dem Archiv
+
+
+def test_video_aus_archiv_entfernen(umgebung):
+    from app.services import suche as volltext
+
+    client, db = umgebung
+    v = db.get(Video, "v0")
+    buendel = settings.bundle_dir / "UCtest" / "v0.zip"
+    buendel.parent.mkdir(parents=True, exist_ok=True)
+    buendel.write_bytes(b"z" * 2000)
+    thumb = settings.thumb_dir / "v0.jpg"
+    thumb.write_bytes(b"t" * 50)
+    v.bundle_file, v.thumb_file = str(buendel), thumb.name
+    db.commit()
+
+    r = client.delete("/api/videos/v0")
+    assert r.status_code == 200
+    assert r.json()["bytes_freigegeben"] == 2050
+
+    db.expire_all()
+    v = db.get(Video, "v0")
+    assert v is not None, "der Datensatz bleibt - das Video gehoert zum Kanal"
+    assert v.status == VideoStatus.SKIPPED
+    assert v.bundle_file is None and v.thumb_file is None
+    assert not buendel.exists() and not thumb.exists()
+    assert volltext.video_treffer(db, "video 0") == []
+    # Es bleibt in der Playlist, jetzt als nicht archivierte Position.
+    d = client.get("/api/playlists/PLabc").json()
+    assert {p["video"]["id"]: p["video"]["status"] for p in d["positionen"]}["v0"] == "skipped"
+
+
+def test_nicht_archiviertes_video_entfernen_gibt_409(umgebung):
+    client, _ = umgebung
+    assert client.delete("/api/videos/v1").status_code == 409
+    assert client.delete("/api/videos/nixda").status_code == 404

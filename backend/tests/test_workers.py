@@ -322,6 +322,10 @@ def test_hochkantiges_video_wird_als_short_markiert(umgebung, monkeypatch, tmp_p
         check=True, capture_output=True,
     )
     db, _tmp = umgebung
+    # Shorts hier ausdruecklich erlauben - geprueft wird die Kennzeichnung,
+    # nicht die Sperre (die hat ihren eigenen Test).
+    db.get(Channel, "UCtest").archive_shorts = True
+    db.commit()
     _download_ersetzen(monkeypatch, quelle, info_extra={"height": 426})
     _archivieren(db)
 
@@ -486,3 +490,78 @@ def test_testsitzung_entspricht_dem_betrieb(umgebung):
     assert db.autoflush is False
     assert SessionLocal.kw["autoflush"] is False
     assert db.autoflush == SessionLocal.kw["autoflush"]
+
+
+# ------------------------------------------------------------ Keine Shorts
+
+
+def test_short_wird_trotz_uploads_liste_nicht_eingereiht(umgebung, monkeypatch):
+    """Ein Short steht auch in der Uploads-Liste, dort aber ohne Kennzeichnung.
+    Frueher wurde es von dort als normales Video eingereiht, bevor die
+    Shorts-Liste ueberhaupt gelesen war. Jetzt wird zuerst gekennzeichnet,
+    dann eingereiht."""
+    from app.models import Channel
+    from app.services import ytdlp
+    from app.workers import sync
+
+    db, _tmp = umgebung
+    kanal = db.get(Channel, "UCtest")
+    kanal.auto_archive, kanal.archive_shorts = True, False
+    db.commit()
+    db.get(Video, "vid1").status = VideoStatus.ARCHIVED  # aus dem Weg
+    db.commit()
+
+    listen = {
+        "UUSH": _liste(["kurz1"]),
+        "UULV": [],
+        "UU": _liste(["lang1", "kurz1", "lang2"]),
+    }
+
+    def gefaelscht(url, limit=None):
+        kennung = url.split("list=")[-1]
+        # Laengste Praefixe zuerst, sonst faengt "UU" auch "UUSH..." ab.
+        for praefix in sorted(listen, key=len, reverse=True):
+            if kennung.startswith(praefix):
+                return listen[praefix]
+        return []
+
+    monkeypatch.setattr(ytdlp, "list_entries", gefaelscht)
+    monkeypatch.setattr(ytdlp, "list_channel_playlists", lambda url: [])
+    monkeypatch.setattr(ytdlp, "peek_recent", lambda kanal_id: [])
+
+    jobs.enqueue(db, JobType.CHANNEL_SYNC, "UCtest", payload={"voll": True})
+    sync.kanal_abgleichen(db, jobs.claim_next(db, [JobType.CHANNEL_SYNC]))
+
+    assert db.get(Video, "kurz1").is_short is True
+    eingereiht = {j.target_id for j in db.scalars(select(Job).where(Job.type == JobType.VIDEO_ARCHIVE))}
+    assert eingereiht == {"lang1", "lang2"}, "das Short darf nicht dabei sein"
+    assert db.get(Video, "kurz1").status == VideoStatus.NEW
+
+
+def test_hochkant_wird_vor_dem_buendeln_verworfen(umgebung, monkeypatch, tmp_path_factory):
+    """Letzte Sperre direkt an der Datei: Auch wenn die Liste luegt oder jemand
+    auf 'Laden' klickt - ein hochkantiges Video wird bei abgeschalteten Shorts
+    nicht gebuendelt, sondern als uebersprungen vermerkt."""
+    from app.models import Channel
+
+    ordner = tmp_path_factory.mktemp("hochkant2")
+    quelle = ordner / "short.mkv"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc2=size=240x426:rate=15:duration=1",
+         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-an", str(quelle)],
+        check=True, capture_output=True,
+    )
+    db, _tmp = umgebung
+    db.get(Channel, "UCtest").archive_shorts = False
+    db.commit()
+    _download_ersetzen(monkeypatch, quelle, info_extra={"height": 426})
+
+    job = _archivieren(db)
+    video = db.get(Video, "vid1")
+    assert video.status == VideoStatus.SKIPPED
+    assert "Shorts" in (video.status_message or "")
+    assert video.bundle_file is None
+    assert job.status == JobStatus.DONE, "bewusst uebersprungen ist kein Fehlschlag"
+    assert not list((settings.bundle_dir).rglob("*.zip")), "es darf kein Buendel entstehen"
+    assert not (settings.tmp_dir / "vid1").exists(), "Arbeitsordner muss weg sein"

@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { Player } from "../components/Player";
 import { Fehler, Gitter, Skelettgitter, Videokachel, Zustand } from "../components/ui";
@@ -18,6 +18,11 @@ export function Wiedergabeseite() {
   const [technikOffen, setTechnikOffen] = useState(false);
   // Kinomodus: Player ueber die volle Breite, die Seitenspalte rutscht darunter.
   const [theater, setTheater] = useState(false);
+  const navigate = useNavigate();
+  // Entfernen in zwei Schritten - ein einzelner Klick, der Dateien loescht,
+  // waere zu leicht danebengegangen.
+  const [entfernenNachfrage, setEntfernenNachfrage] = useState(false);
+  const [entfernenLaeuft, setEntfernenLaeuft] = useState(false);
 
   const detail = useApi(() => api.video(videoId), [videoId]);
   const weitere = useApi(
@@ -80,6 +85,38 @@ export function Wiedergabeseite() {
             <button className="knopf" onClick={() => setTechnikOffen(!technikOffen)}>
               Technik
             </button>
+            {v.status === "archived" ? (
+              entfernenNachfrage ? (
+                <>
+                  <span style={{ color: "var(--text-gedaempft)", fontSize: 13 }}>
+                    Dateien löschen? Der Eintrag bleibt beim Kanal.
+                  </span>
+                  <button
+                    className="knopf"
+                    data-art="gefahr-stark"
+                    disabled={entfernenLaeuft}
+                    onClick={async () => {
+                      setEntfernenLaeuft(true);
+                      try {
+                        await api.videoEntfernen(videoId);
+                        navigate(v.kanal_id ? `/kanal/${v.kanal_id}` : "/");
+                      } finally {
+                        setEntfernenLaeuft(false);
+                      }
+                    }}
+                  >
+                    {entfernenLaeuft ? "wird entfernt …" : "Ja, entfernen"}
+                  </button>
+                  <button className="knopf" onClick={() => setEntfernenNachfrage(false)}>
+                    Nein
+                  </button>
+                </>
+              ) : (
+                <button className="knopf" data-art="gefahr" onClick={() => setEntfernenNachfrage(true)}>
+                  Aus dem Archiv entfernen
+                </button>
+              )
+            ) : null}
           </div>
         </div>
 

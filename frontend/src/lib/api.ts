@@ -227,6 +227,11 @@ export const api = {
   video: (id: string) => hole<VideoDetail>(`/api/videos/${id}`),
   videoArchivieren: (id: string) =>
     hole<{ job_id: number }>(`/api/videos/${id}/archive`, { method: "POST" }),
+  /** Nimmt die Dateien aus dem Archiv; der Eintrag bleibt beim Kanal. */
+  videoEntfernen: (id: string) =>
+    hole<{ video_id: string; bytes_freigegeben: number; status: string }>(`/api/videos/${id}`, {
+      method: "DELETE",
+    }),
 
   fortschrittMerken: (id: string, sekunden: number, gesehen?: boolean) =>
     hole<void>(`/api/videos/${id}/progress`, {
