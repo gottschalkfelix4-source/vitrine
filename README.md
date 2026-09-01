@@ -146,11 +146,11 @@ die IDs und gibt die Rechte ab - beim Start werden nur die Verzeichnisse
 selbst umgeschrieben, nicht rekursiv, sonst dauerte das bei Terabytes an
 Buendeln Minuten.
 
-**Einmalig noetig:** Das Paket auf GitHub Container Registry muss auf *public*
-stehen, sonst kann Unraid es nicht ohne Anmeldung ziehen. GitHub legt neue
-Pakete privat an und bietet dafuer keine API - das geht nur in der
-Weboberflaeche: Repo → *Packages* → *vitrine* → *Package settings* →
-*Change visibility*.
+Das Paket auf GitHub Container Registry erbt die Sichtbarkeit des Repos und
+ist damit oeffentlich - Unraid zieht es ohne Anmeldung. Geprueft mit einem
+anonymen Manifest-Abruf gegen `ghcr.io`. Sollte das Repo einmal privat werden,
+muss das Paket von Hand auf *public* gestellt werden (Repo → *Packages* →
+*Package settings*); eine API gibt es dafuer nicht.
 
 ### Der stille 360p-Fehler
 

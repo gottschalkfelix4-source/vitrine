@@ -28,7 +28,7 @@ Ein Container, SQLite, kein Elasticsearch. Bringt ffmpeg, Deno und yt-dlp mit.
   <DateInstalled/>
   <DonateText/>
   <DonateLink/>
-  <Requires>Das Image liegt auf GitHub Container Registry. Es muss dort auf "public" stehen, sonst kann Unraid es nicht ohne Anmeldung ziehen.</Requires>
+  <Requires>Zwei Pfade: /data auf den Cache-Pool (appdata), /data/bundles auf das Array - ein eigener Share fuer die Videos empfiehlt sich. Hardware-Encoder nur mit passender GPU (siehe Beschreibung der Variable).</Requires>
 
   <!-- Netz -->
   <Config Name="Web-Oberflaeche" Target="8000" Default="8000" Mode="tcp" Description="Port der Oberflaeche und der API." Type="Port" Display="always" Required="true" Mask="false">8000</Config>
