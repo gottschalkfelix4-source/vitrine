@@ -247,3 +247,26 @@ def test_grossgeschriebene_endung_gilt_auch_als_medium(tmp_path: Path, manifest:
     b = _build(tmp_path, quelle, manifest)
     with zipfile.ZipFile(b) as z:
         assert z.getinfo("media/FILM.MP4").compress_type == zipfile.ZIP_STORED
+
+
+def test_nicht_serialisierbare_metadaten_scheitern_vor_dem_schreiben(
+    tmp_path: Path, media: Path, manifest: BundleManifest
+):
+    """Regression: yt-dlp liefert nach einem Download ein Info-Dict mit lebenden
+    Python-Objekten. Frueher flog dabei ein nackter TypeError - und zwar erst
+    NACH dem vollstaendigen Download. Jetzt gibt es eine verstaendliche Meldung,
+    und es bleibt keine halbe Datei zurueck."""
+
+    class Unserialisierbar:
+        pass
+
+    dest = tmp_path / "out" / "x.zip"
+    with pytest.raises(BundleError, match="sanitize_info"):
+        write_bundle(
+            dest,
+            manifest=manifest,
+            media_file=media,
+            info_json={"id": "x", "__postprocessors": [Unserialisierbar()]},
+        )
+    assert not dest.exists()
+    assert not dest.with_suffix(".zip.part").exists()

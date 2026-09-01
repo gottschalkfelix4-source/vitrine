@@ -78,6 +78,10 @@ def _extract(url: str, opts: dict[str, Any]) -> dict[str, Any]:
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            # Entfernt interne Objekte und macht das Ergebnis JSON-tauglich -
+            # es landet unveraendert im Buendel.
+            if info is not None:
+                info = ydl.sanitize_info(info)
     except UnsupportedError as e:
         raise YtdlpError(f"URL wird nicht unterstuetzt: {url}") from e
     except (DownloadError, ExtractorError) as e:
@@ -300,6 +304,13 @@ def download_video(
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+            # Zwingend: Das Ergebnis eines Downloads enthaelt lebende
+            # Python-Objekte - unter "__postprocessors" etwa die
+            # ffmpeg-Nachbearbeiter. Ohne sanitize_info scheitert spaeter das
+            # Schreiben der info.json ins Buendel mit
+            # "Object of type FFmpegMergerPP is not JSON serializable", und
+            # zwar erst nach dem vollstaendigen Download.
+            info = ydl.sanitize_info(info)
     except (DownloadError, ExtractorError) as e:
         text = str(e).lower()
         if any(w in text for w in ("private", "unavailable", "removed", "deleted")):

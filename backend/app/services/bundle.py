@@ -157,6 +157,24 @@ def write_bundle(
     if not media_file.is_file():
         raise BundleError(f"Mediendatei fehlt: {media_file}")
 
+    # Die Metadaten frueh pruefen, bevor irgendetwas geschrieben wird.
+    #
+    # Hintergrund: yt-dlp liefert nach einem Download ein Info-Dict, das lebende
+    # Python-Objekte enthaelt (die ffmpeg-Nachbearbeiter unter
+    # "__postprocessors"). Ohne sanitize_info fliegt hier ein TypeError - und
+    # zwar erst, nachdem das Video vollstaendig heruntergeladen wurde. Diese
+    # Vorpruefung macht daraus wenigstens eine verstaendliche Meldung.
+    if info_json is not None:
+        try:
+            vorgemerkte_metadaten = json.dumps(info_json, ensure_ascii=False)
+        except (TypeError, ValueError) as e:
+            raise BundleError(
+                f"Metadaten von {manifest.video_id} sind nicht als JSON darstellbar: {e}. "
+                "Bei yt-dlp-Ergebnissen hilft YoutubeDL.sanitize_info()."
+            ) from e
+    else:
+        vorgemerkte_metadaten = None
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     if tmp.exists():
@@ -192,12 +210,8 @@ def write_bundle(
         with zipfile.ZipFile(tmp, "w", allowZip64=True) as z:
             # Manifest zuerst, damit es ohne weites Springen lesbar ist.
             z.writestr(MANIFEST_NAME, manifest.to_json(), compress_type=zipfile.ZIP_DEFLATED)
-            if info_json is not None:
-                z.writestr(
-                    INFO_NAME,
-                    json.dumps(info_json, ensure_ascii=False),
-                    compress_type=zipfile.ZIP_DEFLATED,
-                )
+            if vorgemerkte_metadaten is not None:
+                z.writestr(INFO_NAME, vorgemerkte_metadaten, compress_type=zipfile.ZIP_DEFLATED)
             if thumbnail and thumb_name:
                 z.write(thumbnail, thumb_name, compress_type=zipfile.ZIP_STORED)
             for entry, (_lang, _auto, path) in zip(sub_entries, present_subs, strict=True):
