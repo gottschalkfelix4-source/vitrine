@@ -224,6 +224,8 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
         jobs.erledigt(db, job, f"{neu} neue Videos gefunden")
 
     except Exception as e:
+        # jobs.gescheitert setzt die Sitzung selbst zurueck - noetig, weil ein
+        # Schreibfehler sie sonst blockiert und die Fehlermeldung verschluckt.
         jobs.gescheitert(db, job, f"{type(e).__name__}: {e}")
         raise
 

@@ -179,7 +179,7 @@ def test_je_video_nur_eine_fundstelle(db: Session):
         db, "v2", "de",
         "WEBVTT\n\n" + "\n\n".join(
             f"00:00:{i:02d}.000 --> 00:00:{i + 1:02d}.000\nimmer wieder Router Nummer {i}"
-            for i in range(0, 20)
+            for i in range(20)
         ),
     )
     db.commit()

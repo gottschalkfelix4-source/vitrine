@@ -322,3 +322,90 @@ def test_medienname_im_buendel_bleibt_sauber(umgebung, quellvideo, monkeypatch):
     assert video.media_name == "media/vid1.mp4", video.media_name
     with bundle.BundleReader(Path(video.bundle_file)) as r:
         assert "media/vid1.mp4" in r.names()
+
+
+# ------------------------------------------------------- Kanal- und Playlistabgleich
+
+
+def _liste(ids, titel="T"):
+    from app.services.ytdlp import ListedVideo
+
+    return [ListedVideo(id=i, title=f"{titel} {n}", duration_s=60, upload_date=None, view_count=1)
+            for n, i in enumerate(ids)]
+
+
+def test_playlist_darf_dasselbe_video_mehrfach_enthalten(umgebung, monkeypatch):
+    """Regression aus einem echten Kanalabgleich.
+
+    Naheliegend waere, ein Video je Playlist nur einmal zuzulassen. Echte
+    Playlists enthalten aber Wiederholungen - einen Vorspann am Anfang und am
+    Ende etwa. Mit der falschen Eindeutigkeitsregel brach der Abgleich der
+    Blender-Kanalseite mitten im Lauf ab und liess den Auftrag als "laeuft"
+    stehen.
+    """
+    from app.models import Channel, PlaylistItem
+    from app.services import ytdlp
+    from app.workers import sync
+
+    db, _tmp = umgebung
+    kanal = db.get(Channel, "UCtest")
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: _liste(["a", "b", "a", "c"]))
+
+    neu = sync._sammlung_abgleichen(
+        db, kanal, playlist_id="PLx", titel="Mit Wiederholung", art="playlist",
+        url="egal", einreihen=False,
+    )
+
+    eintraege = list(db.scalars(select(PlaylistItem).where(PlaylistItem.playlist_id == "PLx")))
+    assert [e.video_id for e in sorted(eintraege, key=lambda x: x.position)] == ["a", "b", "a", "c"]
+    assert neu == 3, "drei verschiedene Videos, vier Positionen"
+
+
+def test_erneuter_abgleich_ersetzt_die_reihenfolge(umgebung, monkeypatch):
+    """Aendert der Kanal die Playlist, muss das Archiv nachziehen statt zu
+    haeufen - entfernte Positionen sollen verschwinden."""
+    from app.models import Channel, PlaylistItem
+    from app.services import ytdlp
+    from app.workers import sync
+
+    db, _tmp = umgebung
+    kanal = db.get(Channel, "UCtest")
+
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: _liste(["a", "b", "c"]))
+    sync._sammlung_abgleichen(db, kanal, playlist_id="PLx", titel="V1", art="playlist",
+                              url="egal", einreihen=False)
+
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: _liste(["c", "a"]))
+    sync._sammlung_abgleichen(db, kanal, playlist_id="PLx", titel="V2", art="playlist",
+                              url="egal", einreihen=False)
+
+    eintraege = sorted(
+        db.scalars(select(PlaylistItem).where(PlaylistItem.playlist_id == "PLx")),
+        key=lambda x: x.position,
+    )
+    assert [e.video_id for e in eintraege] == ["c", "a"]
+    assert db.get(__import__("app.models", fromlist=["Playlist"]).Playlist, "PLx").title == "V2"
+
+
+def test_gescheiterter_auftrag_wird_trotz_blockierter_sitzung_vermerkt(umgebung, monkeypatch):
+    """Der zweite Teil desselben Vorfalls: Nach einem Schreibfehler nimmt die
+    Sitzung nichts mehr an. Die Fehlerbehandlung selbst darf daran nicht
+    scheitern - sonst verdeckt sie die Ursache und der Auftrag bleibt fuer
+    immer auf 'laeuft' stehen."""
+    from sqlalchemy.exc import IntegrityError
+
+    db, _tmp = umgebung
+    job = jobs.enqueue_archive(db, "vid1")
+    laufend = jobs.claim_next(db, [JobType.VIDEO_ARCHIVE])
+    assert laufend is not None
+
+    # Sitzung absichtlich in den blockierten Zustand bringen.
+    db.add(Video(id="vid1", channel_id="UCtest", title="doppelt"))
+    with pytest.raises(IntegrityError):
+        db.flush()
+
+    jobs.gescheitert(db, laufend, "irgendein Schreibfehler")
+
+    db_job = db.get(Job, job.id)
+    assert db_job.status == JobStatus.FAILED
+    assert "Schreibfehler" in db_job.error

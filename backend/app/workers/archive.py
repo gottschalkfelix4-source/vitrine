@@ -44,6 +44,28 @@ def _status(db: Session, video: Video, status: str, nachricht: str | None = None
     db.commit()
 
 
+def _fehler_vermerken(
+    db: Session, video_id: str, status: str, meldung: str, *, versuch_zaehlen: bool = False
+) -> None:
+    """Haelt einen Fehlschlag fest, auch wenn die Sitzung blockiert ist.
+
+    Scheitert ein Auftrag an einem Schreibfehler, nimmt SQLAlchemy bis zum
+    Zuruecksetzen keine weitere Anweisung mehr an. Ein schlichtes
+    ``video.status = ...; db.commit()`` wuerde dann selbst scheitern und die
+    urspruengliche Ursache verdecken - das Video bliebe auf "wird geladen"
+    stehen und niemand wuesste, warum.
+    """
+    db.rollback()
+    video = db.get(Video, video_id)
+    if video is None:
+        return
+    if versuch_zaehlen:
+        video.retry_count += 1
+    video.status = status
+    video.status_message = meldung[:1000]
+    db.commit()
+
+
 def _thumbnail_ablegen(video_id: str, quelle: Path | None) -> str | None:
     """Legt das Vorschaubild ausserhalb des Buendels ab.
 
@@ -265,17 +287,17 @@ def archivieren(db: Session, job: Job) -> None:
 
     except ytdlp.VideoUnavailable as e:
         # Kein Grund zum Wiederholen - das Video ist bei der Quelle weg.
-        _status(db, video, VideoStatus.UNAVAILABLE, str(e)[:1000])
+        _fehler_vermerken(db, video_id, VideoStatus.UNAVAILABLE, str(e))
         jobs.erledigt(db, job, "Video bei der Quelle nicht mehr verfuegbar")
     except ytdlp.DegradedDownload as e:
         # Bewusst NICHT als archiviert verbuchen: Sobald die PO-Token- oder
         # JavaScript-Kette wieder steht, soll dieses Video erneut geholt werden.
-        video.retry_count += 1
-        _status(db, video, VideoStatus.FAILED, str(e)[:1000])
+        _fehler_vermerken(db, video_id, VideoStatus.FAILED, str(e), versuch_zaehlen=True)
         jobs.gescheitert(db, job, str(e))
     except Exception as e:
-        video.retry_count += 1
-        _status(db, video, VideoStatus.FAILED, f"{type(e).__name__}: {e}"[:1000])
+        _fehler_vermerken(
+            db, video_id, VideoStatus.FAILED, f"{type(e).__name__}: {e}", versuch_zaehlen=True
+        )
         jobs.gescheitert(db, job, f"{type(e).__name__}: {e}")
         raise
     finally:
@@ -383,7 +405,7 @@ def recodieren(db: Session, job: Job) -> None:
 
     except Exception as e:
         # Das alte Buendel steht noch - das Video bleibt abspielbar.
-        _status(db, video, VideoStatus.ARCHIVED, f"Recodierung fehlgeschlagen: {e}"[:1000])
+        _fehler_vermerken(db, video_id, VideoStatus.ARCHIVED, f"Recodierung fehlgeschlagen: {e}")
         jobs.gescheitert(db, job, f"{type(e).__name__}: {e}")
         raise
     finally:

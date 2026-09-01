@@ -17,6 +17,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -152,11 +153,38 @@ def erledigt(db: Session, job: Job, nachricht: str | None = None) -> None:
 
 
 def gescheitert(db: Session, job: Job, fehler: str) -> None:
-    job.status = JobStatus.FAILED
-    job.finished_at = utcnow()
-    job.error = fehler[:4000]
+    """Vermerkt einen Fehlschlag - auch dann, wenn die Sitzung blockiert ist.
+
+    Das Zuruecksetzen am Anfang ist der springende Punkt: Ist der Auftrag an
+    einem Schreibfehler gescheitert (etwa an einer verletzten Eindeutigkeit),
+    nimmt SQLAlchemy keine weitere Anweisung mehr entgegen, bis zurueckgesetzt
+    wurde. Ohne das wirft ausgerechnet die Fehlerbehandlung selbst eine
+    PendingRollbackError - und die verdeckt die eigentliche Ursache. Genau so
+    blieb ein abgebrochener Kanalabgleich frueher als "laeuft" stehen.
+    """
+    # Den Schluessel ueber den Objektzustand lesen, nicht ueber job.id: Nach
+    # einem fehlgeschlagenen Flush sind die Felder abgelaufen, und schon ein
+    # lesender Zugriff wuerde ein Nachladen ausloesen - das scheitert dann
+    # genauso. identity kommt dagegen ohne Datenbankzugriff aus.
+    kennung = sa_inspect(job).identity
+    if kennung is None:
+        db.rollback()
+        log.warning("Auftrag ohne Kennung gescheitert: %s", fehler)
+        return
+    job_id = kennung[0]
+
+    db.rollback()
+    frisch = db.get(Job, job_id)
+    if frisch is None:
+        log.warning("Auftrag %s gescheitert, ist aber verschwunden: %s", job_id, fehler)
+        return
+    frisch.status = JobStatus.FAILED
+    frisch.finished_at = utcnow()
+    frisch.error = fehler[:4000]
     db.commit()
-    log.warning("Auftrag %s gescheitert (%s %s): %s", job.id, job.type, job.target_id or "", fehler)
+    log.warning(
+        "Auftrag %s gescheitert (%s %s): %s", job_id, frisch.type, frisch.target_id or "", fehler
+    )
 
 
 def abbrechen(db: Session, job: Job) -> None:

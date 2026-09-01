@@ -243,7 +243,13 @@ class PlaylistItem(Base):
     playlist: Mapped[Playlist] = relationship(back_populates="items")
     video: Mapped[Video] = relationship(back_populates="playlist_items")
 
-    __table_args__ = (UniqueConstraint("playlist_id", "video_id", name="uq_playlist_video"),)
+    #: Eindeutig ist die POSITION, nicht das Video.
+    #:
+    #: Naheliegend waere (playlist_id, video_id) - aber echte Playlists
+    #: enthalten dasselbe Video durchaus mehrfach, etwa einen Vorspann am
+    #: Anfang und am Ende. Mit der falschen Regel bricht der Kanalabgleich
+    #: mitten im Lauf ab; auf der Blender-Kanalseite passiert genau das.
+    __table_args__ = (UniqueConstraint("playlist_id", "position", name="uq_playlist_position"),)
 
 
 class Chapter(Base):
