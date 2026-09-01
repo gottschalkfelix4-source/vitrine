@@ -1,0 +1,21 @@
+# Zeilenenden im Repository immer als LF speichern.
+#
+# Ohne das checkt Git unter Windows CRLF aus und schreibt es beim Commit
+# zurueck. Im Linux-Container faellt das an unangenehmen Stellen auf: Ein
+# Dockerfile oder Shell-Skript mit CRLF laeuft dort nicht, und Diffs zwischen
+# Windows- und Linux-Arbeitskopien werden unlesbar.
+* text=auto eol=lf
+
+# Binaerdateien nie anfassen.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.zip binary
+*.mp4 binary
+*.webm binary
+*.mkv binary
+
+# In der Sprachstatistik von GitHub nicht mitzaehlen.
+package-lock.json linguist-generated=true
