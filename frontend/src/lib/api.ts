@@ -46,6 +46,8 @@ export interface KanalDetail {
   kanal: KanalKurz;
   beschreibung: string | null;
   banner: string | null;
+  /** Zaehler je Videoart, aus der Datenbank - nicht aus der geladenen Seite. */
+  zaehler: { videos: number; shorts: number; live: number };
   sammlungen: Sammlung[];
   regeln: {
     auto_archivieren: boolean;
@@ -188,8 +190,27 @@ function frage(werte: Record<string, string | number | boolean | undefined>): st
   return s ? `?${s}` : "";
 }
 
+// Bewusst ein Typalias, kein Interface: Nur Aliase bekommen die implizite
+// Indexsignatur, die frage() fuer die Umwandlung in Abfrageparameter braucht.
+export type VideoAbfrage = {
+  kanal?: string;
+  status?: string;
+  suche?: string;
+  nur_archiviert?: boolean;
+  /** "videos" heisst: weder Short noch Livestream. */
+  art?: "videos" | "shorts" | "live";
+  sortierung?: "neu" | "alt" | "aufrufe" | "titel";
+  limit?: number;
+  offset?: number;
+};
+
 export const api = {
   kanaele: () => hole<KanalKurz[]>("/api/channels"),
+  kanalLoeschen: (id: string, dateien: boolean) =>
+    hole<{ videos_entfernt: number; bytes_freigegeben: number; buendel_geloescht: boolean }>(
+      `/api/channels/${id}${frage({ dateien })}`,
+      { method: "DELETE" },
+    ),
   kanal: (id: string) => hole<KanalDetail>(`/api/channels/${id}`),
   kanalAnlegen: (daten: {
     url: string;
@@ -202,15 +223,7 @@ export const api = {
 
   playlist: (id: string) => hole<PlaylistDetail>(`/api/playlists/${id}`),
 
-  videos: (opt: {
-    kanal?: string;
-    status?: string;
-    suche?: string;
-    nur_archiviert?: boolean;
-    sortierung?: "neu" | "alt" | "aufrufe" | "titel";
-    limit?: number;
-    offset?: number;
-  } = {}) => hole<VideoKurz[]>(`/api/videos${frage(opt)}`),
+  videos: (opt: VideoAbfrage = {}) => hole<VideoKurz[]>(`/api/videos${frage(opt)}`),
   video: (id: string) => hole<VideoDetail>(`/api/videos/${id}`),
   videoArchivieren: (id: string) =>
     hole<{ job_id: number }>(`/api/videos/${id}/archive`, { method: "POST" }),

@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.db import set_pragmas
 from app.models import Base
 
 
@@ -34,6 +35,11 @@ def neue_engine():
     eng = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
+    # Dieselben Pragmas wie im Betrieb - insbesondere foreign_keys=ON, sonst
+    # prueft ein Loesch-Test etwas anderes, als im Betrieb passiert.
+    from sqlalchemy import event
+
+    event.listens_for(eng, "connect")(set_pragmas)
     Base.metadata.create_all(eng)
     return eng
 

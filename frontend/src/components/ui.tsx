@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { VideoKurz } from "../lib/api";
-import { thumbUrl } from "../lib/api";
+import { api, thumbUrl } from "../lib/api";
 import { aufrufe, dauer, vorZeit, zustandText } from "../lib/format";
 
 /** Zustandsmarke - im Archiv-Kontext das wichtigste Zusatzelement gegenueber
@@ -21,9 +22,29 @@ interface KachelProps {
   position?: number;
 }
 
+/** Zustaende, aus denen heraus ein Video (erneut) geholt werden kann. */
+const HOLBAR = new Set(["new", "failed", "skipped"]);
+
 export function Videokachel({ video, ohneKanal, position }: KachelProps) {
-  const spielbar = video.status === "archived";
+  // Nach dem Klick auf "Laden" zeigt die Kachel sofort "wartet", ohne dass
+  // die ganze Liste neu geholt werden muss.
+  const [neuerStatus, setNeuerStatus] = useState<string | null>(null);
+  const [holFehler, setHolFehler] = useState<string | null>(null);
+  const status = neuerStatus ?? video.status;
+  const spielbar = status === "archived";
   const bild = thumbUrl(video.thumb);
+
+  async function holen(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setHolFehler(null);
+    try {
+      await api.videoArchivieren(video.id);
+      setNeuerStatus("queued");
+    } catch (err) {
+      setHolFehler(err instanceof Error ? err.message : String(err));
+    }
+  }
   const inhalt = (
     <>
       <div className="kachel-bild">
@@ -57,7 +78,13 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
             {video.hochgeladen ? (
               <span className={video.aufrufe ? "punkt" : undefined}>{vorZeit(video.hochgeladen)}</span>
             ) : null}
-            {!spielbar ? <Zustand status={video.status} /> : null}
+            {!spielbar ? <Zustand status={status} /> : null}
+            {HOLBAR.has(status) ? (
+              <button className="kachel-laden" onClick={holen} title="Dieses Video ins Archiv holen">
+                ↓ Laden
+              </button>
+            ) : null}
+            {holFehler ? <span style={{ color: "var(--zu-fehler)" }}>{holFehler}</span> : null}
             {video.recodiert ? (
               <span title="nach AV1 verkleinert" style={{ color: "var(--text-schwach)" }}>
                 AV1
@@ -76,7 +103,7 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
       {inhalt}
     </Link>
   ) : (
-    <div className="kachel" data-verfuegbar="false" title={zustandText(video.status)}>
+    <div className="kachel" data-verfuegbar="false" title={zustandText(status)}>
       {inhalt}
     </div>
   );

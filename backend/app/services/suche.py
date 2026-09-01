@@ -210,6 +210,22 @@ def entfernen(db: Session, video_id: str) -> None:
     db.execute(text("DELETE FROM untertitel_suche WHERE video_id = :v"), {"v": video_id})
 
 
+def alle_entfernen(db: Session, video_ids: list[str]) -> None:
+    """Entfernt viele Videos auf einmal aus dem Index.
+
+    In Bloecken, weil SQLite die Zahl der Platzhalter je Anweisung begrenzt -
+    ein Kanal mit tausenden Videos wuerde die Grenze sonst reissen.
+    """
+    for i in range(0, len(video_ids), 500):
+        block = video_ids[i : i + 500]
+        platzhalter = ",".join(f":v{n}" for n in range(len(block)))
+        werte = {f"v{n}": vid for n, vid in enumerate(block)}
+        db.execute(text(f"DELETE FROM video_suche WHERE video_id IN ({platzhalter})"), werte)
+        db.execute(
+            text(f"DELETE FROM untertitel_suche WHERE video_id IN ({platzhalter})"), werte
+        )
+
+
 # --------------------------------------------------------------------- Suchen
 
 

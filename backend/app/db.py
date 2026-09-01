@@ -19,6 +19,25 @@ from app.config import settings
 from app.models import Base
 
 
+def set_pragmas(dbapi_conn, _record=None) -> None:
+    """Verbindungs-Einstellungen - auch fuer die Test-Engines gedacht.
+
+    Die Tests MUESSEN dieselben Pragmas benutzen wie der Betrieb. Vor allem
+    ``foreign_keys=ON``: Ohne das kaskadiert SQLite nicht, und ein Test, der
+    das Loeschen eines Kanals prueft, prueft dann etwas anderes als das, was
+    im Betrieb passiert.
+    """
+    cur = dbapi_conn.cursor()
+    # WAL: Leser blockieren den Schreiber nicht. Entscheidend, weil ein
+    # laufender Encode-Job minutenlang schreiben kann, waehrend das UI liest.
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA synchronous=NORMAL")
+    cur.execute("PRAGMA foreign_keys=ON")
+    cur.execute("PRAGMA busy_timeout=30000")
+    cur.execute("PRAGMA temp_store=MEMORY")
+    cur.close()
+
+
 def _create_engine() -> Engine:
     engine = create_engine(
         settings.database_url,
@@ -27,19 +46,7 @@ def _create_engine() -> Engine:
         pool_pre_ping=True,
         future=True,
     )
-
-    @event.listens_for(engine, "connect")
-    def _set_pragmas(dbapi_conn, _record) -> None:
-        cur = dbapi_conn.cursor()
-        # WAL: Leser blockieren den Schreiber nicht. Entscheidend, weil ein
-        # laufender Encode-Job minutenlang schreiben kann, waehrend das UI liest.
-        cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA synchronous=NORMAL")
-        cur.execute("PRAGMA foreign_keys=ON")
-        cur.execute("PRAGMA busy_timeout=30000")
-        cur.execute("PRAGMA temp_store=MEMORY")
-        cur.close()
-
+    event.listens_for(engine, "connect")(set_pragmas)
     return engine
 
 

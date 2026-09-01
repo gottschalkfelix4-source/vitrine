@@ -196,10 +196,22 @@ def kanal(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     listen = db.scalars(
         select(Playlist).where(Playlist.channel_id == kanal_id).order_by(Playlist.kind, Playlist.title)
     )
+
+    # Die Tab-Zaehler kommen aus der Datenbank, nicht aus der gerade geladenen
+    # Seite - sonst stuende an "Videos" die Zahl der zufaellig ersten 60.
+    lang, shorts, live = db.execute(
+        select(
+            func.count(Video.id).filter(Video.is_short.is_(False), Video.was_live.is_(False)),
+            func.count(Video.id).filter(Video.is_short.is_(True)),
+            func.count(Video.id).filter(Video.was_live.is_(True)),
+        ).where(Video.channel_id == kanal_id)
+    ).one()
+
     return {
         "kanal": _kanal_kurz(db, k),
         "beschreibung": k.description,
         "banner": k.banner_file,
+        "zaehler": {"videos": lang, "shorts": shorts, "live": live},
         # Die Tabs entsprechen der YouTube-Gliederung: Videos, Shorts,
         # Livestreams, Playlists.
         "sammlungen": [
@@ -219,6 +231,125 @@ def kanal(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
             "codec": k.archive_codec or settings.archive_codec,
             "abgleich_stunden": k.sync_interval_hours or settings.default_sync_interval_hours,
         },
+    }
+
+
+@router.delete("/channels/{kanal_id}")
+def kanal_entfernen(
+    kanal_id: str,
+    dateien: bool = Query(
+        True,
+        description="Auch die Videodateien (Buendel) von der Platte loeschen. "
+        "Ohne diesen Schalter verschwindet nur die Verwaltung; die Buendel "
+        "blieben verwaist zurueck und waeren ohne Datenbank nicht abspielbar.",
+    ),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Entfernt einen Kanal samt allem, was an ihm haengt.
+
+    Die Reihenfolge ist bewusst: Erst werden alle Dateipfade eingesammelt und
+    die Datenbank bereinigt, erst danach wird geloescht, was auf der Platte
+    liegt. Scheitert der Datenbankteil, ist noch nichts unwiederbringlich weg;
+    scheitert das Dateiloeschen, raeumt der Reaper die Heisskopien ohnehin als
+    verwaist ab und die Buendel lassen sich von Hand entfernen.
+    """
+    import shutil as _shutil
+    from pathlib import Path as _Path
+
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import update as sa_update
+
+    k = db.get(Channel, kanal_id)
+    if k is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kanal unbekannt")
+
+    video_ids = list(db.scalars(select(Video.id).where(Video.channel_id == kanal_id)))
+
+    # ---- Dateipfade einsammeln, solange die Datenbank sie noch kennt.
+    from app.models import HotCopy
+
+    heisse = [
+        _Path(p)
+        for p in db.scalars(
+            select(HotCopy.path).join(Video, Video.id == HotCopy.video_id).where(
+                Video.channel_id == kanal_id
+            )
+        )
+    ]
+    vorschauen = [
+        settings.thumb_dir / name
+        for name in db.scalars(
+            select(Video.thumb_file).where(
+                Video.channel_id == kanal_id, Video.thumb_file.is_not(None)
+            )
+        )
+    ]
+    for name in (k.avatar_file, k.banner_file):
+        if name:
+            vorschauen.append(settings.thumb_dir / name)
+    buendel_ordner = settings.bundle_dir / kanal_id
+    buendel_bytes = (
+        sum(p.stat().st_size for p in buendel_ordner.rglob("*") if p.is_file())
+        if buendel_ordner.is_dir()
+        else 0
+    )
+
+    # ---- Auftraege: Laufende werden abgebrochen (die Arbeiter pruefen das),
+    # alles andere zu diesem Kanal fliegt raus - tote Eintraege, deren Ziel es
+    # nicht mehr gibt, haetten in der Warteschlange nichts verloren.
+    ziele = [kanal_id, *video_ids]
+    for i in range(0, len(ziele), 500):
+        block = ziele[i : i + 500]
+        db.execute(
+            sa_update(Job)
+            .where(Job.target_id.in_(block), Job.status == JobStatus.RUNNING)
+            .values(status=JobStatus.CANCELLED, finished_at=utcnow())
+        )
+        db.execute(
+            sa_delete(Job).where(
+                Job.target_id.in_(block), Job.status != JobStatus.CANCELLED
+            )
+        )
+
+    # ---- Suchindex
+    volltext.alle_entfernen(db, video_ids)
+
+    # ---- Datenbank. Der Umweg ueber das DELETE-Statement statt db.delete(k)
+    # ist Absicht: So kaskadiert die Datenbank selbst (Videos, Playlists,
+    # Zuordnungen, Kapitel, Untertitel, Heisskopien), statt dass SQLAlchemy
+    # tausende Objekte laedt und einzeln loescht.
+    db.execute(sa_delete(Channel).where(Channel.id == kanal_id))
+    db.commit()
+    # Die Kaskade lief in der Datenbank, nicht in der Session - dort haengen
+    # die geloeschten Videos noch im Zwischenspeicher und wuerden von db.get()
+    # weiter ausgeliefert.
+    db.expire_all()
+
+    # ---- Platte
+    geloescht_bytes = 0
+    for p in heisse + vorschauen:
+        try:
+            if p.is_file():
+                geloescht_bytes += p.stat().st_size
+                p.unlink()
+        except OSError as e:
+            log.warning("Datei %s liess sich nicht loeschen: %s", p, e)
+    if dateien and buendel_ordner.is_dir():
+        try:
+            _shutil.rmtree(buendel_ordner)
+            geloescht_bytes += buendel_bytes
+        except OSError as e:
+            log.warning("Buendelordner %s liess sich nicht loeschen: %s", buendel_ordner, e)
+
+    log.info(
+        "Kanal %s entfernt: %d Videos, %.1f MB freigegeben (Buendel %s)",
+        kanal_id, len(video_ids), geloescht_bytes / 1e6,
+        "geloescht" if dateien else "behalten",
+    )
+    return {
+        "videos_entfernt": len(video_ids),
+        "bytes_freigegeben": geloescht_bytes,
+        "buendel_geloescht": dateien,
     }
 
 
@@ -276,6 +407,10 @@ def videos(
     status_filter: str | None = Query(None, alias="status"),
     suche: str | None = None,
     nur_archiviert: bool = True,
+    art: Literal["videos", "shorts", "live"] | None = Query(
+        None,
+        description="Auf eine Videoart eingrenzen. 'videos' heisst: weder Short noch Livestream.",
+    ),
     sortierung: Literal["neu", "alt", "aufrufe", "titel"] = "neu",
     limit: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -287,6 +422,15 @@ def videos(
         anfrage = anfrage.where(Video.status == status_filter)
     elif nur_archiviert:
         anfrage = anfrage.where(Video.status == VideoStatus.ARCHIVED)
+    # Die Art wird serverseitig gefiltert, nicht im Client. Sonst stimmt das
+    # Blaettern nicht: Wer Seite fuer Seite laedt und erst im Browser die
+    # Shorts aussiebt, bekommt mal 60, mal 3 sichtbare Videos pro Seite.
+    if art == "shorts":
+        anfrage = anfrage.where(Video.is_short.is_(True))
+    elif art == "live":
+        anfrage = anfrage.where(Video.was_live.is_(True))
+    elif art == "videos":
+        anfrage = anfrage.where(Video.is_short.is_(False), Video.was_live.is_(False))
     if suche:
         # Der Volltextindex findet auch mitten im Wort und damit deutsche
         # Komposita. Fehlt er - alte SQLite ohne FTS5 - oder ist die Eingabe zu

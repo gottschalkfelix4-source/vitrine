@@ -925,3 +925,44 @@
     width: 108px;
   }
 }
+
+/* ---------------------------------------------------- Laden-Knopf auf Kacheln */
+
+.kachel-laden {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: var(--radius-rund);
+  background: var(--text);
+  color: var(--grund);
+  transition: opacity var(--uebergang);
+}
+
+.kachel-laden:hover {
+  opacity: 0.85;
+}
+
+.mehr-laden {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 0 8px;
+  color: var(--text-schwach);
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------------------- Gefahrenknopf */
+
+.knopf[data-art="gefahr"] {
+  color: var(--zu-fehler);
+}
+
+.knopf[data-art="gefahr"]:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.knopf[data-art="gefahr-stark"] {
+  background: var(--zu-fehler);
+  color: #fff;
+}

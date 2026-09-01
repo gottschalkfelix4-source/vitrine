@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { Fehler, Gitter, Leer, Skelettgitter, Videokachel } from "../components/ui";
-import { useApi } from "../hooks/useApi";
+import { useApi, useVideostapel } from "../hooks/useApi";
 import type { Sammlung } from "../lib/api";
 import { api, thumbUrl } from "../lib/api";
 import { bytes, datum } from "../lib/format";
@@ -15,28 +15,41 @@ const ART_TEXT: Record<Sammlung["art"], string> = {
   playlist: "Playlist",
 };
 
+type Tab = "videos" | "shorts" | "live" | "playlists";
+
 export function Kanalseite() {
   const { kanalId = "" } = useParams();
+  const navigate = useNavigate();
   const [suchparameter, setSuchparameter] = useSearchParams();
-  const tab = suchparameter.get("tab") ?? "videos";
+  const tab = (suchparameter.get("tab") ?? "videos") as Tab;
   const [abgleichLaeuft, setAbgleichLaeuft] = useState(false);
+  const [entfernenOffen, setEntfernenOffen] = useState(false);
 
   const kanal = useApi(() => api.kanal(kanalId), [kanalId]);
-  const videos = useApi(
-    () => api.videos({ kanal: kanalId, limit: 90, nur_archiviert: false }),
-    [kanalId],
-  );
+
+  // Die Videos kommen serverseitig gefiltert und seitenweise. Der Filter
+  // MUSS auf dem Server liegen: Wer Seite fuer Seite laedt und erst im Browser
+  // die Shorts aussiebt, bekommt mal 60, mal 3 sichtbare Videos je Seite.
+  const stapel = useVideostapel({
+    kanal: kanalId,
+    art: tab === "playlists" ? "videos" : tab,
+    nur_archiviert: false,
+    sortierung: "neu",
+  });
 
   if (kanal.fehler) return <Fehler text={kanal.fehler} erneut={kanal.neuLaden} />;
   if (!kanal.daten) return <Skelettgitter anzahl={8} />;
 
   const d = kanal.daten;
   const playlists = d.sammlungen.filter((s) => s.art === "playlist");
-  const alleVideos = videos.daten ?? [];
-  // Aus der einen Videoliste die Tabs bedienen, statt drei Anfragen zu stellen.
-  const gefiltert = alleVideos.filter((v) =>
-    tab === "shorts" ? v.ist_short : tab === "live" ? v.war_live : !v.ist_short && !v.war_live,
-  );
+  const gesamtImTab =
+    tab === "playlists"
+      ? playlists.length
+      : tab === "shorts"
+        ? d.zaehler.shorts
+        : tab === "live"
+          ? d.zaehler.live
+          : d.zaehler.videos;
 
   async function abgleichen() {
     setAbgleichLaeuft(true);
@@ -46,6 +59,13 @@ export function Kanalseite() {
       setAbgleichLaeuft(false);
     }
   }
+
+  const tabs: { wert: Tab; text: string; zahl: number }[] = [
+    { wert: "videos", text: "Videos", zahl: d.zaehler.videos },
+    { wert: "shorts", text: "Shorts", zahl: d.zaehler.shorts },
+    { wert: "live", text: "Livestreams", zahl: d.zaehler.live },
+    { wert: "playlists", text: "Playlists", zahl: playlists.length },
+  ];
 
   return (
     <>
@@ -76,6 +96,9 @@ export function Kanalseite() {
             <button className="knopf" onClick={abgleichen} disabled={abgleichLaeuft}>
               {abgleichLaeuft ? "wird eingereiht …" : "Jetzt abgleichen"}
             </button>
+            <button className="knopf" data-art="gefahr" onClick={() => setEntfernenOffen(true)}>
+              Entfernen
+            </button>
           </div>
         </div>
         {d.beschreibung ? (
@@ -86,12 +109,7 @@ export function Kanalseite() {
       </div>
 
       <div className="tabs">
-        {[
-          { wert: "videos", text: "Videos", zahl: alleVideos.filter((v) => !v.ist_short && !v.war_live).length },
-          { wert: "shorts", text: "Shorts", zahl: alleVideos.filter((v) => v.ist_short).length },
-          { wert: "live", text: "Livestreams", zahl: alleVideos.filter((v) => v.war_live).length },
-          { wert: "playlists", text: "Playlists", zahl: playlists.length },
-        ]
+        {tabs
           // Leere Tabs gar nicht erst zeigen - nicht jeder Kanal hat Shorts.
           .filter((t) => t.zahl > 0 || t.wert === "videos")
           .map((t) => (
@@ -132,20 +150,133 @@ export function Kanalseite() {
         ) : (
           <Leer zeichen="☰" titel="Keine Playlists" text="Dieser Kanal führt keine öffentlichen Playlists." />
         )
-      ) : videos.laedt && !videos.daten ? (
-        <Skelettgitter />
-      ) : gefiltert.length > 0 ? (
-        <Gitter>
-          {gefiltert.map((v) => (
-            <Videokachel key={v.id} video={v} ohneKanal />
-          ))}
-        </Gitter>
       ) : (
-        <Leer
-          titel="Hier ist noch nichts"
-          text="Sobald der Abgleich durch ist, erscheinen die Videos dieses Kanals hier."
-        />
+        <>
+          {stapel.fehler ? <Fehler text={stapel.fehler} erneut={stapel.neuLaden} /> : null}
+          {stapel.laedt && stapel.videos.length === 0 ? (
+            <Skelettgitter />
+          ) : stapel.videos.length > 0 ? (
+            <>
+              <Gitter>
+                {stapel.videos.map((v) => (
+                  <Videokachel key={v.id} video={v} ohneKanal />
+                ))}
+              </Gitter>
+              <div className="mehr-laden">
+                <span>
+                  {stapel.videos.length} von {gesamtImTab}
+                </span>
+                {!stapel.ende ? (
+                  <button className="knopf" onClick={stapel.mehrLaden} disabled={stapel.laedt}>
+                    {stapel.laedt ? "lädt …" : "Mehr laden"}
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : !stapel.fehler ? (
+            <Leer
+              titel="Hier ist noch nichts"
+              text="Sobald der Abgleich durch ist, erscheinen die Videos dieses Kanals hier."
+            />
+          ) : null}
+        </>
       )}
+
+      {entfernenOffen ? (
+        <KanalEntfernenDialog
+          kanalId={kanalId}
+          name={d.kanal.name}
+          videos={d.kanal.videos_gesamt}
+          archiviert={d.kanal.videos_archiviert}
+          belegung={d.kanal.belegung_bytes}
+          aufSchliessen={() => setEntfernenOffen(false)}
+          aufFertig={() => navigate("/kanaele")}
+        />
+      ) : null}
     </>
+  );
+}
+
+function KanalEntfernenDialog({
+  kanalId,
+  name,
+  videos,
+  archiviert,
+  belegung,
+  aufSchliessen,
+  aufFertig,
+}: {
+  kanalId: string;
+  name: string;
+  videos: number;
+  archiviert: number;
+  belegung: number;
+  aufSchliessen: () => void;
+  aufFertig: () => void;
+}) {
+  const [dateien, setDateien] = useState(true);
+  const [laeuft, setLaeuft] = useState(false);
+  const [fehler, setFehler] = useState<string | null>(null);
+
+  async function bestaetigen() {
+    setLaeuft(true);
+    setFehler(null);
+    try {
+      await api.kanalLoeschen(kanalId, dateien);
+      aufFertig();
+    } catch (e) {
+      setFehler(e instanceof Error ? e.message : String(e));
+      setLaeuft(false);
+    }
+  }
+
+  return (
+    <div
+      className="schleier"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !laeuft) aufSchliessen();
+      }}
+    >
+      <div className="dialog">
+        <h2>„{name}“ entfernen?</h2>
+        <p className="erklaerung">
+          Der Kanal verschwindet mit allen {videos} erfassten Videos, den Playlists und den
+          zugehörigen Aufträgen aus der Verwaltung. Das lässt sich nicht rückgängig machen –
+          ein erneutes Aufnehmen muss alles neu erfassen.
+        </p>
+
+        <label className="schalter">
+          <input type="checkbox" checked={dateien} onChange={(e) => setDateien(e.target.checked)} />
+          <span>
+            Auch die Videodateien löschen
+            <div style={{ color: "var(--text-schwach)", fontSize: 12 }}>
+              {archiviert} archivierte Videos, {bytes(belegung)}. Ohne Haken bleiben die Bündel
+              auf der Platte liegen – aber ohne Datenbank sind sie nicht abspielbar.
+            </div>
+          </span>
+        </label>
+
+        {fehler ? (
+          <div className="hinweis" data-art="fehler" style={{ marginTop: 14, marginBottom: 0 }}>
+            <div>{fehler}</div>
+          </div>
+        ) : null}
+
+        <div className="dialog-fuss">
+          <button type="button" className="knopf" onClick={aufSchliessen} disabled={laeuft}>
+            Abbrechen
+          </button>
+          <button
+            type="button"
+            className="knopf"
+            data-art="gefahr-stark"
+            onClick={() => void bestaetigen()}
+            disabled={laeuft}
+          >
+            {laeuft ? "wird entfernt …" : dateien ? "Kanal und Dateien löschen" : "Nur Kanal entfernen"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -243,3 +243,118 @@ def test_thumbnail_pfad_kann_nicht_ausbrechen(umgebung, name):
     r = client.get(f"/api/thumbs/{name}")
     assert r.status_code == 404
     assert b"Oeffentlichkeit" not in r.content
+
+
+# ------------------------------------------------------------ Art-Filter
+
+
+def test_videoliste_filtert_nach_art(umgebung):
+    """Der Filter muss serverseitig greifen - sonst stimmt das Blaettern nicht,
+    wenn der Client Shorts erst nach dem Laden aussiebt."""
+    client, db = umgebung
+    db.add(Video(id="s1", channel_id="UCtest", title="Ein Short", status=VideoStatus.ARCHIVED,
+                 is_short=True))
+    db.add(Video(id="l1", channel_id="UCtest", title="Ein Stream", status=VideoStatus.ARCHIVED,
+                 was_live=True))
+    db.commit()
+
+    p = {"nur_archiviert": False, "kanal": "UCtest"}
+    alle = {v["id"] for v in client.get("/api/videos", params=p).json()}
+    nur_videos = {v["id"] for v in client.get("/api/videos", params=p | {"art": "videos"}).json()}
+    shorts = {v["id"] for v in client.get("/api/videos", params=p | {"art": "shorts"}).json()}
+    live = {v["id"] for v in client.get("/api/videos", params=p | {"art": "live"}).json()}
+
+    assert "s1" in alle and "l1" in alle
+    assert shorts == {"s1"}
+    assert live == {"l1"}
+    assert "s1" not in nur_videos and "l1" not in nur_videos
+    assert {"v0", "v1", "v2"} <= nur_videos
+
+
+def test_kanaldetail_zaehlt_nach_art(umgebung):
+    client, db = umgebung
+    db.add(Video(id="s1", channel_id="UCtest", title="Short", is_short=True))
+    db.add(Video(id="l1", channel_id="UCtest", title="Stream", was_live=True))
+    db.commit()
+    z = client.get("/api/channels/UCtest").json()["zaehler"]
+    assert z == {"videos": 3, "shorts": 1, "live": 1}
+
+
+# ---------------------------------------------------------- Kanal entfernen
+
+
+def _kanal_mit_dateien(db):
+    """Ein zweiter Kanal mit allem Drum und Dran auf der Platte."""
+    from app.models import HotCopy, Subtitle
+    from app.services import suche as volltext
+
+    db.add(Channel(id="UCweg", name="Wegwerfkanal"))
+    ordner = settings.bundle_dir / "UCweg"
+    ordner.mkdir(parents=True, exist_ok=True)
+    for i in range(2):
+        vid = f"weg{i}"
+        buendel = ordner / f"{vid}.zip"
+        buendel.write_bytes(b"x" * 1000)
+        thumb = settings.thumb_dir / f"{vid}.jpg"
+        thumb.parent.mkdir(parents=True, exist_ok=True)
+        thumb.write_bytes(b"t" * 100)
+        db.add(Video(id=vid, channel_id="UCweg", title=f"Weg {i}",
+                     status=VideoStatus.ARCHIVED, bundle_file=str(buendel),
+                     thumb_file=thumb.name))
+        db.add(Subtitle(video_id=vid, language="de", is_auto=False,
+                        name_in_bundle="subs/de.orig.vtt"))
+        volltext.video_indizieren(db, video_id=vid, titel=f"Weg {i}",
+                                  beschreibung=None, kanal="Wegwerfkanal")
+    heiss = settings.cache_dir / "weg0.source.mp4"
+    heiss.parent.mkdir(parents=True, exist_ok=True)
+    heiss.write_bytes(b"h" * 500)
+    db.add(HotCopy(video_id="weg0", variant="source", path=str(heiss)))
+    db.commit()
+    from app.services import jobs as j
+
+    j.enqueue_archive(db, "weg1")
+    return ordner, heiss
+
+
+def test_kanal_entfernen_raeumt_alles_ab(umgebung):
+    from app.services import suche as volltext
+
+    client, db = umgebung
+    ordner, heiss = _kanal_mit_dateien(db)
+
+    r = client.delete("/api/channels/UCweg", params={"dateien": True})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["videos_entfernt"] == 2
+    assert d["bytes_freigegeben"] > 0
+
+    # Datenbank leer
+    assert db.get(Channel, "UCweg") is None
+    assert db.get(Video, "weg0") is None
+    # Suchindex leer
+    assert volltext.video_treffer(db, "wegwerfkanal") == []
+    # Auftraege weg
+    assert client.get("/api/jobs").json() == []
+    # Platte leer
+    assert not ordner.exists()
+    assert not heiss.exists()
+    # Der andere Kanal ist unberuehrt
+    assert db.get(Channel, "UCtest") is not None
+    assert db.get(Video, "v0") is not None
+
+
+def test_kanal_entfernen_kann_buendel_behalten(umgebung):
+    client, db = umgebung
+    ordner, _ = _kanal_mit_dateien(db)
+
+    r = client.delete("/api/channels/UCweg", params={"dateien": False})
+    assert r.status_code == 200
+    assert r.json()["buendel_geloescht"] is False
+    assert db.get(Channel, "UCweg") is None
+    assert ordner.exists(), "Buendel sollten behalten werden"
+    assert (ordner / "weg0.zip").is_file()
+
+
+def test_unbekannten_kanal_entfernen(umgebung):
+    client, _ = umgebung
+    assert client.delete("/api/channels/UCnix").status_code == 404

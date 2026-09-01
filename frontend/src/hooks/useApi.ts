@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { VideoAbfrage, VideoKurz } from "../lib/api";
+import { api } from "../lib/api";
+
 export interface Ladezustand<T> {
   daten: T | undefined;
   laedt: boolean;
@@ -73,4 +76,75 @@ export function useVerzoegert<T>(wert: T, ms = 300): T {
     return () => window.clearTimeout(id);
   }, [wert, ms]);
   return verzoegert;
+}
+
+export interface Videostapel {
+  videos: VideoKurz[];
+  laedt: boolean;
+  fehler: string | null;
+  /** Es gibt nichts mehr nachzuladen. */
+  ende: boolean;
+  mehrLaden: () => void;
+  neuLaden: () => void;
+}
+
+/**
+ * Videos seitenweise laden, mit "Mehr laden" statt fester Obergrenze.
+ *
+ * Der Grund fuer diesen Hook: Ein Kanal kann tausende Videos haben. Alles auf
+ * einmal zu laden waere zaeh, und ein festes Limit ("die ersten 90") laesst
+ * den Rest schlicht verschwinden - genau das war der Fehler in der ersten
+ * Fassung der Kanalseite.
+ *
+ * Aendern sich die Abfrageparameter (anderer Kanal, anderer Tab, andere
+ * Sortierung), beginnt der Stapel von vorn.
+ */
+export function useVideostapel(abfrage: VideoAbfrage, seitengroesse = 60): Videostapel {
+  const [videos, setVideos] = useState<VideoKurz[]>([]);
+  const [laedt, setLaedt] = useState(true);
+  const [fehler, setFehler] = useState<string | null>(null);
+  const [ende, setEnde] = useState(false);
+  const lauf = useRef(0);
+  const abfrageRef = useRef(abfrage);
+  abfrageRef.current = abfrage;
+  // Ein stabiler Schluessel, damit sich der Effekt nur bei echten Aenderungen
+  // meldet und nicht bei jedem neu erzeugten Objekt.
+  const schluessel = JSON.stringify(abfrage);
+
+  const laden = useCallback(
+    async (ab: number) => {
+      const meine = ++lauf.current;
+      setLaedt(true);
+      try {
+        const neue = await api.videos({ ...abfrageRef.current, limit: seitengroesse, offset: ab });
+        if (meine !== lauf.current) return;
+        setVideos((alte) => (ab === 0 ? neue : [...alte, ...neue]));
+        setEnde(neue.length < seitengroesse);
+        setFehler(null);
+      } catch (e) {
+        if (meine === lauf.current) setFehler(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (meine === lauf.current) setLaedt(false);
+      }
+    },
+    [seitengroesse],
+  );
+
+  useEffect(() => {
+    setVideos([]);
+    setEnde(false);
+    void laden(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schluessel, laden]);
+
+  return {
+    videos,
+    laedt,
+    fehler,
+    ende,
+    mehrLaden: () => {
+      if (!laedt && !ende) void laden(videos.length);
+    },
+    neuLaden: () => void laden(0),
+  };
 }

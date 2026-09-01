@@ -2,8 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Fehler, Gitter, Leer, Skelettgitter, Videokachel } from "../components/ui";
-import { useApi } from "../hooks/useApi";
-import { api } from "../lib/api";
+import { useVideostapel } from "../hooks/useApi";
 
 type Sortierung = "neu" | "alt" | "aufrufe" | "titel";
 
@@ -18,16 +17,15 @@ export function Startseite() {
   const [sortierung, setSortierung] = useState<Sortierung>("neu");
   const [nurOffen, setNurOffen] = useState(false);
 
-  const { daten, laedt, fehler, neuLaden } = useApi(
-    () => api.videos({ sortierung, limit: 60, nur_archiviert: !nurOffen }),
-    [sortierung, nurOffen],
-  );
+  const stapel = useVideostapel({ sortierung, nur_archiviert: !nurOffen });
 
   return (
     <>
       <div className="seiten-kopf">
         <h1>Archiv</h1>
-        {daten ? <span className="beiwerk">{daten.length} Videos</span> : null}
+        <span className="beiwerk">
+          {stapel.videos.length} Videos{stapel.ende ? "" : " geladen"}
+        </span>
       </div>
 
       <div className="chips">
@@ -46,17 +44,26 @@ export function Startseite() {
         </button>
       </div>
 
-      {fehler ? <Fehler text={fehler} erneut={neuLaden} /> : null}
+      {stapel.fehler ? <Fehler text={stapel.fehler} erneut={stapel.neuLaden} /> : null}
 
-      {laedt && !daten ? (
+      {stapel.laedt && stapel.videos.length === 0 ? (
         <Skelettgitter />
-      ) : daten && daten.length > 0 ? (
-        <Gitter>
-          {daten.map((v) => (
-            <Videokachel key={v.id} video={v} />
-          ))}
-        </Gitter>
-      ) : !fehler ? (
+      ) : stapel.videos.length > 0 ? (
+        <>
+          <Gitter>
+            {stapel.videos.map((v) => (
+              <Videokachel key={v.id} video={v} />
+            ))}
+          </Gitter>
+          {!stapel.ende ? (
+            <div className="mehr-laden">
+              <button className="knopf" onClick={stapel.mehrLaden} disabled={stapel.laedt}>
+                {stapel.laedt ? "lädt …" : "Mehr laden"}
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : !stapel.fehler ? (
         <Leer
           titel="Noch nichts im Archiv"
           text="Nimm einen Kanal auf, dann werden dessen Videos im Hintergrund geladen und erscheinen hier."
