@@ -92,6 +92,10 @@ jobs:
     # Erst bauen, wenn Backend und Frontend fuer sich stimmen - sonst wartet
     # man mehrere Minuten auf einen Fehler, den die schnellen Jobs schon kennen.
     needs: [backend, frontend]
+    permissions:
+      contents: read
+      # Zum Veroeffentlichen des Images auf GitHub Container Registry.
+      packages: write
     steps:
       - uses: actions/checkout@v7
 
@@ -136,3 +140,25 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/assets/gibtsnicht.js)" = "404"
           docker logs pruefling
           docker rm -f pruefling
+
+      # Veroeffentlichen nur nach einem Push auf main, nie fuer Pull Requests.
+      # Das Image landet auf GitHub Container Registry - von dort zieht es das
+      # Unraid-Template. Der Build kommt aus dem Cache des Schritts oben.
+      - name: Anmeldung bei GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image veroeffentlichen
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha

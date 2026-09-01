@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Vitrine</Name>
+  <Repository>ghcr.io/gottschalkfelix4-source/vitrine:latest</Repository>
+  <Registry>https://github.com/gottschalkfelix4-source/vitrine/pkgs/container/vitrine</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/gottschalkfelix4-source/vitrine/issues</Support>
+  <Project>https://github.com/gottschalkfelix4-source/vitrine</Project>
+  <Overview>
+Selbst gehostetes YouTube-Archiv mit eigener, YouTube-artiger Oberflaeche. Archiviert ganze Kanaele samt Playlist-Gliederung und haelt den Speicherbedarf durch eine Kalt/Heiss-Trennung klein.
+
+Kaltspeicher: ein Buendel je Video, aus dem direkt gestreamt wird - ohne Entpacken. Heissspeicher: entsteht nur, wenn ein Client den Archivcodec nicht kann, und raeumt sich selbst wieder auf. Volltextsuche ueber Titel, Beschreibungen UND gesprochenes Wort mit Sprung zur Fundstelle.
+
+Zwei Pfade, bewusst getrennt: /data (Datenbank, Vorschaubilder, Heissspeicher) gehoert auf den Cache-Pool - klein und oft gelesen. /data/bundles (die Videos) gehoert auf das Array - gross und selten angefasst; die Platten duerfen schlafen.
+
+Ein Container, SQLite, kein Elasticsearch. Bringt ffmpeg, Deno und yt-dlp mit.
+  </Overview>
+  <Category>MediaServer:Video Tools:Utilities</Category>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/gottschalkfelix4-source/vitrine/main/unraid/vitrine.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/gottschalkfelix4-source/vitrine/main/unraid/vitrine.png</Icon>
+  <ExtraParams>--stop-timeout 30</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Das Image liegt auf GitHub Container Registry. Es muss dort auf "public" stehen, sonst kann Unraid es nicht ohne Anmeldung ziehen.</Requires>
+
+  <!-- Netz -->
+  <Config Name="Web-Oberflaeche" Target="8000" Default="8000" Mode="tcp" Description="Port der Oberflaeche und der API." Type="Port" Display="always" Required="true" Mask="false">8000</Config>
+
+  <!-- Pfade -->
+  <Config Name="Daten (Cache-Pool)" Target="/data" Default="/mnt/user/appdata/vitrine" Mode="rw" Description="Datenbank, Vorschaubilder, Heissspeicher und Arbeitsverzeichnis. Klein, aber staendig in Benutzung - gehoert auf den Cache-Pool (appdata)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/vitrine</Config>
+  <Config Name="Videos (Array)" Target="/data/bundles" Default="/mnt/user/vitrine" Mode="rw" Description="Der Kaltspeicher: ein Buendel je Video. Gross und selten angefasst - gehoert auf das Array. Ein eigener Share empfiehlt sich (z. B. 'vitrine'), damit die Platten schlafen koennen und Backups einfach bleiben." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/vitrine</Config>
+
+  <!-- Rechte -->
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Nutzer-ID, unter der geschrieben wird. Unraid-Standard: 99 (nobody)." Type="Variable" Display="always" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Gruppen-ID. Unraid-Standard: 100 (users)." Type="Variable" Display="always" Required="true" Mask="false">100</Config>
+  <Config Name="Zeitzone" Target="YTA_TIMEZONE" Default="Europe/Berlin" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">Europe/Berlin</Config>
+
+  <!-- Qualitaet -->
+  <Config Name="Mindesthoehe (px)" Target="YTA_ARCHIVE_MIN_HEIGHT" Default="1080" Mode="" Description="Untergrenze, KEIN Deckel: Bietet die Quelle 4K, wird 4K geladen. Bietet sie weniger als diesen Wert, wird das Beste genommen, was sie hat." Type="Variable" Display="always" Required="false" Mask="false">1080</Config>
+  <Config Name="Hoechsthoehe (px, 0 = offen)" Target="YTA_ARCHIVE_MAX_HEIGHT" Default="0" Mode="" Description="Obergrenze fuer den Download. 4K belegt grob das Drei- bis Fuenffache von 1080p. Wer Platz sparen will: 1440 oder 1080." Type="Variable" Display="always" Required="false" Mask="false">0</Config>
+
+  <!-- Kaltspeicher -->
+  <Config Name="Archiv-Codec" Target="YTA_ARCHIVE_CODEC" Default="av1" Mode="" Description="av1 (kleinste Dateien, Software-Encode), hevc (schneller mit Hardware) oder copy (nichts umkodieren, Original behalten). H.264-Quellen werden umkodiert, VP9- und AV1-Quellen nie - dort braechte es nur Generationsverlust." Type="Variable" Display="always" Required="false" Mask="false">av1</Config>
+  <Config Name="AV1 CRF" Target="YTA_AV1_CRF" Default="30" Mode="" Description="Qualitaet der Recodierung. Gemessen gegen eine H.264-Quelle: 26 = ca. 23 % kleiner, 30 = ca. 40 %, 34 = ca. 55 %. Niedriger = besser und groesser." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="AV1 Preset" Target="YTA_AV1_PRESET" Default="6" Mode="" Description="Tempo der Recodierung, 0 (langsam, dicht) bis 13 (schnell). Auf einer 6-Kern-CPU je Stunde 1080p: 6 = ca. 51 Minuten, 8 = ca. 25, 10 = ca. 16. Fuer grosse Kanaele ist 8-10 vernuenftiger." Type="Variable" Display="advanced" Required="false" Mask="false">6</Config>
+  <Config Name="Hardware-Encoder" Target="YTA_HWACCEL" Default="none" Mode="" Description="none, qsv (Intel), nvenc (NVIDIA) oder vaapi. Achtung: Intel 11.-13. Generation (UHD 730/770) kann AV1 nur DEkodieren. AV1-Hardware-Encode braucht Arc, Meteor/Lunar/Arrow Lake, RTX 40/50 oder RDNA3+. Fuer qsv/vaapi unten /dev/dri freigeben." Type="Variable" Display="advanced" Required="false" Mask="false">none</Config>
+  <Config Name="Intel/AMD GPU" Target="/dev/dri" Default="/dev/dri" Mode="" Description="Nur fuer Hardware-Encoder qsv oder vaapi. Zeile leer lassen, wenn nicht gebraucht." Type="Device" Display="advanced" Required="false" Mask="false"></Config>
+
+  <!-- Heissspeicher -->
+  <Config Name="Heissspeicher-Limit (Bytes)" Target="YTA_HOT_MAX_BYTES" Default="21474836480" Mode="" Description="Obergrenze fuer entpackte Kopien auf dem Cache-Pool. Standard 20 GB. Bei Ueberschreitung wird nach dem aeltesten Zugriff aufgeraeumt, laufende Wiedergaben bleiben verschont." Type="Variable" Display="advanced" Required="false" Mask="false">21474836480</Config>
+  <Config Name="Heisskopie-Frist (Stunden)" Target="YTA_HOT_TTL_HOURS" Default="24" Mode="" Description="Wie lange eine entpackte Kopie ab dem letzten Zugriff liegen bleibt." Type="Variable" Display="advanced" Required="false" Mask="false">24</Config>
+  <Config Name="Frist nach Wiedergabe (Minuten)" Target="YTA_HOT_TTL_AFTER_PLAYBACK_MINUTES" Default="30" Mode="" Description="Kuerzere Frist, sobald die Wiedergabe sauber beendet wurde." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+
+  <!-- Arbeiter -->
+  <Config Name="Parallele Downloads" Target="YTA_DOWNLOAD_CONCURRENCY" Default="1" Mode="" Description="Bewusst 1: YouTube drosselt pro IP-Adresse bei rund 300 Videos je Stunde. Hochdrehen macht nicht schneller fertig, sondern voruebergehend gesperrt." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="Parallele Recodierungen" Target="YTA_ENCODE_CONCURRENCY" Default="1" Mode="" Description="Ein Encode belegt ohnehin alle Kerne. Mehr als 1 nur mit Hardware-Encoder sinnvoll." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="Kanalabgleich (Stunden)" Target="YTA_DEFAULT_SYNC_INTERVAL_HOURS" Default="12" Mode="" Description="Standardrhythmus je Kanal. Der Schnellcheck laeuft ueber den RSS-Feed und kostet keinen yt-dlp-Request." Type="Variable" Display="advanced" Required="false" Mask="false">12</Config>
+
+  <!-- yt-dlp -->
+  <Config Name="Cookies-Datei" Target="YTA_YTDLP_COOKIES_FILE" Default="" Mode="" Description="Optional, Pfad IM Container (z. B. /data/cookies.txt) fuer altersbeschraenkte oder Mitglieder-Inhalte. Nur mit einem Wegwerf-Konto." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Untertitel-Sprachen" Target="YTA_SUBTITLE_LANGUAGES" Default="de,en" Mode="" Description="Kommaliste. Untertitel werden je Sprechzeile durchsuchbar." Type="Variable" Display="advanced" Required="false" Mask="false">de,en</Config>
+  <Config Name="Protokoll-Stufe" Target="YTA_LOG_LEVEL" Default="INFO" Mode="" Description="INFO oder DEBUG." Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
+</Container>

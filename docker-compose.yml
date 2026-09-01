@@ -16,6 +16,9 @@ services:
       # cache/ (Heisskopien), thumbs/ und die SQLite-Datei.
       - ${DATA_DIR:-./data}:/data
     environment:
+      # Nutzer-ID zur Laufzeit, wie bei den linuxserver-Images. Unraid: 99:100.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
       YTA_DATA_DIR: /data
       YTA_TIMEZONE: ${TZ:-Europe/Berlin}
       YTA_LOG_LEVEL: ${LOG_LEVEL:-INFO}

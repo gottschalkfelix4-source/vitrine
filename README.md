@@ -119,6 +119,39 @@ docker compose up -d --build
 
 Danach `http://localhost:8000`.
 
+### Unraid
+
+Es gibt ein fertiges Template unter `unraid/vitrine.xml`. Das Image kommt von
+GitHub Container Registry: `ghcr.io/gottschalkfelix4-source/vitrine:latest`,
+gebaut von der CI bei jedem Push auf `main`.
+
+1. Docker-Tab, ganz unten **Template repositories**, dort eintragen:
+   `https://github.com/gottschalkfelix4-source/vitrine` - speichern.
+2. **Add Container**, im Template-Menue unter *User templates* **Vitrine**
+   waehlen.
+3. Zwei Pfade pruefen, der Rest hat Voreinstellungen:
+
+| Im Container | Vorschlag | Was dort liegt |
+|---|---|---|
+| `/data` | `/mnt/user/appdata/vitrine` | Datenbank, Vorschaubilder, Heissspeicher - klein, oft gelesen, gehoert auf den Cache-Pool |
+| `/data/bundles` | `/mnt/user/vitrine` | Die Videos - gross, selten angefasst, gehoert auf das Array, damit die Platten schlafen koennen |
+
+Die Trennung ist der Kern der Kalt/Heiss-Architektur, auf Unraid abgebildet
+auf Array und Cache-Pool. Ein eigener Share fuer die Videos macht Backups
+einfach: ein Verzeichnis, ein Buendel je Video.
+
+`PUID`/`PGID` stehen auf 99/100 (nobody:users), damit die Dateien im Share
+dem gehoeren, der sie ueber SMB sieht. Der Container startet als root, setzt
+die IDs und gibt die Rechte ab - beim Start werden nur die Verzeichnisse
+selbst umgeschrieben, nicht rekursiv, sonst dauerte das bei Terabytes an
+Buendeln Minuten.
+
+**Einmalig noetig:** Das Paket auf GitHub Container Registry muss auf *public*
+stehen, sonst kann Unraid es nicht ohne Anmeldung ziehen. GitHub legt neue
+Pakete privat an und bietet dafuer keine API - das geht nur in der
+Weboberflaeche: Repo → *Packages* → *vitrine* → *Package settings* →
+*Change visibility*.
+
 ### Der stille 360p-Fehler
 
 Der gefaehrlichste Fehler im Betrieb kuendigt sich nicht an. Zwei Ursachen

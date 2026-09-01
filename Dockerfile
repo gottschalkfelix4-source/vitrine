@@ -21,6 +21,7 @@ RUN apt-get update \
       curl \
       unzip \
       tini \
+      gosu \
  && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
@@ -48,14 +49,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY --from=frontend /build/dist ./static
 
-# Nicht als root laufen. Die UID ist ueber Build-Argumente einstellbar, damit
-# die Dateirechte auf einem NAS-Share passen (auf Unraid ueblich: 99:100).
-ARG UID=1000
-ARG GID=1000
-RUN groupadd -g "${GID}" archiv 2>/dev/null || true \
- && useradd -u "${UID}" -g "${GID}" -m -s /bin/bash archiv 2>/dev/null || true \
- && mkdir -p /data && chown -R "${UID}:${GID}" /data /app
-USER ${UID}:${GID}
+# Der Nutzer "archiv" bekommt seine endgueltige ID erst beim Start: Der
+# Entrypoint liest PUID/PGID und passt sie an, bevor er die Rechte abgibt.
+# So gehoeren die Dateien auf einem NAS-Share dem richtigen Nutzer (Unraid:
+# 99:100), ohne dass das Image dafuer neu gebaut werden muss.
+RUN groupadd -g 1000 archiv \
+ && useradd -u 1000 -g 1000 -m -s /bin/bash archiv \
+ && mkdir -p /data && chown archiv:archiv /data /app
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENV YTA_DATA_DIR=/data \
     YTA_HOST=0.0.0.0 \
@@ -71,5 +73,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # tini als PID 1, damit abgebrochene ffmpeg-Kindprozesse ordentlich
 # eingesammelt werden und keine Zombies zurueckbleiben.
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
