@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import { Player } from "../components/Player";
 import { Fehler, Gitter, Skelettgitter, Videokachel, Zustand } from "../components/ui";
@@ -9,6 +9,10 @@ import { aufrufe, bytes, dauer, datum, prozent } from "../lib/format";
 
 export function Wiedergabeseite() {
   const { videoId = "" } = useParams();
+  const [parameter] = useSearchParams();
+  // Sprungziel aus der Untertitelsuche. Ist keines gesetzt, wird der gemerkte
+  // Fortschritt benutzt.
+  const sprungziel = Number(parameter.get("t"));
   const [beschreibungOffen, setBeschreibungOffen] = useState(false);
   const [aktivesKapitel, setAktivesKapitel] = useState<number | null>(null);
   const [technikOffen, setTechnikOffen] = useState(false);
@@ -46,7 +50,7 @@ export function Wiedergabeseite() {
       <div>
         <Player
           videoId={videoId}
-          startSekunde={v.fortschritt_s}
+          startSekunde={Number.isFinite(sprungziel) && sprungziel > 0 ? sprungziel : v.fortschritt_s}
           dauerS={v.dauer_s}
           kapitel={kapitel}
           untertitel={untertitel}

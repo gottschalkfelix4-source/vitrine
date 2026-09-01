@@ -33,7 +33,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import bundle, jobs, media, ytdlp
+from app.services import bundle, jobs, media, suche, ytdlp
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +110,39 @@ def _untertitel_uebernehmen(
             )
         )
     db.commit()
+
+
+def _in_suche_aufnehmen(
+    db: Session, video: Video, untertitel: list[tuple[str, bool, Path]]
+) -> None:
+    """Nimmt Titel, Beschreibung und gesprochenen Text in den Volltextindex auf.
+
+    Die Untertitel sind dabei der eigentliche Gewinn: Damit findet man nicht nur
+    das Video, sondern die Stelle darin. Ein Fehler hier darf die Archivierung
+    aber nicht scheitern lassen - das Video ist bereits sicher gespeichert, ein
+    fehlender Indexeintrag laesst sich jederzeit nachholen.
+    """
+    try:
+        suche.video_indizieren(
+            db,
+            video_id=video.id,
+            titel=video.title,
+            beschreibung=video.description,
+            kanal=video.channel.name if video.channel else None,
+        )
+        zeilen = 0
+        for sprache, _ist_auto, pfad in untertitel:
+            if not pfad.is_file():
+                continue
+            zeilen += suche.untertitel_indizieren(
+                db, video.id, sprache, pfad.read_text(encoding="utf-8", errors="replace")
+            )
+        db.commit()
+        if zeilen:
+            log.info("%s: %d Untertitelzeilen durchsuchbar", video.id, zeilen)
+    except Exception:
+        db.rollback()
+        log.warning("%s konnte nicht in den Suchindex aufgenommen werden", video.id, exc_info=True)
 
 
 @jobs.register(JobType.VIDEO_ARCHIVE)
@@ -216,6 +249,8 @@ def archivieren(db: Session, job: Job) -> None:
         video.archived_at = utcnow()
         video.retry_count = 0
         _status(db, video, VideoStatus.ARCHIVED)
+
+        _in_suche_aufnehmen(db, video, ergebnis.subtitles)
 
         # ---- 6. Recodierung nachgelagert einreihen, falls sie sich lohnt
         codec = media.ArchiveCodec(kanal.archive_codec) if kanal and kanal.archive_codec else settings.archive_codec

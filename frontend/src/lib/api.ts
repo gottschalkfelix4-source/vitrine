@@ -93,6 +93,20 @@ export interface VideoDetail {
   statusmeldung: string | null;
 }
 
+export interface Untertitelfund {
+  video: VideoKurz;
+  start_s: number;
+  sprache: string;
+  zeile: string;
+}
+
+export interface Suchergebnis {
+  anfrage: string;
+  videos: VideoKurz[];
+  im_gesprochenen: Untertitelfund[];
+  zu_kurz: boolean;
+}
+
 export interface Auftrag {
   id: number;
   art: string;
@@ -221,6 +235,10 @@ export const api = {
   auftragWiederholen: (id: number) => hole<void>(`/api/jobs/${id}/retry`, { method: "POST" }),
 
   speicher: () => hole<Speicher>("/api/storage"),
+
+  suchen: (q: string, limit = 40) => hole<Suchergebnis>(`/api/search${frage({ q, limit })}`),
+  suchindexNeuAufbauen: () =>
+    hole<Record<string, number>>("/api/search/reindex", { method: "POST" }),
 };
 
 /** Adresse des Videostroms, inklusive der gemeldeten Client-Faehigkeiten. */

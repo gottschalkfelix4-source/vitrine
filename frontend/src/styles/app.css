@@ -864,3 +864,64 @@
   justify-content: flex-end;
   margin-top: 20px;
 }
+
+/* ------------------------------------------------------------ Fundstellen */
+
+/* Treffer im gesprochenen Wort. Quer gelegt statt als Kachel, weil hier das
+   Zitat die Hauptsache ist und nicht das Vorschaubild. */
+.fundstellen {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fundstelle {
+  display: flex;
+  gap: 14px;
+  padding: 10px;
+  border-radius: var(--radius);
+  transition: background var(--uebergang);
+  align-items: center;
+}
+
+.fundstelle:hover {
+  background: var(--flaeche);
+}
+
+.fundstelle-bild {
+  position: relative;
+  width: 150px;
+  flex-shrink: 0;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-klein);
+  overflow: hidden;
+  background: var(--flaeche-hoch);
+}
+
+.fundstelle-bild img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.fundstelle-zitat {
+  font-size: 14.5px;
+  line-height: 1.45;
+  margin-bottom: 5px;
+  /* Untertitel stehen normalisiert im Index - Kleinschreibung faellt weniger
+     auf, wenn das Zitat als Zitat gesetzt ist. */
+  font-style: italic;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .fundstelle-bild {
+    width: 108px;
+  }
+}

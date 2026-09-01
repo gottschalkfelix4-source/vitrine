@@ -8,6 +8,7 @@ Beides wird deshalb bei jeder neuen Verbindung erzwungen.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -50,6 +51,22 @@ def init_db() -> None:
     """Legt Verzeichnisse und Schema an. Idempotent."""
     settings.ensure_dirs()
     Base.metadata.create_all(engine)
+
+    # Die Volltext-Tabellen sind virtuelle FTS5-Tabellen und stehen deshalb
+    # nicht im SQLAlchemy-Modell - sie werden hier von Hand angelegt.
+    from app.services import suche
+
+    with SessionLocal() as s:
+        try:
+            suche.schema_anlegen(s)
+        except Exception:
+            # Ohne FTS5 laeuft das Archiv weiter, nur die Suche faellt auf
+            # einfaches Vergleichen zurueck. Kein Grund, den Start abzubrechen.
+            logging.getLogger(__name__).warning(
+                "Volltextsuche konnte nicht eingerichtet werden - SQLite ohne FTS5? "
+                "Die Suche benutzt dann den langsameren Rueckfallweg.",
+                exc_info=True,
+            )
 
 
 @contextmanager

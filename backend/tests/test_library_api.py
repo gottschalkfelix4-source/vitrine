@@ -37,6 +37,11 @@ def umgebung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(eng)
     db = sessionmaker(bind=eng, expire_on_commit=False)()
+    # Die FTS5-Tabellen stehen nicht im SQLAlchemy-Modell - ohne sie wuerde
+    # hier der Rueckfallweg getestet statt der echten Suche.
+    from app.services import suche as volltext
+
+    volltext.schema_anlegen(db)
 
     db.add(Channel(id="UCtest", name="Testkanal", handle="@test"))
     db.add(Playlist(id="PLabc", channel_id="UCtest", kind=PlaylistKind.PLAYLIST,
@@ -52,6 +57,13 @@ def umgebung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         ))
         db.add(PlaylistItem(playlist_id="PLabc", video_id=f"v{i}", position=i))
     db.commit()
+
+    # Im Betrieb indiziert der Archivierungs-Worker. Hier entstehen die Videos
+    # direkt in der Datenbank, also muss der Index nachgezogen werden - das
+    # prueft nebenbei den Neuaufbau-Weg mit.
+    from app.services.reindex import index_neu_aufbauen
+
+    index_neu_aufbauen(db, mit_untertiteln=False)
 
     app = FastAPI()
     app.include_router(library.router)

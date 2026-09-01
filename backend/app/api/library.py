@@ -33,6 +33,7 @@ from app.models import (
     utcnow,
 )
 from app.services import cache, jobs, ytdlp
+from app.services import suche as volltext
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["bibliothek"])
@@ -287,8 +288,19 @@ def videos(
     elif nur_archiviert:
         anfrage = anfrage.where(Video.status == VideoStatus.ARCHIVED)
     if suche:
-        muster = f"%{suche}%"
-        anfrage = anfrage.where(Video.title.ilike(muster) | Video.description.ilike(muster))
+        # Der Volltextindex findet auch mitten im Wort und damit deutsche
+        # Komposita. Fehlt er - alte SQLite ohne FTS5 - oder ist die Eingabe zu
+        # kurz fuer Trigramme, bleibt der einfache Vergleich als Rueckfall.
+        # Langsam, aber besser als gar kein Ergebnis.
+        zu_kurz = len(volltext.normalisieren(suche).strip()) < volltext.MIN_LAENGE
+        if zu_kurz or not volltext.verfuegbar(db):
+            muster = f"%{suche}%"
+            anfrage = anfrage.where(Video.title.ilike(muster) | Video.description.ilike(muster))
+        else:
+            treffer = volltext.video_treffer(db, suche, limit=limit, offset=offset)
+            if not treffer:
+                return []
+            anfrage = anfrage.where(Video.id.in_(treffer))
 
     anfrage = anfrage.order_by(
         {
@@ -299,6 +311,67 @@ def videos(
         }[sortierung]
     )
     return [VideoKurz.aus(v) for v in db.scalars(anfrage.limit(limit).offset(offset))]
+
+
+class Untertitelfund(BaseModel):
+    video: VideoKurz
+    start_s: float
+    sprache: str
+    zeile: str
+
+
+class Suchergebnis(BaseModel):
+    anfrage: str
+    videos: list[VideoKurz]
+    #: Fundstellen im gesprochenen Wort, je Video hoechstens eine.
+    im_gesprochenen: list[Untertitelfund]
+    zu_kurz: bool = False
+
+
+@router.get("/search", response_model=Suchergebnis)
+def volltextsuche(
+    q: str = Query(description="Suchbegriff"),
+    limit: int = Query(40, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> Suchergebnis:
+    """Sucht in Titeln, Beschreibungen und im gesprochenen Wort.
+
+    Die Untertitelfunde sind der eigentliche Mehrwert gegenueber einer
+    Titelsuche: Sie liefern nicht nur das Video, sondern die Sekunde, an der
+    der Begriff faellt.
+    """
+    if len(volltext.normalisieren(q).strip()) < volltext.MIN_LAENGE:
+        return Suchergebnis(anfrage=q, videos=[], im_gesprochenen=[], zu_kurz=True)
+
+    ids = volltext.video_treffer(db, q, limit=limit)
+    gefunden = {v.id: v for v in db.scalars(select(Video).where(Video.id.in_(ids)))} if ids else {}
+    # Reihenfolge des Index beibehalten - sie ist die Relevanzsortierung.
+    videos = [VideoKurz.aus(gefunden[i]) for i in ids if i in gefunden]
+
+    funde: list[Untertitelfund] = []
+    for f in volltext.untertitel_treffer(db, q, limit=limit):
+        v = db.get(Video, f.video_id)
+        if v is None:
+            continue
+        funde.append(
+            Untertitelfund(
+                video=VideoKurz.aus(v), start_s=f.start_s, sprache=f.sprache, zeile=f.zeile
+            )
+        )
+
+    return Suchergebnis(anfrage=q, videos=videos, im_gesprochenen=funde)
+
+
+@router.post("/search/reindex", status_code=status.HTTP_200_OK)
+def suchindex_neu_aufbauen(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Baut den Suchindex aus der Datenbank und den Buendeln neu auf.
+
+    Noetig nach einem Import bestehender Daten oder wenn die Untertitelsuche
+    erst nachtraeglich eingeschaltet wurde.
+    """
+    from app.services.reindex import index_neu_aufbauen
+
+    return index_neu_aufbauen(db)
 
 
 @router.get("/videos/{video_id}")
