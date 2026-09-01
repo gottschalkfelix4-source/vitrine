@@ -202,7 +202,11 @@ def archivieren(db: Session, job: Job) -> None:
         # ---- 2. Pruefen, ob wirklich die gewuenschte Qualitaet ankam
         # Muss vor allem anderen passieren: Ein stiller 360p-Rueckfall darf
         # niemals als archiviert verbucht werden.
-        ytdlp.check_not_degraded(ergebnis.info, mindesthoehe=settings.recode_min_height)
+        qualitaetshinweis = ytdlp.check_not_degraded(
+            ergebnis.info,
+            mindesthoehe=settings.archive_min_height,
+            boden=settings.recode_min_height,
+        )
 
         quelle_bytes = ergebnis.path.stat().st_size
         info_medien = media.probe(ergebnis.path)
@@ -295,7 +299,9 @@ def archivieren(db: Session, job: Job) -> None:
         video.recoded = False
         video.archived_at = utcnow()
         video.retry_count = 0
-        _status(db, video, VideoStatus.ARCHIVED)
+        # Ein Hinweis wie "Quelle bietet hoechstens 720p" bleibt sichtbar -
+        # sonst wundert man sich spaeter, warum ein Video nicht in 1080p da ist.
+        _status(db, video, VideoStatus.ARCHIVED, qualitaetshinweis)
 
         _in_suche_aufnehmen(db, video, ergebnis.subtitles)
 

@@ -148,6 +148,22 @@ der teure Vollabgleich ueber die `UU`-Playlist laeuft dann nur noch
 woechentlich. Der Feed liefert allerdings nur rund 15 Eintraege und keine
 Dauer - er ersetzt den Vollabgleich nicht, er verschiebt ihn.
 
+### Qualitaet: Minimum, kein Deckel
+
+`YTA_ARCHIVE_MIN_HEIGHT` (Standard 1080) ist eine **Untergrenze**, keine
+Obergrenze. Bietet die Quelle 4K, wird 4K geladen. Wer Platz sparen will,
+setzt `YTA_ARCHIVE_MAX_HEIGHT` auf 1440 oder 1080.
+
+Der Unterschied ist nicht akademisch: Ein Selektor mit `height<=1080` waehlt
+bei einem hochkantigen Short die 608x1080-Fassung statt der vollen 1080x1920,
+weil yt-dlp die lange Seite als Hoehe zaehlt. Genau so war es in der ersten
+Fassung.
+
+Bietet eine Quelle nichts in Mindesthoehe - ein altes 720p-Video -, wird das
+Beste genommen, was sie hat, und das als Hinweis am Video vermerkt. Liefert der
+Download dagegen weniger, obwohl die Quelle mehr anbietet, gilt die Kette als
+gestoert und das Video wird nicht als archiviert verbucht.
+
 ### Nebenlaeufigkeit
 
 YouTube drosselt pro IP-Adresse, nicht pro Prozess; als Gast liegt die Grenze

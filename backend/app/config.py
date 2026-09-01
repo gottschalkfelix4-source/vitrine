@@ -122,10 +122,17 @@ class Settings(BaseSettings):
     hot_grace_seconds: int = 120
 
     # -------------------------------------------------------------- yt-dlp
-    #: Format-Selektor. Standard zielt auf bestes Video <=1080p plus bestes Audio.
-    ytdlp_format: str = (
-        "bestvideo[height<=?1080][vcodec!*=av01]+bestaudio/best[height<=?1080]/best"
-    )
+    #: Mindesthoehe fuer das Archiv. Gibt es bei der Quelle nichts in dieser
+    #: Hoehe, wird das Beste genommen, was sie hat - ein altes 720p-Video
+    #: soll nicht ungesichert bleiben. Gibt es aber mehr und der Download
+    #: liefert trotzdem weniger, gilt das als gestoerte Kette und wird
+    #: verworfen (siehe check_not_degraded).
+    archive_min_height: int = 1080
+    #: Obergrenze, 0 = keine. Ein 4K-Video belegt grob das Drei- bis
+    #: Vierfache von 1080p - wer Platz sparen will, setzt hier 1440 oder 1080.
+    archive_max_height: int = 0
+    #: Eigener yt-dlp-Format-Selektor. Leer = aus den beiden Hoehen abgeleitet.
+    ytdlp_format: str | None = None
     ytdlp_cookies_file: Path | None = None
     ytdlp_concurrent_fragments: int = 4
     #: Bandbreitenlimit je Download, z.B. "5M". Leer = unbegrenzt.
@@ -161,6 +168,30 @@ class Settings(BaseSettings):
         if isinstance(v, str) and not v.strip().startswith("["):
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
+
+    def format_selector(self) -> str:
+        """Der yt-dlp-Format-Selektor, abgeleitet aus Mindest- und Hoechsthoehe.
+
+        Die Kette faellt von links nach rechts durch: erst bestes Video ab der
+        Mindesthoehe, dann - falls die Quelle das nicht hat - das beste
+        vorhandene, zuletzt ein fertig gemischtes Format. "Mindestens 1080p"
+        heisst also NICHT "hoechstens 1080p": Bietet die Quelle 4K, wird 4K
+        geladen, solange keine Obergrenze gesetzt ist.
+
+        Bei hochkantigen Videos zaehlt yt-dlp die lange Seite als Hoehe. Ein
+        Short in voller Qualitaet ist 1080x1920 - eine Obergrenze von 1080
+        haette davon die 608x1080-Fassung gewaehlt.
+        """
+        if self.ytdlp_format:
+            return self.ytdlp_format
+        deckel = f"[height<={self.archive_max_height}]" if self.archive_max_height > 0 else ""
+        stufen: list[str] = []
+        if self.archive_min_height > 0:
+            stufen.append(f"bestvideo[height>={self.archive_min_height}]{deckel}+bestaudio")
+        stufen.append(f"bestvideo{deckel}+bestaudio")
+        stufen.append(f"best{deckel}")
+        stufen.append("best")
+        return "/".join(stufen)
 
     def ensure_dirs(self) -> None:
         for d in (self.data_dir, self.bundle_dir, self.cache_dir, self.thumb_dir, self.tmp_dir):

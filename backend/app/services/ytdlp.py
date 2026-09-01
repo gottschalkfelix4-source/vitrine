@@ -281,7 +281,7 @@ def download_video(
 
     opts = _base_opts() | {
         "ignoreerrors": False,
-        "format": format_selector or settings.ytdlp_format,
+        "format": format_selector or settings.format_selector(),
         "merge_output_format": "mkv",
         "outtmpl": {"default": str(ziel / "%(id)s.%(ext)s")},
         "concurrent_fragment_downloads": settings.ytdlp_concurrent_fragments,
@@ -335,7 +335,19 @@ class DegradedDownload(YtdlpError):
     """Der Download hat formal geklappt, aber nur eine Notfassung geliefert."""
 
 
-def check_not_degraded(info: dict[str, Any], mindesthoehe: int = 480) -> None:
+def angebotene_hoehe(info: dict[str, Any]) -> int | None:
+    """Die groesste Hoehe, die die Quelle laut Formatliste anbietet."""
+    hoehen = [
+        f.get("height")
+        for f in info.get("formats") or []
+        if f.get("vcodec") not in (None, "none") and f.get("height")
+    ]
+    return max(hoehen) if hoehen else None
+
+
+def check_not_degraded(
+    info: dict[str, Any], mindesthoehe: int = 1080, boden: int = 480
+) -> str | None:
     """Prueft, ob wirklich die gewuenschte Qualitaet ankam.
 
     Das ist der gefaehrlichste stille Fehler des ganzen Projekts. Wenn die
@@ -344,8 +356,20 @@ def check_not_degraded(info: dict[str, Any], mindesthoehe: int = 480) -> None:
     meldet Erfolg. Ohne diese Pruefung archiviert man wochenlang 360p-Dateien
     und merkt es erst beim Zuschauen, wenn die Quelle laengst geloescht ist.
 
-    Wichtig ist deshalb auch, ein so entstandenes Video NICHT als erledigt zu
-    verbuchen, sondern erneut einzureihen, sobald die Kette wieder steht.
+    Zwei Schwellen, mit unterschiedlicher Bedeutung:
+
+    ``boden`` ist absolut. Darunter wird immer verworfen - auch wenn die
+    Formatliste behauptet, es gaebe nichts Besseres. Genau das behauptet eine
+    gestoerte Sitzung naemlich auch; die Liste ist dann selbst Teil des
+    Problems und kein verlaesslicher Zeuge.
+
+    ``mindesthoehe`` ist relativ zum Angebot. Liegt der Download darunter,
+    obwohl die Quelle mehr anbietet, ist die Kette gestoert. Bietet die Quelle
+    selbst nicht mehr - ein altes 720p-Video -, wird das Beste genommen, was es
+    gibt, und das als Hinweis zurueckgegeben statt als Fehler geworfen. Ein
+    altes Video soll nicht ungesichert bleiben, nur weil es keine 1080p hat.
+
+    Liefert ``None`` oder einen Hinweistext fuer die Statuszeile.
     """
     hoehe = info.get("height")
     format_id = str(info.get("format_id") or "")
@@ -361,15 +385,29 @@ def check_not_degraded(info: dict[str, Any], mindesthoehe: int = 480) -> None:
             "archiviert verbucht."
         )
 
-    if hoehe and hoehe < mindesthoehe:
-        raise DegradedDownload(
-            f"nur {hoehe}p erhalten, erwartet mindestens {mindesthoehe}p - "
-            "vermutlich eingeschraenkte Formatauswahl"
-        )
-
     if vcodec in ("none", "") and info.get("acodec") not in ("none", "", None):
         # Reines Audio ist bei einem Video-Archiv fast immer ein Fehlgriff.
         raise DegradedDownload("nur eine Tonspur erhalten, kein Video")
+
+    if not hoehe:
+        return None
+
+    if hoehe < boden:
+        raise DegradedDownload(
+            f"nur {hoehe}p erhalten - unterhalb des absoluten Bodens von {boden}p, "
+            "vermutlich eingeschraenkte Formatauswahl"
+        )
+
+    if hoehe < mindesthoehe:
+        angebot = angebotene_hoehe(info)
+        if angebot is not None and angebot >= mindesthoehe:
+            raise DegradedDownload(
+                f"nur {hoehe}p erhalten, obwohl die Quelle {angebot}p anbietet - "
+                "Kette gestoert, Video wurde NICHT als archiviert verbucht"
+            )
+        return f"Quelle bietet hoechstens {angebot or hoehe}p (gewuenscht: {mindesthoehe}p)"
+
+    return None
 
 
 _MEDIEN_ENDUNGEN = (".mkv", ".mp4", ".webm", ".m4a", ".opus", ".mp3", ".ogg")

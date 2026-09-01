@@ -186,17 +186,67 @@ def test_stiller_360p_rueckfall_wird_erkannt():
     die Notfassung geholt. Ohne Pruefung archiviert man wochenlang 360p."""
     from app.services.ytdlp import DegradedDownload, check_not_degraded
 
-    # Guter Fall
-    check_not_degraded({"height": 1080, "format_id": "303+251", "vcodec": "vp09", "acodec": "opus"})
+    def angebot(*hoehen):
+        return [{"vcodec": "vp09", "height": h} for h in hoehen]
+
+    # Guter Fall: 1080p bekommen, 1080p gewuenscht
+    assert check_not_degraded(
+        {"height": 1080, "format_id": "303+251", "vcodec": "vp09", "acodec": "opus",
+         "formats": angebot(360, 720, 1080)}
+    ) is None
+
+    # Hochkant: yt-dlp zaehlt die lange Seite - ein Short in voller Qualitaet
+    # ist 1080x1920 und muss durchgehen.
+    assert check_not_degraded(
+        {"height": 1920, "width": 1080, "format_id": "313+251", "vcodec": "vp09",
+         "formats": angebot(1080, 1920)}
+    ) is None
 
     # Format 18 - der klassische Rueckfall bei fehlenden PO-Tokens
     with pytest.raises(DegradedDownload, match="Format 18"):
         check_not_degraded({"height": 360, "format_id": "18", "vcodec": "avc1", "acodec": "mp4a"})
 
-    # Zu niedrige Aufloesung ohne Format 18
-    with pytest.raises(DegradedDownload, match="360p"):
-        check_not_degraded({"height": 360, "format_id": "134+140", "vcodec": "avc1"})
+    # Unter dem absoluten Boden: immer verwerfen, auch wenn die Liste
+    # behauptet, es gaebe nichts Besseres - eine gestoerte Sitzung behauptet
+    # genau das.
+    with pytest.raises(DegradedDownload, match="Boden"):
+        check_not_degraded(
+            {"height": 360, "format_id": "134+140", "vcodec": "avc1", "formats": angebot(360)}
+        )
+
+    # 720p bekommen, obwohl die Quelle 1080p anbietet: Kette gestoert.
+    with pytest.raises(DegradedDownload, match="obwohl die Quelle 1080p"):
+        check_not_degraded(
+            {"height": 720, "format_id": "247+251", "vcodec": "vp09",
+             "formats": angebot(360, 720, 1080)}
+        )
+
+    # 720p bekommen, die Quelle hat auch nicht mehr: annehmen, aber vermerken.
+    hinweis = check_not_degraded(
+        {"height": 720, "format_id": "247+251", "vcodec": "vp09", "formats": angebot(360, 720)}
+    )
+    assert hinweis and "720p" in hinweis and "1080p" in hinweis
 
     # Nur Ton statt Video
     with pytest.raises(DegradedDownload, match="Tonspur"):
         check_not_degraded({"height": None, "format_id": "251", "vcodec": "none", "acodec": "opus"})
+
+
+def test_format_selektor_setzt_minimum_statt_maximum():
+    """Der Kern der Aenderung: 'mindestens 1080p' darf nicht 'hoechstens
+    1080p' bedeuten. Bietet die Quelle 4K, wird 4K geladen."""
+    from app.config import Settings
+
+    s = Settings(archive_min_height=1080, archive_max_height=0)
+    sel = s.format_selector()
+    assert sel.startswith("bestvideo[height>=1080]+bestaudio/")
+    assert "<=" not in sel, "ohne Obergrenze darf nichts gedeckelt werden"
+    # Rueckfall auf das Beste, was die Quelle hat
+    assert "/bestvideo+bestaudio/" in sel and sel.endswith("/best")
+
+    gedeckelt = Settings(archive_min_height=1080, archive_max_height=1440).format_selector()
+    assert "[height>=1080][height<=1440]" in gedeckelt
+    assert gedeckelt.endswith("/best")
+
+    eigener = Settings(ytdlp_format="bestvideo[height<=720]+bestaudio").format_selector()
+    assert eigener == "bestvideo[height<=720]+bestaudio"

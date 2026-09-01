@@ -27,6 +27,11 @@ services:
       YTA_HOT_TTL_HOURS: ${HOT_TTL_HOURS:-24}
       YTA_HOT_TTL_AFTER_PLAYBACK_MINUTES: ${HOT_TTL_AFTER_PLAYBACK_MINUTES:-30}
       YTA_HOT_MAX_BYTES: ${HOT_MAX_BYTES:-53687091200}
+      # Qualitaet: Mindesthoehe (kein Deckel!) und optionale Obergrenze.
+      # Bietet die Quelle 4K, wird 4K geladen - grob das Drei- bis Vierfache
+      # von 1080p. Wer Platz sparen will: ARCHIVE_MAX_HEIGHT=1440 oder 1080.
+      YTA_ARCHIVE_MIN_HEIGHT: ${ARCHIVE_MIN_HEIGHT:-1080}
+      YTA_ARCHIVE_MAX_HEIGHT: ${ARCHIVE_MAX_HEIGHT:-0}
       # Nebenlaeufigkeit - beim Download bewusst niedrig, YouTube drosselt pro IP.
       YTA_DOWNLOAD_CONCURRENCY: ${DOWNLOAD_CONCURRENCY:-1}
       YTA_ENCODE_CONCURRENCY: ${ENCODE_CONCURRENCY:-1}
