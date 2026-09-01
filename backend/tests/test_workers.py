@@ -309,6 +309,28 @@ def test_behaelterwahl(vcodec, acodec, erwartet_suffix, ton_neu):
     assert plan.ton_umkodieren is ton_neu
 
 
+def test_hochkantiges_video_wird_als_short_markiert(umgebung, monkeypatch, tmp_path_factory):
+    """Ein Short, das ueber die Uploads-Liste kam, war bisher nicht als solches
+    gekennzeichnet - es landete unter "Videos" und wurde in eine
+    16:9-Buehne gezwungen. Hochkant ist das verlaessliche Merkmal."""
+    ordner = tmp_path_factory.mktemp("hochkant")
+    quelle = ordner / "short.mkv"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc2=size=240x426:rate=15:duration=1",
+         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-an", str(quelle)],
+        check=True, capture_output=True,
+    )
+    db, _tmp = umgebung
+    _download_ersetzen(monkeypatch, quelle, info_extra={"height": 426})
+    _archivieren(db)
+
+    video = db.get(Video, "vid1")
+    assert video.status == VideoStatus.ARCHIVED
+    assert video.width == 240 and video.height == 426
+    assert video.is_short is True
+
+
 def test_medienname_im_buendel_bleibt_sauber(umgebung, quellvideo, monkeypatch):
     """Der Dateiname im Buendel ist das, was ein Mensch beim Hineinschauen
     sieht - da haben Zwischenschritt-Namen nichts verloren."""

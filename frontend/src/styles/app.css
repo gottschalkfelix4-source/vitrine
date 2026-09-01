@@ -509,20 +509,70 @@
   }
 }
 
+/* Kinomodus: Player ueber die volle Breite, Kapitel und weitere Videos
+   rutschen darunter. */
+.watch[data-theater="true"] {
+  grid-template-columns: 1fr;
+}
+
+.watch[data-theater="true"] .buehne {
+  width: 100%;
+}
+
+/* Die Buehne richtet sich nach dem Bildschirm, nicht nur nach der Breite:
+   Auf einem breiten Monitor waere ein 16:9-Kasten ueber die volle Spalte
+   hoeher als das Fenster. Deshalb ist die Hoehe gedeckelt, und das Video wird
+   darin eingepasst - hochkantige Shorts bekommen dann links und rechts
+   schwarze Raender statt zerrissen zu werden. */
 .buehne {
+  position: relative;
   background: #000;
   border-radius: var(--radius);
   overflow: hidden;
   aspect-ratio: 16 / 9;
+  max-height: calc(100vh - 150px);
   display: grid;
   place-items: center;
+  user-select: none;
 }
 
+/* Absolut positioniert, nicht "height: 100%": Eine Prozent-Hoehe gegen eine
+   per aspect-ratio abgeleitete Hoehe gilt als unbestimmt - das Video waechst
+   dann auf sein eigenes Seitenverhaeltnis, laeuft ueber die Buehne hinaus und
+   wird beschnitten. Genau so entstand das zerrissene Bild bei hochkantigen
+   Shorts. Mit inset: 0 ist die Groesse immer die der Buehne. */
 .buehne video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
   background: #000;
+  object-fit: contain;
+}
+
+.buehne-meldung {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-gedaempft);
+  font-size: 13px;
+}
+
+.watch[data-theater="true"] .buehne,
+.buehne[data-vollbild="true"] {
+  max-height: calc(100vh - 56px);
+  border-radius: 0;
+}
+
+.buehne[data-vollbild="true"] {
+  max-height: 100vh;
+  aspect-ratio: auto;
+  width: 100vw;
+  height: 100vh;
+}
+
+.player[data-laeuft="true"][data-steuerung="false"] {
+  cursor: none;
 }
 
 .watch h1 {
@@ -965,4 +1015,287 @@
 .knopf[data-art="gefahr-stark"] {
   background: var(--zu-fehler);
   color: #fff;
+}
+
+/* Schmale Seitenleiste: lange Beschriftungen wie "Warteschlange" duerfen
+   nicht ueber den Rand laufen. */
+.leiste[data-schmal="true"] .nav-punkt > span:not(.zeichen) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ================================================================== Player */
+
+.player-gross {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  transition: transform var(--uebergang), background var(--uebergang);
+}
+
+.player-gross:hover {
+  background: var(--akzent);
+  transform: scale(1.06);
+}
+
+.player-lader {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  animation: drehen 0.9s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes drehen {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Die Steuerung liegt unten auf einem Verlauf und blendet waehrend der
+   Wiedergabe aus, sobald die Maus ruht - wie man es gewohnt ist. */
+.player-steuerung {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 26px 12px 6px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0));
+  color: #fff;
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+.player[data-steuerung="false"] .player-steuerung {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---- Zeitleiste */
+
+.zeitleiste {
+  position: relative;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  /* Sonst greift die alte .leiste-Regel der Seitenleiste. */
+  width: auto;
+  padding: 0;
+  overflow: visible;
+  border: none;
+  touch-action: none;
+}
+
+.leiste-spur {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+  transition: height var(--uebergang);
+}
+
+.zeitleiste:hover .leiste-spur {
+  height: 5px;
+}
+
+.leiste-puffer,
+.leiste-gespielt {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.leiste-puffer {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.leiste-gespielt {
+  background: var(--akzent);
+}
+
+.leiste-trenner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.leiste-griff {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  margin-left: -6.5px;
+  border-radius: 50%;
+  background: var(--akzent);
+  transform: translateY(-50%) scale(0);
+  transition: transform var(--uebergang);
+  pointer-events: none;
+}
+
+.zeitleiste:hover .leiste-griff {
+  transform: translateY(-50%) scale(1);
+}
+
+.leiste-tipp {
+  position: absolute;
+  bottom: 22px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  text-align: center;
+}
+
+.leiste-tipp-kapitel {
+  font-weight: 500;
+  margin-bottom: 1px;
+}
+
+/* ---- Knopfzeile */
+
+.steuer-zeile {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.steuer-knopf {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-klein);
+  color: #fff;
+  opacity: 0.92;
+  transition: opacity var(--uebergang), background var(--uebergang);
+}
+
+.steuer-knopf svg {
+  width: 24px;
+  height: 24px;
+}
+
+.steuer-knopf:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.steuer-knopf.steuer-text {
+  width: auto;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.steuer-knopf[data-aktiv="true"] {
+  box-shadow: inset 0 -3px 0 var(--akzent);
+}
+
+.steuer-ton {
+  display: flex;
+  align-items: center;
+}
+
+.steuer-regler {
+  width: 0;
+  opacity: 0;
+  transition: width var(--uebergang), opacity var(--uebergang);
+  accent-color: #fff;
+  cursor: pointer;
+}
+
+.steuer-ton:hover .steuer-regler,
+.steuer-regler:focus-visible {
+  width: 72px;
+  opacity: 1;
+  margin-right: 8px;
+}
+
+.steuer-zeit {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.steuer-zeit-trenner {
+  opacity: 0.6;
+  margin: 0 2px;
+}
+
+.steuer-luecke {
+  flex: 1;
+}
+
+.steuer-menue-anker {
+  position: relative;
+}
+
+.steuer-menue {
+  position: absolute;
+  bottom: 46px;
+  right: 0;
+  min-width: 150px;
+  background: rgba(28, 28, 28, 0.96);
+  border-radius: var(--radius-klein);
+  padding: 6px 0;
+  box-shadow: var(--schatten);
+  display: flex;
+  flex-direction: column;
+}
+
+.steuer-menue button {
+  text-align: left;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #fff;
+}
+
+.steuer-menue button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.steuer-menue button[data-aktiv="true"] {
+  font-weight: 600;
+}
+
+.steuer-menue button[data-aktiv="true"]::before {
+  content: "✓ ";
+}
+
+@media (max-width: 640px) {
+  .steuer-zeit {
+    font-size: 11.5px;
+  }
+  .steuer-knopf {
+    width: 36px;
+    height: 36px;
+  }
 }

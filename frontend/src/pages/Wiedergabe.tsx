@@ -16,6 +16,8 @@ export function Wiedergabeseite() {
   const [beschreibungOffen, setBeschreibungOffen] = useState(false);
   const [aktivesKapitel, setAktivesKapitel] = useState<number | null>(null);
   const [technikOffen, setTechnikOffen] = useState(false);
+  // Kinomodus: Player ueber die volle Breite, die Seitenspalte rutscht darunter.
+  const [theater, setTheater] = useState(false);
 
   const detail = useApi(() => api.video(videoId), [videoId]);
   const weitere = useApi(
@@ -46,7 +48,7 @@ export function Wiedergabeseite() {
   }
 
   return (
-    <div className="watch">
+    <div className="watch" data-theater={theater}>
       <div>
         <Player
           videoId={videoId}
@@ -55,6 +57,8 @@ export function Wiedergabeseite() {
           kapitel={kapitel}
           untertitel={untertitel}
           aufKapitel={beiKapitel}
+          theater={theater}
+          aufTheater={setTheater}
         />
 
         <h1>{v.titel}</h1>
@@ -178,14 +182,28 @@ export function Wiedergabeseite() {
         ) : null}
 
         <div className="beschreibung-kopf">Mehr von {v.kanal_name}</div>
-        <Gitter form="liste">
-          {(weitere.daten ?? [])
-            .filter((x) => x.id !== videoId)
-            .slice(0, 10)
-            .map((x) => (
-              <Videokachel key={x.id} video={x} ohneKanal />
-            ))}
-        </Gitter>
+        {(() => {
+          const andere = (weitere.daten ?? []).filter((x) => x.id !== videoId).slice(0, 10);
+          if (andere.length === 0 && !weitere.laedt) {
+            return (
+              <div style={{ color: "var(--text-schwach)", fontSize: 13, lineHeight: 1.5 }}>
+                Noch keine weiteren archivierten Videos dieses Kanals.{" "}
+                {v.kanal_id ? (
+                  <Link to={`/kanal/${v.kanal_id}`} style={{ textDecoration: "underline" }}>
+                    Zum Kanal
+                  </Link>
+                ) : null}
+              </div>
+            );
+          }
+          return (
+            <Gitter form="liste">
+              {andere.map((x) => (
+                <Videokachel key={x.id} video={x} ohneKanal />
+              ))}
+            </Gitter>
+          );
+        })()}
       </aside>
     </div>
   );

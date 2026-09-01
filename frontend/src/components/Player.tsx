@@ -1,22 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Kapitel } from "../lib/api";
 import { api, streamUrl, untertitelUrl } from "../lib/api";
-import { prozent } from "../lib/format";
+import { dauer, prozent } from "../lib/format";
 
 /**
  * Der Player.
  *
- * Die Besonderheit gegenueber einem gewoehnlichen <video>-Element: Die Quelle
- * ist nicht immer sofort da. Kann der Browser den Archivcodec, liefert der
- * Server die Bytes direkt aus dem Buendel und es geht ohne Umweg los. Sonst
- * antwortet er mit 202 und bereitet im Hintergrund eine Heisskopie vor - dann
- * zeigen wir den Fortschritt, statt den Nutzer vor einem schwarzen Bild sitzen
- * zu lassen.
+ * Eigene Steuerung statt der Browser-Bedienelemente - aus zwei Gruenden. Zum
+ * einen sehen die nativen Steuerungen in jedem Browser anders aus und lassen
+ * sich nicht um Kapitel, Tempo oder Theater-Modus erweitern. Zum anderen
+ * verhaelt sich die Buehne selbst nach dem Inhalt: Ein hochkantiges Short darf
+ * nicht in ein 16:9-Fenster gepresst werden, sondern bekommt eine Buehne, die
+ * sich an der Bildschirmhoehe orientiert.
  *
- * Deshalb wird die Quelle vorher angetastet, statt sie dem Element einfach
- * hinzuwerfen: Ein <video>, das eine 202-Antwort mit JSON bekommt, meldet nur
- * "Format nicht unterstuetzt" - und niemand wuesste, warum.
+ * Die Quelle ist nicht immer sofort da: Kann der Browser den Archivcodec, kommt
+ * das Video direkt aus dem Buendel. Sonst antwortet der Server mit 202 und
+ * bereitet im Hintergrund eine Heisskopie vor - dann zeigen wir den
+ * Fortschritt, statt den Nutzer vor einem schwarzen Bild sitzen zu lassen.
  */
 
 type Lage =
@@ -32,6 +33,8 @@ interface Props {
   kapitel?: Kapitel[];
   untertitel?: { sprache: string; automatisch: boolean }[];
   aufKapitel?: (index: number | null) => void;
+  theater?: boolean;
+  aufTheater?: (an: boolean) => void;
 }
 
 /** Wie oft der Player meldet, dass noch geschaut wird. Deutlich haeufiger als
@@ -39,6 +42,47 @@ interface Props {
  *  gleich zum Abraeumen fuehrt. */
 const HERZSCHLAG_MS = 30_000;
 const FORTSCHRITT_MS = 5_000;
+/** Nach so viel Ruhe verschwindet die Steuerung waehrend der Wiedergabe. */
+const AUSBLENDEN_MS = 2600;
+const TEMPI = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const SPEICHER_SCHLUESSEL = "vitrine.wiedergabe";
+
+interface Gemerkt {
+  lautstaerke: number;
+  stumm: boolean;
+  tempo: number;
+}
+
+function gemerktLesen(): Gemerkt {
+  try {
+    const roh = localStorage.getItem(SPEICHER_SCHLUESSEL);
+    if (roh) {
+      const g = JSON.parse(roh) as Partial<Gemerkt>;
+      return {
+        lautstaerke: typeof g.lautstaerke === "number" ? g.lautstaerke : 1,
+        stumm: !!g.stumm,
+        tempo: typeof g.tempo === "number" ? g.tempo : 1,
+      };
+    }
+  } catch {
+    /* privates Fenster o. ae. */
+  }
+  return { lautstaerke: 1, stumm: false, tempo: 1 };
+}
+
+function gemerktSchreiben(g: Gemerkt) {
+  try {
+    localStorage.setItem(SPEICHER_SCHLUESSEL, JSON.stringify(g));
+  } catch {
+    /* ignorieren */
+  }
+}
+
+function bereiche(tr: TimeRanges): [number, number][] {
+  const aus: [number, number][] = [];
+  for (let i = 0; i < tr.length; i++) aus.push([tr.start(i), tr.end(i)]);
+  return aus;
+}
 
 export function Player({
   videoId,
@@ -47,10 +91,30 @@ export function Player({
   kapitel = [],
   untertitel = [],
   aufKapitel,
+  theater = false,
+  aufTheater,
 }: Props) {
   const [lage, setLage] = useState<Lage>({ art: "pruefen" });
   const videoRef = useRef<HTMLVideoElement>(null);
+  const huelleRef = useRef<HTMLDivElement>(null);
+  const leisteRef = useRef<HTMLDivElement>(null);
   const gesprungen = useRef(false);
+
+  // ---- Zustand der Steuerung
+  const [laeuft, setLaeuft] = useState(false);
+  const [zeit, setZeit] = useState(0);
+  const [gesamt, setGesamt] = useState(dauerS ?? 0);
+  const [gepuffert, setGepuffert] = useState<[number, number][]>([]);
+  const [wartet, setWartet] = useState(false);
+  const [hochkant, setHochkant] = useState(false);
+  const [gemerkt, setGemerkt] = useState<Gemerkt>(gemerktLesen);
+  const [vollbild, setVollbild] = useState(false);
+  const [sichtbar, setSichtbar] = useState(true);
+  const [menue, setMenue] = useState<"tempo" | "untertitel" | null>(null);
+  const [spur, setSpur] = useState(-1); // -1 = aus
+  const [zeiger, setZeiger] = useState<{ x: number; zeit: number } | null>(null);
+  const zieht = useRef(false);
+  const ausblender = useRef<number | undefined>(undefined);
 
   // ---- Quelle beschaffen -------------------------------------------------
   useEffect(() => {
@@ -62,8 +126,7 @@ export function Player({
     async function antasten(): Promise<void> {
       try {
         // Nur das erste Byte anfordern: Das reicht, um zu erfahren, ob
-        // ausgeliefert wird oder erst vorbereitet werden muss - und laedt
-        // nicht versehentlich das ganze Video.
+        // ausgeliefert wird oder erst vorbereitet werden muss.
         const antwort = await fetch(streamUrl(videoId), { headers: { Range: "bytes=0-0" } });
         if (abgebrochen) return;
 
@@ -74,28 +137,23 @@ export function Player({
             grund: koerper.grund ?? "wird vorbereitet",
             anteil: koerper.fortschritt ?? 0,
           });
-          // Anfangs haeufiger nachfragen, dann ruhiger werden.
           const wartezeit = Math.min(5000, 1000 + versuch * 500);
           versuch += 1;
           window.setTimeout(() => void antasten(), wartezeit);
           return;
         }
-
         if (!antwort.ok && antwort.status !== 206) {
           const koerper = await antwort.json().catch(() => ({}));
           setLage({ art: "fehler", text: koerper.detail ?? `Fehler ${antwort.status}` });
           return;
         }
-
         setLage({
           art: "bereit",
           quelle: streamUrl(videoId),
           modus: antwort.headers.get("X-Wiedergabe-Modus"),
         });
       } catch (e) {
-        if (!abgebrochen) {
-          setLage({ art: "fehler", text: e instanceof Error ? e.message : String(e) });
-        }
+        if (!abgebrochen) setLage({ art: "fehler", text: e instanceof Error ? e.message : String(e) });
       }
     }
 
@@ -105,6 +163,76 @@ export function Player({
     };
   }, [videoId]);
 
+  // ---- Medienereignisse --------------------------------------------------
+  useEffect(() => {
+    if (lage.art !== "bereit") return;
+    const el = videoRef.current;
+    if (!el) return;
+
+    el.volume = gemerkt.lautstaerke;
+    el.muted = gemerkt.stumm;
+    el.playbackRate = gemerkt.tempo;
+
+    const beiMeta = () => {
+      setGesamt(el.duration || dauerS || 0);
+      setHochkant(el.videoHeight > el.videoWidth);
+      // Nur einmal an die gemerkte Stelle springen, nicht bei jedem
+      // erneuten Puffern - sonst zieht es den Nutzer beim Spulen zurueck.
+      if (!gesprungen.current && startSekunde > 1) el.currentTime = startSekunde;
+      gesprungen.current = true;
+    };
+    const beiZeit = () => {
+      if (!zieht.current) setZeit(el.currentTime);
+    };
+    const beiPuffer = () => setGepuffert(bereiche(el.buffered));
+    const an = () => setLaeuft(true);
+    const aus = () => setLaeuft(false);
+    const warten = () => setWartet(true);
+    const weiter = () => setWartet(false);
+    const beiTon = () =>
+      setGemerkt((g) => {
+        const neu = { ...g, lautstaerke: el.volume, stumm: el.muted };
+        gemerktSchreiben(neu);
+        return neu;
+      });
+    const beiTempo = () =>
+      setGemerkt((g) => {
+        const neu = { ...g, tempo: el.playbackRate };
+        gemerktSchreiben(neu);
+        return neu;
+      });
+
+    el.addEventListener("loadedmetadata", beiMeta);
+    el.addEventListener("durationchange", beiMeta);
+    el.addEventListener("timeupdate", beiZeit);
+    el.addEventListener("progress", beiPuffer);
+    el.addEventListener("play", an);
+    el.addEventListener("pause", aus);
+    el.addEventListener("ended", aus);
+    el.addEventListener("waiting", warten);
+    el.addEventListener("playing", weiter);
+    el.addEventListener("canplay", weiter);
+    el.addEventListener("volumechange", beiTon);
+    el.addEventListener("ratechange", beiTempo);
+    return () => {
+      el.removeEventListener("loadedmetadata", beiMeta);
+      el.removeEventListener("durationchange", beiMeta);
+      el.removeEventListener("timeupdate", beiZeit);
+      el.removeEventListener("progress", beiPuffer);
+      el.removeEventListener("play", an);
+      el.removeEventListener("pause", aus);
+      el.removeEventListener("ended", aus);
+      el.removeEventListener("waiting", warten);
+      el.removeEventListener("playing", weiter);
+      el.removeEventListener("canplay", weiter);
+      el.removeEventListener("volumechange", beiTon);
+      el.removeEventListener("ratechange", beiTempo);
+    };
+    // gemerkt bewusst nicht als Abhaengigkeit: Es wird hier nur als Startwert
+    // angewandt, danach fuehrt das Element selbst.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lage.art, videoId, dauerS, startSekunde]);
+
   // ---- Lease und Fortschritt --------------------------------------------
   useEffect(() => {
     if (lage.art !== "bereit") return;
@@ -113,7 +241,6 @@ export function Player({
 
     let herz: number | undefined;
     let merken: number | undefined;
-
     const starten = () => {
       if (herz === undefined) {
         void api.herzschlag(videoId);
@@ -125,26 +252,20 @@ export function Player({
         }, FORTSCHRITT_MS);
       }
     };
-
     const anhalten = () => {
       if (herz !== undefined) window.clearInterval(herz);
       if (merken !== undefined) window.clearInterval(merken);
-      herz = undefined;
-      merken = undefined;
+      herz = merken = undefined;
     };
-
     const beenden = () => {
       anhalten();
       if (el.currentTime > 0) void api.fortschrittMerken(videoId, el.currentTime);
       void api.wiedergabeBeendet(videoId);
     };
-
     el.addEventListener("play", starten);
     el.addEventListener("pause", anhalten);
     el.addEventListener("ended", beenden);
-    // Beim Schliessen des Tabs zaehlt nur noch, was mit keepalive rausgeht.
     window.addEventListener("pagehide", beenden);
-
     return () => {
       el.removeEventListener("play", starten);
       el.removeEventListener("pause", anhalten);
@@ -156,77 +277,189 @@ export function Player({
 
   // ---- Kapitel mitverfolgen ---------------------------------------------
   useEffect(() => {
-    if (lage.art !== "bereit" || !aufKapitel || kapitel.length === 0) return;
+    if (!aufKapitel || kapitel.length === 0) return;
+    let index: number | null = null;
+    for (let i = kapitel.length - 1; i >= 0; i--) {
+      if (zeit >= kapitel[i].start_s) {
+        index = i;
+        break;
+      }
+    }
+    aufKapitel(index);
+  }, [zeit, kapitel, aufKapitel]);
+
+  // ---- Vollbild ----------------------------------------------------------
+  useEffect(() => {
+    const beim = () => setVollbild(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", beim);
+    return () => document.removeEventListener("fullscreenchange", beim);
+  }, []);
+
+  // ---- Steuerung ein-/ausblenden ----------------------------------------
+  const zeigen = useCallback(() => {
+    setSichtbar(true);
+    window.clearTimeout(ausblender.current);
+    ausblender.current = window.setTimeout(() => {
+      if (menue === null) setSichtbar(false);
+    }, AUSBLENDEN_MS);
+  }, [menue]);
+
+  useEffect(() => {
+    if (!laeuft) {
+      setSichtbar(true);
+      window.clearTimeout(ausblender.current);
+    } else {
+      zeigen();
+    }
+    return () => window.clearTimeout(ausblender.current);
+  }, [laeuft, zeigen]);
+
+  // ---- Bedienung ---------------------------------------------------------
+  const umschalten = useCallback(() => {
     const el = videoRef.current;
     if (!el) return;
+    if (el.paused) void el.play();
+    else el.pause();
+  }, []);
 
-    const beobachten = () => {
-      const t = el.currentTime;
-      let index: number | null = null;
-      for (let i = kapitel.length - 1; i >= 0; i--) {
-        if (t >= kapitel[i].start_s) {
-          index = i;
-          break;
-        }
-      }
-      aufKapitel(index);
-    };
-    el.addEventListener("timeupdate", beobachten);
-    return () => el.removeEventListener("timeupdate", beobachten);
-  }, [lage.art, kapitel, aufKapitel]);
+  const springe = useCallback(
+    (t: number) => {
+      const el = videoRef.current;
+      if (!el) return;
+      const ziel = Math.max(0, Math.min(gesamt || el.duration || 0, t));
+      el.currentTime = ziel;
+      setZeit(ziel);
+    },
+    [gesamt],
+  );
+
+  const vollbildUmschalten = useCallback(() => {
+    const ziel = huelleRef.current;
+    if (!ziel) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void ziel.requestFullscreen?.();
+  }, []);
+
+  const bildImBild = useCallback(() => {
+    const el = videoRef.current;
+    if (!el || !document.pictureInPictureEnabled) return;
+    if (document.pictureInPictureElement) void document.exitPictureInPicture();
+    else void el.requestPictureInPicture();
+  }, []);
+
+  const spurWaehlen = useCallback((index: number) => {
+    const el = videoRef.current;
+    if (!el) return;
+    for (let i = 0; i < el.textTracks.length; i++) {
+      el.textTracks[i].mode = i === index ? "showing" : "disabled";
+    }
+    setSpur(index);
+    setMenue(null);
+  }, []);
+
+  const tempoSetzen = useCallback((t: number) => {
+    const el = videoRef.current;
+    if (el) el.playbackRate = t;
+    setMenue(null);
+  }, []);
 
   // ---- Tastatur ----------------------------------------------------------
   useEffect(() => {
     if (lage.art !== "bereit") return;
     const beim = (e: KeyboardEvent) => {
       const ziel = e.target as HTMLElement | null;
-      // In Eingabefeldern hat der Player nichts zu melden.
       if (ziel && (ziel.tagName === "INPUT" || ziel.tagName === "TEXTAREA" || ziel.isContentEditable))
         return;
       const el = videoRef.current;
       if (!el) return;
+      zeigen();
 
       // Die Belegung, die YouTube-Nutzer im Muskelgedaechtnis haben.
       switch (e.key.toLowerCase()) {
         case " ":
         case "k":
           e.preventDefault();
-          el.paused ? void el.play() : el.pause();
+          umschalten();
           break;
         case "j":
-          el.currentTime = Math.max(0, el.currentTime - 10);
+          springe(el.currentTime - 10);
           break;
         case "l":
-          el.currentTime += 10;
+          springe(el.currentTime + 10);
           break;
         case "arrowleft":
-          el.currentTime = Math.max(0, el.currentTime - 5);
+          springe(el.currentTime - 5);
           break;
         case "arrowright":
-          el.currentTime += 5;
+          springe(el.currentTime + 5);
+          break;
+        case "arrowup":
+          e.preventDefault();
+          el.volume = Math.min(1, el.volume + 0.05);
+          break;
+        case "arrowdown":
+          e.preventDefault();
+          el.volume = Math.max(0, el.volume - 0.05);
           break;
         case "m":
           el.muted = !el.muted;
           break;
         case "f":
-          if (document.fullscreenElement) void document.exitFullscreen();
-          else void el.requestFullscreen?.();
+          vollbildUmschalten();
+          break;
+        case "t":
+          aufTheater?.(!theater);
+          break;
+        case "c":
+          spurWaehlen(spur >= 0 ? -1 : untertitel.length > 0 ? 0 : -1);
+          break;
+        case "i":
+          bildImBild();
+          break;
+        case "<":
+        case ",":
+          el.playbackRate = Math.max(0.25, el.playbackRate - 0.25);
+          break;
+        case ">":
+        case ".":
+          el.playbackRate = Math.min(3, el.playbackRate + 0.25);
+          break;
+        case "home":
+          springe(0);
+          break;
+        case "end":
+          springe(gesamt);
           break;
         default:
-          if (/^[0-9]$/.test(e.key) && dauerS) {
-            el.currentTime = (Number(e.key) / 10) * dauerS;
-          }
+          if (/^[0-9]$/.test(e.key) && gesamt) springe((Number(e.key) / 10) * gesamt);
       }
     };
     window.addEventListener("keydown", beim);
     return () => window.removeEventListener("keydown", beim);
-  }, [lage.art, dauerS]);
+  }, [
+    lage.art, gesamt, umschalten, springe, vollbildUmschalten, aufTheater, theater,
+    spurWaehlen, spur, untertitel.length, bildImBild, zeigen,
+  ]);
+
+  // ---- Leiste: Zeiger und Ziehen ----------------------------------------
+  const zeitAmZeiger = (clientX: number) => {
+    const r = leisteRef.current?.getBoundingClientRect();
+    if (!r || r.width === 0) return { x: 0, zeit: 0 };
+    const anteil = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    return { x: anteil * r.width, zeit: anteil * gesamt };
+  };
+
+  const kapitelBei = (t: number): Kapitel | null => {
+    let gefunden: Kapitel | null = null;
+    for (const k of kapitel) if (t >= k.start_s) gefunden = k;
+    return gefunden;
+  };
 
   // ---- Darstellung -------------------------------------------------------
   if (lage.art === "pruefen") {
     return (
       <div className="buehne">
-        <div style={{ color: "var(--text-gedaempft)", fontSize: 13 }}>wird geöffnet …</div>
+        <div className="buehne-meldung">wird geöffnet …</div>
       </div>
     );
   }
@@ -234,7 +467,7 @@ export function Player({
   if (lage.art === "vorbereitung") {
     return (
       <div className="buehne">
-        <div style={{ textAlign: "center", padding: 24, maxWidth: 440 }}>
+        <div className="buehne-meldung" style={{ maxWidth: 440 }}>
           <div style={{ fontSize: 30, marginBottom: 12 }}>📦</div>
           <div style={{ fontWeight: 500, marginBottom: 6 }}>Video wird vorbereitet</div>
           <div style={{ color: "var(--text-gedaempft)", fontSize: 13, marginBottom: 16 }}>
@@ -254,7 +487,7 @@ export function Player({
   if (lage.art === "fehler") {
     return (
       <div className="buehne">
-        <div style={{ textAlign: "center", padding: 24, maxWidth: 420 }}>
+        <div className="buehne-meldung" style={{ maxWidth: 420 }}>
           <div style={{ fontSize: 30, marginBottom: 12 }}>⚠</div>
           <div style={{ fontWeight: 500, marginBottom: 6 }}>Wiedergabe nicht möglich</div>
           <div style={{ color: "var(--text-gedaempft)", fontSize: 13 }}>{lage.text}</div>
@@ -263,24 +496,33 @@ export function Player({
     );
   }
 
+  const gespielt = gesamt > 0 ? (zeit / gesamt) * 100 : 0;
+  const steuerungSichtbar = sichtbar || !laeuft || menue !== null;
+  const zeigerKapitel = zeiger ? kapitelBei(zeiger.zeit) : null;
+
   return (
-    <div className="buehne">
+    <div
+      ref={huelleRef}
+      className="buehne player"
+      data-hochkant={hochkant}
+      data-vollbild={vollbild}
+      data-theater={theater}
+      data-steuerung={steuerungSichtbar}
+      data-laeuft={laeuft}
+      onMouseMove={zeigen}
+      onMouseLeave={() => {
+        if (laeuft && menue === null) setSichtbar(false);
+      }}
+    >
       <video
         ref={videoRef}
         src={lage.quelle}
-        controls
         autoPlay
         playsInline
         preload="metadata"
         data-modus={lage.modus ?? undefined}
-        onLoadedMetadata={(e) => {
-          // Nur einmal an die gemerkte Stelle springen, nicht bei jedem
-          // erneuten Puffern - sonst zieht es den Nutzer beim Spulen zurueck.
-          if (!gesprungen.current && startSekunde > 1) {
-            e.currentTarget.currentTime = startSekunde;
-          }
-          gesprungen.current = true;
-        }}
+        onClick={umschalten}
+        onDoubleClick={vollbildUmschalten}
       >
         {untertitel.map((u) => (
           <track
@@ -292,6 +534,217 @@ export function Player({
           />
         ))}
       </video>
+
+      {wartet && laeuft ? <div className="player-lader" aria-hidden="true" /> : null}
+
+      {!laeuft ? (
+        <button className="player-gross" onClick={umschalten} aria-label="Abspielen">
+          <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
+            <path d="M8 5v14l11-7z" fill="currentColor" />
+          </svg>
+        </button>
+      ) : null}
+
+      <div className="player-steuerung" onClick={(e) => e.stopPropagation()}>
+        {/* ---- Zeitleiste */}
+        <div
+          ref={leisteRef}
+          className="zeitleiste"
+          role="slider"
+          aria-label="Position"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(gesamt)}
+          aria-valuenow={Math.round(zeit)}
+          onPointerDown={(e) => {
+            zieht.current = true;
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            springe(zeitAmZeiger(e.clientX).zeit);
+          }}
+          onPointerMove={(e) => {
+            const p = zeitAmZeiger(e.clientX);
+            setZeiger(p);
+            if (zieht.current) springe(p.zeit);
+          }}
+          onPointerUp={(e) => {
+            zieht.current = false;
+            (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          }}
+          onPointerLeave={() => {
+            if (!zieht.current) setZeiger(null);
+          }}
+        >
+          <div className="leiste-spur">
+            {gesamt > 0
+              ? gepuffert.map(([a, b], i) => (
+                  <div
+                    key={i}
+                    className="leiste-puffer"
+                    style={{ left: `${(a / gesamt) * 100}%`, width: `${((b - a) / gesamt) * 100}%` }}
+                  />
+                ))
+              : null}
+            <div className="leiste-gespielt" style={{ width: `${gespielt}%` }} />
+            {/* Kapitelgrenzen als kleine Luecken - so, wie man es von YouTube kennt. */}
+            {gesamt > 0
+              ? kapitel.slice(1).map((k, i) => (
+                  <div key={i} className="leiste-trenner" style={{ left: `${(k.start_s / gesamt) * 100}%` }} />
+                ))
+              : null}
+          </div>
+          <div className="leiste-griff" style={{ left: `${gespielt}%` }} />
+          {zeiger ? (
+            <div className="leiste-tipp" style={{ left: zeiger.x }}>
+              {zeigerKapitel ? <div className="leiste-tipp-kapitel">{zeigerKapitel.titel}</div> : null}
+              <div>{dauer(zeiger.zeit)}</div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* ---- Knopfzeile */}
+        <div className="steuer-zeile">
+          <button className="steuer-knopf" onClick={umschalten} aria-label={laeuft ? "Pause" : "Abspielen"}>
+            {laeuft ? (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 5h4v14H6zm8 0h4v14h-4z" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5v14l11-7z" fill="currentColor" />
+              </svg>
+            )}
+          </button>
+
+          <div className="steuer-ton">
+            <button
+              className="steuer-knopf"
+              onClick={() => {
+                const el = videoRef.current;
+                if (el) el.muted = !el.muted;
+              }}
+              aria-label={gemerkt.stumm ? "Ton an" : "Stumm"}
+            >
+              {gemerkt.stumm || gemerkt.lautstaerke === 0 ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M16.5 12A4.5 4.5 0 0 0 14 8v2.2l2.5 2.5zM19 12c0 .9-.2 1.8-.5 2.6l1.5 1.5A8.8 8.8 0 0 0 21 12a9 9 0 0 0-7-8.8v2.1A7 7 0 0 1 19 12zM4.3 3 3 4.3 7.7 9H3v6h4l5 5v-6.7l4.3 4.3a7 7 0 0 1-2.3 1.2v2.1a9 9 0 0 0 3.7-1.8l2 2 1.3-1.3zM12 4 9.9 6.1 12 8.2z" fill="currentColor" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 9v6h4l5 5V4L7 9zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" fill="currentColor" />
+                </svg>
+              )}
+            </button>
+            <input
+              className="steuer-regler"
+              type="range"
+              min={0}
+              max={1}
+              step={0.02}
+              value={gemerkt.stumm ? 0 : gemerkt.lautstaerke}
+              aria-label="Lautstärke"
+              onChange={(e) => {
+                const el = videoRef.current;
+                if (!el) return;
+                el.volume = Number(e.target.value);
+                el.muted = el.volume === 0;
+              }}
+            />
+          </div>
+
+          <span className="steuer-zeit">
+            {dauer(zeit)} <span className="steuer-zeit-trenner">/</span> {dauer(gesamt)}
+          </span>
+
+          <div className="steuer-luecke" />
+
+          {/* Tempo */}
+          <div className="steuer-menue-anker">
+            <button
+              className="steuer-knopf steuer-text"
+              onClick={() => setMenue(menue === "tempo" ? null : "tempo")}
+              aria-label="Wiedergabegeschwindigkeit"
+            >
+              {gemerkt.tempo === 1 ? "1×" : `${gemerkt.tempo}×`}
+            </button>
+            {menue === "tempo" ? (
+              <div className="steuer-menue">
+                {TEMPI.map((t) => (
+                  <button key={t} data-aktiv={t === gemerkt.tempo} onClick={() => tempoSetzen(t)}>
+                    {t === 1 ? "Normal" : `${t}×`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Untertitel */}
+          {untertitel.length > 0 ? (
+            <div className="steuer-menue-anker">
+              <button
+                className="steuer-knopf steuer-text"
+                data-aktiv={spur >= 0}
+                onClick={() => setMenue(menue === "untertitel" ? null : "untertitel")}
+                aria-label="Untertitel"
+              >
+                CC
+              </button>
+              {menue === "untertitel" ? (
+                <div className="steuer-menue">
+                  <button data-aktiv={spur === -1} onClick={() => spurWaehlen(-1)}>
+                    Aus
+                  </button>
+                  {untertitel.map((u, i) => (
+                    <button key={i} data-aktiv={spur === i} onClick={() => spurWaehlen(i)}>
+                      {u.sprache}
+                      {u.automatisch ? " (automatisch)" : ""}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Bild-im-Bild */}
+          {typeof document !== "undefined" && document.pictureInPictureEnabled ? (
+            <button className="steuer-knopf" onClick={bildImBild} aria-label="Bild im Bild">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M19 11h-8v6h8zm4 8V4.9A2 2 0 0 0 21 3H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2zm-2 0H3V5h18z" fill="currentColor" />
+              </svg>
+            </button>
+          ) : null}
+
+          {/* Theater */}
+          {aufTheater && !vollbild ? (
+            <button
+              className="steuer-knopf"
+              onClick={() => aufTheater(!theater)}
+              aria-label={theater ? "Normale Ansicht" : "Kinomodus"}
+            >
+              {theater ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 4h18v16H3zm2 2v12h14V6z" fill="currentColor" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2 6h20v12H2zm2 2v8h16V8z" fill="currentColor" />
+                </svg>
+              )}
+            </button>
+          ) : null}
+
+          {/* Vollbild */}
+          <button className="steuer-knopf" onClick={vollbildUmschalten} aria-label={vollbild ? "Vollbild beenden" : "Vollbild"}>
+            {vollbild ? (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 16h3v3h2v-5H5zm3-8H5v2h5V5H8zm6 11h2v-3h3v-2h-5zm2-11V5h-2v5h5V8z" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 14H5v5h5v-2H7zm-2-4h2V7h3V5H5zm12 7h-3v2h5v-5h-2zM14 5v2h3v3h2V5z" fill="currentColor" />
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

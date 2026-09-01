@@ -202,6 +202,14 @@ def archivieren(db: Session, job: Job) -> None:
         quelle_bytes = ergebnis.path.stat().st_size
         info_medien = media.probe(ergebnis.path)
 
+        # Hochkant heisst Short. Die Kennzeichnung ueber die UUSH-Playlist
+        # greift nur, wenn Shorts beim Kanal eingeschaltet sind - ein Short,
+        # das ueber die Uploads-Liste kam, landete sonst unter "Videos" und
+        # wurde dort in eine 16:9-Buehne gezwungen.
+        if info_medien.width and info_medien.height and info_medien.height > info_medien.width:
+            video.is_short = True
+            db.commit()
+
         # ---- 3. In einen browsertauglichen Behaelter umpacken (60 bis 80 %)
         plan = media.plan_container(info_medien)
         medien_datei = ergebnis.path
