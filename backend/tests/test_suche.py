@@ -7,12 +7,11 @@ zusammengesetzte Woerter und die vielen Schreibweisen von Umlauten.
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
-from app.models import Base, Channel, Video, VideoStatus
+from app.models import Channel, Video, VideoStatus
 from app.services import suche
+from tests.conftest import neue_sitzung
 
 VTT = """WEBVTT
 Kind: captions
@@ -37,10 +36,7 @@ Das war der letzte Abschnitt
 
 @pytest.fixture
 def db() -> Session:
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(eng)
-    s = sessionmaker(bind=eng, expire_on_commit=False)()
-    suche.schema_anlegen(s)
+    s = neue_sitzung()
     s.add(Channel(id="UCtest", name="Werkstattfunk"))
     s.add(Video(id="v1", channel_id="UCtest", title="Netzwerk im Selbstbau",
                 description="Über Router, Switches und Dateigrößen", status=VideoStatus.ARCHIVED))

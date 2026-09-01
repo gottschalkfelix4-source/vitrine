@@ -8,15 +8,11 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.api import library
 from app.config import settings
 from app.db import get_db
 from app.models import (
-    Base,
     Channel,
     Job,
     JobStatus,
@@ -27,6 +23,7 @@ from app.models import (
     Video,
     VideoStatus,
 )
+from tests.conftest import neue_sitzung
 
 
 @pytest.fixture
@@ -34,14 +31,7 @@ def umgebung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
     settings.ensure_dirs()
 
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(eng)
-    db = sessionmaker(bind=eng, expire_on_commit=False)()
-    # Die FTS5-Tabellen stehen nicht im SQLAlchemy-Modell - ohne sie wuerde
-    # hier der Rueckfallweg getestet statt der echten Suche.
-    from app.services import suche as volltext
-
-    volltext.schema_anlegen(db)
+    db = neue_sitzung()
 
     db.add(Channel(id="UCtest", name="Testkanal", handle="@test"))
     db.add(Playlist(id="PLabc", channel_id="UCtest", kind=PlaylistKind.PLAYLIST,

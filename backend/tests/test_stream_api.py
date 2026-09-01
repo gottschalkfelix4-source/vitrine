@@ -14,15 +14,14 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 from app.api import stream
 from app.config import settings
 from app.db import get_db
-from app.models import Base, Channel, Video, VideoStatus
+from app.models import Channel, Video, VideoStatus
 from app.services.bundle import BundleManifest, write_bundle
+from tests.conftest import neue_sitzung
 
 MEDIENGROESSE = 2 * 1024 * 1024 + 777
 MODERN = "mp4,webm,av01,vp09,h264,opus,aac"
@@ -34,15 +33,7 @@ def umgebung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "hot_max_bytes", 0)
     settings.ensure_dirs()
 
-    # StaticPool ist hier zwingend: Eine In-Memory-Datenbank gehoert der
-    # jeweiligen Verbindung. Ohne geteilte Verbindung saehe der Thread des
-    # TestClient eine leere Datenbank ohne Tabellen.
-    eng = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    Base.metadata.create_all(eng)
-    Sitzung = sessionmaker(bind=eng, expire_on_commit=False)
-    db = Sitzung()
+    db = neue_sitzung()
     db.add(Channel(id="UCtest", name="Testkanal"))
     db.commit()
 

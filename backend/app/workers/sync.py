@@ -43,10 +43,30 @@ from app.services import jobs, ytdlp
 log = logging.getLogger(__name__)
 
 
-def _video_anlegen(db: Session, kanal_id: str | None, eintrag: ytdlp.ListedVideo) -> tuple[Video, bool]:
-    """Legt ein Video an, falls es neu ist. Liefert (Video, war_neu)."""
+def _video_anlegen(
+    db: Session,
+    kanal_id: str | None,
+    eintrag: ytdlp.ListedVideo,
+    bekannt: dict[str, Video] | None = None,
+) -> tuple[Video, bool]:
+    """Legt ein Video an, falls es neu ist. Liefert (Video, war_neu).
+
+    ``bekannt`` ist kein Tempo-Trick, sondern notwendig: Die Sitzung laeuft mit
+    abgeschaltetem Autoflush, und ``db.get()`` sieht deshalb ein Video nicht,
+    das in derselben Schleife bereits angelegt, aber noch nicht geschrieben
+    wurde. Ohne diesen Zwischenspeicher entstuenden zwei Datensaetze mit
+    derselben ID und der Abgleich braeche beim Schreiben ab.
+
+    Das ist kein theoretischer Fall: YouTube liefert bei grossen Kanaelen
+    gelegentlich unvollstaendige oder in sich doppelte Listen.
+    """
+    if bekannt is not None and eintrag.id in bekannt:
+        return bekannt[eintrag.id], False
+
     v = db.get(Video, eintrag.id)
     if v is not None:
+        if bekannt is not None:
+            bekannt[eintrag.id] = v
         # Vorhandene Videos nur behutsam auffrischen - Titel und Aufrufe
         # aendern sich, der Archivzustand darf dabei nicht angefasst werden.
         if eintrag.title and eintrag.title != "(ohne Titel)":
@@ -65,6 +85,8 @@ def _video_anlegen(db: Session, kanal_id: str | None, eintrag: ytdlp.ListedVideo
         status=VideoStatus.NEW,
     )
     db.add(v)
+    if bekannt is not None:
+        bekannt[eintrag.id] = v
     return v, True
 
 
@@ -101,6 +123,8 @@ def _sammlung_abgleichen(
 
     eintraege = ytdlp.list_entries(url)
     neu = 0
+    # Ein Zwischenspeicher fuer die gesamte Schleife - siehe _video_anlegen.
+    bekannt: dict[str, Video] = {}
 
     # Zuordnungen vollstaendig neu setzen: Reihenfolge und Zusammensetzung einer
     # Playlist aendern sich, entfernte Positionen muessen verschwinden.
@@ -109,7 +133,7 @@ def _sammlung_abgleichen(
     )
 
     for position, eintrag in enumerate(eintraege):
-        video, war_neu = _video_anlegen(db, kanal.id, eintrag)
+        video, war_neu = _video_anlegen(db, kanal.id, eintrag, bekannt)
         if art == PlaylistKind.SHORTS:
             video.is_short = True
         if art == PlaylistKind.LIVE:
@@ -149,11 +173,15 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
         jobs.fortschritt(db, job, 0.05, "Schnellcheck ueber RSS")
         neu_gesehen = 0
         try:
+            aus_rss: dict[str, Video] = {}
             for eintrag in ytdlp.peek_recent(kanal_id):
-                _, war_neu = _video_anlegen(db, kanal_id, eintrag)
+                _, war_neu = _video_anlegen(db, kanal_id, eintrag, aus_rss)
                 neu_gesehen += int(war_neu)
             db.commit()
         except ytdlp.YtdlpError as e:
+            # Wichtig: zuruecksetzen, sonst haengen halb angelegte Videos in der
+            # Sitzung und kollidieren gleich darauf mit dem Vollabgleich.
+            db.rollback()
             log.info("RSS-Schnellcheck fuer %s fehlgeschlagen: %s", kanal_id, e)
 
         # Nichts Neues im Feed und kein Vollabgleich verlangt: fertig. Das ist

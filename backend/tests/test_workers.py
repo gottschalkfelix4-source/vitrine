@@ -15,13 +15,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import ArchiveCodec, settings
-from app.models import Base, Channel, Chapter, Job, JobStatus, JobType, Video, VideoStatus
+from app.models import Channel, Chapter, Job, JobStatus, JobType, Video, VideoStatus
 from app.services import bundle, jobs, media, ytdlp
+from tests.conftest import neue_sitzung
 
 pytestmark = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
@@ -55,9 +55,7 @@ def umgebung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "recode_min_height", 100)  # das Testvideo ist klein
     settings.ensure_dirs()
 
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(eng)
-    db = sessionmaker(bind=eng, expire_on_commit=False)()
+    db = neue_sitzung()
     db.add(Channel(id="UCtest", name="Testkanal", auto_archive=True))
     db.add(Video(id="vid1", channel_id="UCtest", title="Platzhalter", status=VideoStatus.QUEUED))
     db.commit()
@@ -409,3 +407,60 @@ def test_gescheiterter_auftrag_wird_trotz_blockierter_sitzung_vermerkt(umgebung,
     db_job = db.get(Job, job.id)
     assert db_job.status == JobStatus.FAILED
     assert "Schreibfehler" in db_job.error
+
+
+def test_doppelte_id_in_einer_liste_bricht_den_abgleich_nicht(umgebung, monkeypatch):
+    """Regression aus dem Betrieb.
+
+    YouTube liefert bei grossen Kanaelen gelegentlich Listen, in denen dieselbe
+    Video-ID zweimal steht. Weil die Sitzung ohne Autoflush laeuft, sieht
+    ``db.get()`` das eben erst angelegte, noch nicht geschriebene Video nicht -
+    es entstuenden zwei Datensaetze mit derselben ID und der ganze Abgleich
+    braeche mit einer IntegrityError ab.
+
+    Der Test lief frueher gruen, weil die Testsitzung mit Autoflush gebaut
+    wurde und der Betrieb ohne. Genau deshalb kommt die Sitzung jetzt aus
+    conftest.neue_sitzung() - mit denselben Einstellungen wie im Betrieb.
+    """
+    from app.models import Channel, PlaylistItem
+    from app.services import ytdlp
+    from app.workers import sync
+
+    db, _tmp = umgebung
+    kanal = db.get(Channel, "UCtest")
+    # "doppelt" steht zweimal drin, einmal sogar ohne Titel - so wie es
+    # bei nicht mehr verfuegbaren Videos ankommt.
+    from app.services.ytdlp import ListedVideo
+
+    eintraege = [
+        ListedVideo(id="doppelt", title="(ohne Titel)", duration_s=None, upload_date=None, view_count=None),
+        ListedVideo(id="doppelt", title="(ohne Titel)", duration_s=None, upload_date=None, view_count=None),
+        ListedVideo(id="einzeln", title="Echter Titel", duration_s=99, upload_date=None, view_count=5),
+    ]
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: eintraege)
+
+    neu = sync._sammlung_abgleichen(
+        db, kanal, playlist_id="PLx", titel="Mit Doppel", art="uploads",
+        url="egal", einreihen=False,
+    )
+
+    assert neu == 2, "zwei verschiedene Videos"
+    assert db.get(Video, "doppelt") is not None
+    assert db.get(Video, "einzeln").title == "Echter Titel"
+    # Beide Positionen bleiben erhalten - die Liste wird treu abgebildet.
+    pos = sorted(
+        db.scalars(select(PlaylistItem).where(PlaylistItem.playlist_id == "PLx")),
+        key=lambda x: x.position,
+    )
+    assert [p.video_id for p in pos] == ["doppelt", "doppelt", "einzeln"]
+
+
+def test_testsitzung_entspricht_dem_betrieb(umgebung):
+    """Wacht darueber, dass die Tests nicht wieder anders konfiguriert sind als
+    der Betrieb - genau daran ist der Fehler oben vorbeigerutscht."""
+    from app.db import SessionLocal
+
+    db, _tmp = umgebung
+    assert db.autoflush is False
+    assert SessionLocal.kw["autoflush"] is False
+    assert db.autoflush == SessionLocal.kw["autoflush"]

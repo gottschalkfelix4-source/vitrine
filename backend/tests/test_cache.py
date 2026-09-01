@@ -12,12 +12,13 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Base, Channel, HotCopy, HotCopyStatus, Video, utcnow
+from app.models import Channel, HotCopy, HotCopyStatus, Video, utcnow
 from app.services import cache
+from tests.conftest import neue_sitzung
 
 
 @pytest.fixture
@@ -33,9 +34,7 @@ def datendir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def db(datendir: Path) -> Session:
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(eng)
-    s = sessionmaker(bind=eng, expire_on_commit=False)()
+    s = neue_sitzung(mit_suche=False)
     s.add(Channel(id="UCtest", name="Testkanal"))
     s.commit()
     return s
