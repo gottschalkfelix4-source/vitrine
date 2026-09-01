@@ -96,6 +96,14 @@ def main() -> None:
                 ziel.mkdir(parents=True, exist_ok=True)
                 kopie = ziel / f"{video_id}.mkv"
                 shutil.copy2(_datei, kopie)
+                # Untertitel mitnehmen, damit die Volltextsuche etwas zu
+                # indizieren hat.
+                untertitel = []
+                vtt = _datei.with_suffix(".de.vtt")
+                if vtt.is_file():
+                    ziel_vtt = ziel / f"{video_id}.de.vtt"
+                    shutil.copy2(vtt, ziel_vtt)
+                    untertitel.append(("de", False, ziel_vtt))
                 thumb = None
                 if _vorschau.is_file():
                     thumb = ziel / f"{video_id}.jpg"
@@ -118,7 +126,7 @@ def main() -> None:
                             {"start_time": 4.0, "end_time": 6.0, "title": "Fazit"},
                         ],
                     },
-                    thumbnail=thumb, subtitles=[],
+                    thumbnail=thumb, subtitles=untertitel,
                 )
 
             ytdlp.download_video = falscher_download

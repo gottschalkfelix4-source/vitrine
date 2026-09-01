@@ -161,6 +161,33 @@ AV1-Encode in Hardware braucht es Intel Arc, Meteor/Lunar/Arrow Lake, NVIDIA
 RTX 40/50 oder RDNA3+. Software-Encode bleibt ohnehin die bessere Wahl fuer ein
 Archiv, das einmal geschrieben und lange behalten wird.
 
+## Suche
+
+Gesucht wird in Titeln, Beschreibungen **und im gesprochenen Wort**. Untertitel
+werden je Sprechzeile indiziert, nicht je Video - ein Treffer sagt deshalb nicht
+nur "kommt in diesem Video vor", sondern "faellt bei 4:32", und ein Klick
+springt dorthin.
+
+Zwei Entscheidungen dahinter, beide wegen der deutschen Sprache:
+
+**Trigram statt Wortzerlegung.** Der uebliche Tokenizer findet nur ganze
+Woerter und Praefixe. Im Deutschen reicht das nicht:
+
+| Suche nach | mit Wortzerlegung | mit Trigram |
+|---|---|---|
+| `server` in "Heimserver" | nein | ja |
+| `konfiguration` in "Netzwerkkonfiguration" | nein | ja |
+| `groesse` in "Dateigroessen" | nein | ja |
+
+**Symmetrische Umschrift.** Umlaute werden beim Indizieren *und* beim Suchen zu
+ae/oe/ue/ss. Dadurch finden "Groesse", "Größe" und "Grösse" dasselbe. Reines
+`remove_diacritics` reicht nicht - es macht aus "ae" kein "ä" und kennt das
+scharfe S gar nicht.
+
+Der Index enthaelt nichts, was nicht auch in der Datenbank oder in den Buendeln
+steht. Er muss deshalb weder gesichert noch migriert werden und laesst sich
+jederzeit neu erzeugen (`POST /api/search/reindex`).
+
 ## Zwei Warteschlangen statt einer
 
 Download und Recodierung laufen getrennt. Der Grund ist eine Zahl: Ein Kanal
@@ -205,6 +232,21 @@ der Netzzugriff wird ersetzt, der Rest laeuft echt durch die Arbeiter:
 ```bash
 cd backend && ./.venv/Scripts/python.exe tools/demo_befuellen.py <ordner-mit-seed1.mkv>
 ```
+
+## Was gegen echte Daten geprueft ist
+
+Nicht alles laesst sich mit erzeugten Testdaten pruefen - drei Fehler zeigten
+sich erst im Ernstfall und stehen deshalb hier:
+
+| Geprueft gegen | Ergebnis |
+|---|---|
+| Metadaten eines echten Videos | 54 Formate bis 2160p, Codecs av01/avc1/vp09 |
+| Vollstaendige Archivierung (CC-BY-Video) | 15 s, Buendel geprueft, Direktstream mit 206 |
+| Kanal-Vollabgleich (1619 Videos, 37 Sammlungen) | 43 s; RSS-Schnellcheck 0,16 s |
+
+Die 2160p sind dabei der eigentliche Beweis: Waere die JavaScript-Kette kaputt,
+blieben nur 360p uebrig. Genau deshalb prueft die CI im Container ausdruecklich
+nach, ob ffmpeg, Deno und die EJS-Solver vorhanden sind.
 
 ## Aufbau
 
