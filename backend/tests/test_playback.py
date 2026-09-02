@@ -206,10 +206,13 @@ def test_stiller_360p_rueckfall_wird_erkannt():
     with pytest.raises(DegradedDownload, match="Format 18"):
         check_not_degraded({"height": 360, "format_id": "18", "vcodec": "avc1", "acodec": "mp4a"})
 
-    # Unter dem absoluten Boden: immer verwerfen, auch wenn die Liste
-    # behauptet, es gaebe nichts Besseres - eine gestoerte Sitzung behauptet
-    # genau das.
-    with pytest.raises(DegradedDownload, match="Boden"):
+    # Unter dem absoluten Boden und mit einer duennen Formatliste: verwerfen.
+    # Eine gestoerte Sitzung behauptet ebenfalls, es gaebe nichts Besseres -
+    # unterscheiden laesst sie sich an den getrennten Bild- und Tonspuren, die
+    # sie nicht mehr liefert. Ein wirklich altes, kleines Video hat sie und
+    # wird archiviert; das steht weiter unten in
+    # test_altes_kleines_video_wird_archiviert.
+    with pytest.raises(DegradedDownload, match="glaubwuerdige Formatliste"):
         check_not_degraded(
             {"height": 360, "format_id": "134+140", "vcodec": "avc1", "formats": angebot(360)}
         )
@@ -445,3 +448,86 @@ def test_gestoerte_kette_faellt_weiterhin_hart_durch(tmp_path, monkeypatch):
         archive._laden_mit_rueckfall(
             db, job, "dQw4w9WgXcQ", tmp_path / "arbeit", format_selector=None,
         )
+
+
+# ------------------------------------- Videos, die es nur klein gibt
+#
+# Der Boden bei 480p soll eine gestoerte Sitzung abfangen, nicht ein altes
+# Video. Beide behaupten dasselbe - "mehr gibt es nicht" -, aber sie sind
+# unterscheidbar: Funktioniert die Auslieferung, liefert YouTube getrennte
+# Spuren fuer Bild und Ton, auch bei einem Video von 2005. Bricht die Kette
+# zusammen, bleiben nur die alten, fest gemischten Formate uebrig.
+
+
+def _dash(*stufen):
+    """Formatliste, wie sie eine gesunde Sitzung liefert: getrennte Spuren."""
+    return [{"vcodec": "vp09", "acodec": "none", "width": int(s * 4 / 3), "height": s}
+            for s in stufen]
+
+
+def test_altes_kleines_video_wird_archiviert():
+    """'Me at the zoo' von 2005 gibt es in hoechstens 240p. Es zu verwerfen
+    hiesse, dass sich gerade die aeltesten Videos nicht sichern lassen - die,
+    die am ehesten verschwinden. Genau die will ein Archiv haben."""
+    from app.services.ytdlp import check_not_degraded
+
+    hinweis = check_not_degraded(
+        {"width": 320, "height": 240, "format_id": "395+251", "vcodec": "vp09",
+         "formats": _dash(144, 240)},
+        mindesthoehe=1080, boden=480,
+    )
+    assert hinweis and "240p" in hinweis
+
+
+def test_gestoerte_sitzung_wird_weiterhin_verworfen():
+    """Die Gegenprobe, auf die es ankommt. Ohne getrennte Spuren ist die Liste
+    kein glaubwuerdiger Zeuge - eine gestoerte Sitzung behauptet ebenfalls,
+    es gaebe nichts Besseres."""
+    from app.services.ytdlp import DegradedDownload, check_not_degraded
+
+    with pytest.raises(DegradedDownload, match="glaubwuerdige Formatliste"):
+        check_not_degraded(
+            {"width": 640, "height": 360, "format_id": "134+140", "vcodec": "avc1",
+             "formats": [{"vcodec": "avc1", "acodec": "mp4a", "width": 640, "height": 360}]},
+            mindesthoehe=1080, boden=480,
+        )
+
+
+def test_unter_dem_boden_mit_besserem_angebot_bleibt_ein_fehler():
+    """Liegt der Download unter dem Boden, obwohl die Quelle mehr hat, ist das
+    unabhaengig von der Formatliste ein Fehler."""
+    from app.services.ytdlp import DegradedDownload, check_not_degraded
+
+    with pytest.raises(DegradedDownload, match="gestoerte Sitzung"):
+        check_not_degraded(
+            {"width": 480, "height": 360, "format_id": "x+y", "vcodec": "vp09",
+             "formats": _dash(360, 720, 1080)},
+            mindesthoehe=1080, boden=480,
+        )
+
+
+def test_format_18_bleibt_unabhaengig_davon_ein_fehler():
+    """Der klassische Rueckfall wird vor allem anderen geprueft - auch wenn die
+    Formatliste zufaellig gesund aussieht."""
+    from app.services.ytdlp import DegradedDownload, check_not_degraded
+
+    with pytest.raises(DegradedDownload, match="Format 18"):
+        check_not_degraded(
+            {"width": 640, "height": 360, "format_id": "18", "vcodec": "avc1",
+             "acodec": "mp4a", "formats": _dash(144, 240, 360)},
+            mindesthoehe=1080, boden=480,
+        )
+
+
+@pytest.mark.parametrize("stufe", [720, 480])
+def test_zwischen_boden_und_wunsch_wird_genommen_was_da_ist(stufe):
+    """Der haeufigste Fall bei aelteren Kanaelen: Die Quelle hat kein Full HD.
+    Das Video wird archiviert und der Unterschied vermerkt."""
+    from app.services.ytdlp import check_not_degraded
+
+    hinweis = check_not_degraded(
+        {"width": int(stufe * 16 / 9), "height": stufe, "format_id": "x+y",
+         "vcodec": "vp09", "formats": _dash(240, 360, stufe)},
+        mindesthoehe=1080, boden=480,
+    )
+    assert hinweis and f"{stufe}p" in hinweis and "1080p" in hinweis

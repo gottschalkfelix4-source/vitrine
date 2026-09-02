@@ -416,6 +416,34 @@ def angebotene_guete(info: dict[str, Any]) -> int | None:
     return max(werte) if werte else None
 
 
+#: So viele getrennte Videospuren muss die Formatliste mindestens enthalten,
+#: damit sie als unbeschaedigt gilt. Zwei sind eine sehr milde Huerde - ein
+#: echtes YouTube-Video hat ein Dutzend.
+_MINDEST_ADAPTIVE_FORMATE = 2
+
+
+def _formatliste_glaubwuerdig(info: dict[str, Any]) -> bool:
+    """Unterscheidet ein wirklich kleines Video von einer gestoerten Sitzung.
+
+    Beide behaupten dasselbe: "mehr gibt es nicht". Der Unterschied steht in
+    der Formatliste.
+
+    Funktioniert die Auslieferung, liefert YouTube getrennte Spuren fuer Bild
+    und Ton (DASH) - bei einem Video von 2005 sind das immer noch ein Dutzend
+    Eintraege, nur eben alle klein. Bricht die PO-Token- oder JavaScript-Kette
+    zusammen, bleiben nur die alten, fest zusammengemischten Formate uebrig,
+    allen voran die Nummer 18. Dort steht in jedem Eintrag eine Tonspur.
+
+    Das Vorhandensein reiner Videospuren ist deshalb ein brauchbares Zeichen
+    dafuer, dass die Liste vollstaendig ist und man ihr glauben darf.
+    """
+    nur_video = [
+        f for f in info.get("formats") or []
+        if f.get("vcodec") not in (None, "none") and f.get("acodec") in (None, "none")
+    ]
+    return len(nur_video) >= _MINDEST_ADAPTIVE_FORMATE
+
+
 def check_not_degraded(
     info: dict[str, Any], mindesthoehe: int = 1080, boden: int = 480
 ) -> str | None:
@@ -467,8 +495,21 @@ def check_not_degraded(
         return None
 
     if hoehe < boden:
+        angebot = angebotene_guete(info)
+        if angebot is not None and angebot > hoehe:
+            # Es gaebe Besseres - dann ist das Misstrauen berechtigt.
+            raise DegradedDownload(
+                f"nur {hoehe}p erhalten, obwohl die Quelle {angebot}p anbietet - "
+                "unterhalb des absoluten Bodens, vermutlich gestoerte Sitzung"
+            )
+        if _formatliste_glaubwuerdig(info):
+            # Das Video ist wirklich so klein. "Me at the zoo" von 2005 gibt es
+            # in hoechstens 240p; es zu verwerfen hiesse, dass sich gerade die
+            # aeltesten Videos - die am ehesten verschwinden - nicht sichern
+            # lassen. Genau die will ein Archiv aber haben.
+            return f"Quelle bietet hoechstens {hoehe}p (gewuenscht: {mindesthoehe}p)"
         raise DegradedDownload(
-            f"nur {hoehe}p erhalten - unterhalb des absoluten Bodens von {boden}p, "
+            f"nur {hoehe}p erhalten und keine glaubwuerdige Formatliste - "
             "vermutlich eingeschraenkte Formatauswahl"
         )
 

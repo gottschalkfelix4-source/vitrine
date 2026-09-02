@@ -25,7 +25,10 @@ Elasticsearch.
   Untertitel-Treffer sagt nicht "kommt vor", sondern "faellt bei 4:32" - ein
   Klick springt dorthin. Findet deutsche Komposita und alle Umlautschreibweisen.
 - **Qualitaet als Untergrenze**, nicht als Deckel: mindestens 1080p, nach oben
-  offen. Ein stiller Rueckfall auf 360p wird erkannt und verworfen.
+  offen. Bietet die Quelle weniger, wird genommen, was es gibt, und der
+  Unterschied vermerkt - auch bei einem 240p-Video von 2005. Ein stiller
+  Rueckfall auf 360p bei gestoerter Sitzung wird davon unterschieden und
+  verworfen. Siehe [Wenn die Quelle weniger hergibt](#wenn-die-quelle-weniger-hergibt).
 - **Regeln je Kanal**: nur Videos, keine Shorts (Standard), Livestreams
   optional, Archivierung automatisch oder nur auf Klick.
 - **Einzelne Videos** gezielt holen oder wieder aus dem Archiv nehmen; Kanaele
@@ -266,6 +269,33 @@ Bietet eine Quelle nichts in Mindesthoehe, wird das Beste genommen und das am
 Video vermerkt. Liefert der Download dagegen weniger, obwohl die Quelle mehr
 anbietet, gilt die Kette als gestoert und das Video wird nicht als archiviert
 verbucht.
+
+### Wenn die Quelle weniger hergibt
+
+"Mindestens 1080p" ist ein Wunsch an die Quelle, keine Bedingung fuers
+Archivieren. Was passiert, haengt davon ab, ob es wirklich nichts Besseres
+gibt:
+
+| Lage | Ergebnis |
+| --- | --- |
+| Quelle hat 4K | 4K wird geladen |
+| Quelle hat hoechstens 720p / 480p / 240p | wird archiviert, Unterschied vermerkt |
+| 720p bekommen, obwohl 1080p verfuegbar | neuer Versuch auf der naechsten Stufe |
+| Format 18 (360p, fest gemischt) | verworfen |
+| unter dem Boden UND duenne Formatliste | verworfen |
+
+Der letzte Fall ist der heikle, weil zwei voellig verschiedene Lagen dasselbe
+behaupten: "mehr gibt es nicht". Ein Video von 2005 gibt es tatsaechlich nur in
+240p. Eine gestoerte PO-Token- oder JavaScript-Kette behauptet es ebenfalls.
+
+Unterscheiden lassen sie sich an der Formatliste. Funktioniert die Auslieferung,
+liefert YouTube getrennte Spuren fuer Bild und Ton (DASH) - bei einem alten
+Video immer noch ein Dutzend Eintraege, nur eben alle klein. Bricht die Kette
+zusammen, bleiben nur die alten, fest zusammengemischten Formate uebrig, allen
+voran die Nummer 18; dort steht in jedem Eintrag eine Tonspur.
+
+Ein altes Video zu verwerfen waere besonders schmerzhaft: Gerade die aeltesten
+Videos verschwinden am ehesten, und genau die will ein Archiv haben.
 
 ### Der stille 360p-Fehler
 
