@@ -32,6 +32,9 @@ Elasticsearch.
   samt allem entfernen.
 - **Warteschlange und Speicher** als eigene Ansichten - was laeuft, was wartet,
   was fehlgeschlagen ist, wie viel wo liegt.
+- **Auf dem Telefon bedienbar** und als App ablegbar: Die Seitenleiste wird zur
+  Schublade, der Player laeuft randlos, Vorschaubilder bleiben gespeichert.
+  Siehe [Auf dem Telefon](#auf-dem-telefon).
 
 ## Schnellstart
 
@@ -315,6 +318,49 @@ ae/oe/ue/ss - "Groesse", "Größe" und "Grösse" finden dasselbe. Reines
 Der Index enthaelt nichts, was nicht auch in Datenbank oder Buendeln steht. Er
 muss weder gesichert noch migriert werden (`POST /api/search/reindex`).
 
+## Auf dem Telefon
+
+Die Oberflaeche schaltet unterhalb von 860 Pixeln auf Handbedienung um: Die
+Seitenleiste liegt dann als Schublade ueber dem Inhalt statt daneben, der
+Schriftzug weicht der Suche, "+ Kanal" wird zum "+", und der Player nimmt die
+volle Breite ohne Rand. Aussparungen und der Balken am unteren Rand werden
+ueber `env(safe-area-inset-*)` freigehalten.
+
+Zusaetzlich ist das Archiv eine Progressive Web App: Mit Manifest, Symbolen und
+einem Service Worker laesst es sich auf den Startbildschirm legen und startet
+dann ohne Browserleiste. Der Worker speichert die Oberflaeche und die
+Vorschaubilder - bei 60 Kacheln je Kanalseite spart das auf Mobilfunk spuerbar.
+Videostroeme fasst er ausdruecklich **nicht** an: Sie kommen bereichsweise und
+sind bis zu mehrere Gigabyte gross.
+
+### Dafuer braucht es HTTPS
+
+Das ist der Haken, an dem es im Heimnetz ueblicherweise scheitert. Ein Service
+Worker laeuft nur in einem *sicheren Kontext* - also ueber HTTPS oder auf
+`localhost`. Der uebliche Zugriff `http://192.168.1.50:8000` erfuellt das
+**nicht**: Dann fehlt der Menuepunkt "Zum Startbildschirm hinzufuegen", und es
+gibt keinen Bildspeicher. Die Seite funktioniert im Browser vollstaendig
+weiter, nur eben ohne eigenes Symbol.
+
+Das Archiv sagt das auch selbst: Unter *Einstellungen* steht ganz oben, ob sich
+die App ablegen laesst - und wenn nicht, warum. Ein fehlender Menuepunkt ohne
+jede Meldung kostet sonst einen Abend Suche.
+
+Drei uebliche Wege zu HTTPS im eigenen Netz:
+
+| Weg | Aufwand | Auch von unterwegs |
+| --- | --- | --- |
+| **Tailscale** mit `tailscale cert` | gering | ja |
+| **Reverse Proxy** (Nginx Proxy Manager, Caddy) mit eigener Domain | mittel | je nach Aufbau |
+| **Cloudflare Tunnel** | mittel | ja, ohne offenen Port |
+
+Ein selbst signiertes Zertifikat reicht **nicht**: Browser behandeln eine
+Verbindung, der man von Hand vertraut hat, weiterhin als unsicher.
+
+Auf dem iPhone bietet Safari die Installation nicht von sich aus an - dort geht
+es ueber *Teilen* -> *Zum Home-Bildschirm*. Chrome unter Android zeigt
+*App installieren* im Menue, manchmal erst beim zweiten Besuch.
+
 ## Warum nicht TubeArchivist
 
 TubeArchivist ist das naechstliegende Vergleichsprodukt. Drei Punkte, die hier
@@ -385,6 +431,12 @@ Fehler verdeckte. Deshalb steht hier, was tatsaechlich gelaufen ist:
   Storyboards, die nicht archiviert werden.
 - **Fremde Videos in Playlists** werden dem Kanal zugeordnet, ueber dessen
   Playlist sie gefunden wurden - fuer die Speicherstatistik je Kanal ungenau.
+- **Installieren braucht HTTPS.** Ueber `http://<ip>:8000` bleibt es eine
+  normale Webseite - siehe [Auf dem Telefon](#auf-dem-telefon). Das ist eine
+  Regel der Browser, keine Entscheidung dieses Projekts.
+- **Nichts geht offline ausser der Huelle.** Vorschaubilder und die Oberflaeche
+  liegen im Geraetespeicher, die Videos nicht. Ein Archiv, das sich aufs Telefon
+  spiegelt, waere ein anderes Projekt.
 
 ## Aufbau
 

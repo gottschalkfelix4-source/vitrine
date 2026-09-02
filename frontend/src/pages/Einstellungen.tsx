@@ -4,6 +4,7 @@ import { Fehler, Hinweis, Skelettgitter } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import type { EinstellungsFeld } from "../lib/api";
 import { api } from "../lib/api";
+import { AppInstallieren } from "../components/AppInstallieren";
 
 const HERKUNFT_TEXT: Record<string, string> = {
   datenbank: "hier geändert",
@@ -83,6 +84,10 @@ export function Einstellungenseite() {
           Änderungen wirken sofort für neue Aufträge – laufende bleiben unberührt.
         </span>
       </div>
+
+      {/* Ganz oben, weil es die einzige Einstellung ist, die nicht am Server
+          haengt, sondern am Geraet, auf dem man gerade schaut. */}
+      <AppInstallieren />
 
       {neustartNoetig.length > 0 ? (
         <Hinweis art="arbeit">

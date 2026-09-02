@@ -1723,3 +1723,211 @@
   font-style: italic;
   color: var(--text-schwach);
 }
+
+/* ==========================================================================
+   Handbedienung
+   --------------------------------------------------------------------------
+   Bis hierher ist die Oberflaeche fuer Maus und grossen Bildschirm gebaut: eine
+   feste Leiste links, eine breite Suche in der Mitte, Kacheln mit
+   Schwebe-Zustaenden. Auf einem Telefon mit 375 Pixeln belegte allein die
+   Leiste mehr als die ganze Breite, und der Inhalt lag ausserhalb des Bildes.
+
+   Die Schwelle liegt bei 860 Pixeln und muss mit SCHMAL in
+   hooks/useMedienabfrage.ts uebereinstimmen - dort haengt daran, was der
+   Menueknopf auslöst.
+   ========================================================================== */
+
+@media (max-width: 860px) {
+  /* Die Leiste steht nicht mehr in der Spalte neben dem Inhalt, sondern
+     darueber. Sie aus dem Raster zu nehmen ist der Kern: Sonst bliebe ihre
+     Spalte reserviert, auch wenn sie ausgeblendet ist. */
+  .huelle {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "kopf"
+      "inhalt";
+  }
+
+  .leiste {
+    position: fixed;
+    top: var(--kopf-hoehe);
+    left: 0;
+    bottom: 0;
+    width: min(86vw, 300px);
+    z-index: 30;
+    background: var(--grund);
+    border-right: 1px solid var(--rand);
+    transform: translateX(-100%);
+    transition: transform var(--uebergang);
+    /* Der Balken am unteren Rand aktueller Telefone ueberdeckt sonst den
+       letzten Kanal in der Liste. */
+    padding-bottom: calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .leiste[data-offen="true"] {
+    transform: translateX(0);
+  }
+
+  /* Am Schreibtisch wird die Leiste schmal, auf dem Telefon nie - eine
+     Schublade, die sich oeffnet und dann nur Symbole zeigt, waere sinnlos. */
+  .leiste[data-schmal="true"] {
+    width: min(86vw, 300px);
+    padding: 12px 12px 32px;
+  }
+
+  .leiste-schatten {
+    position: fixed;
+    inset: var(--kopf-hoehe) 0 0 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 25;
+    animation: einblenden var(--uebergang);
+  }
+
+  @keyframes einblenden {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* ---- Kopfleiste: Platz ist knapp, die Suche bekommt den Rest */
+  .kopf {
+    gap: 8px;
+    padding: 0 10px;
+    padding-left: calc(10px + env(safe-area-inset-left));
+    padding-right: calc(10px + env(safe-area-inset-right));
+  }
+
+  /* Der Schriftzug weicht - das Zeichen allein traegt die Marke, und die
+     Suche ist das, was man auf dem Telefon tatsaechlich braucht. */
+  .marke span:last-child {
+    display: none;
+  }
+
+  .suche {
+    margin: 0;
+    min-width: 0;
+    padding-left: 12px;
+  }
+
+  /* "+ Kanal" wird zum "+". Der Text passt sonst nicht neben die Suche. */
+  .kopf-rechts .knopf {
+    font-size: 0;
+    padding: 0;
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+  }
+
+  .kopf-rechts .knopf::before {
+    content: "+";
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .inhalt {
+    padding: 14px 12px calc(24px + env(safe-area-inset-bottom));
+    padding-left: calc(12px + env(safe-area-inset-left));
+    padding-right: calc(12px + env(safe-area-inset-right));
+  }
+
+  /* ---- Kacheln: eine Spalte, aber nicht bildschirmfuellend hoch */
+  .gitter {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .seiten-kopf h1 {
+    font-size: 21px;
+    /* Lange Kanalnamen ohne Leerzeichen sprengen sonst die Zeile. */
+    overflow-wrap: anywhere;
+  }
+
+  /* ---- Fingerkuppen brauchen Flaeche. Unter etwa 40 Pixeln trifft man
+     zuverlaessig daneben; das gilt fuer alles, was man antippt. */
+  .knopf,
+  .kachel-laden,
+  .tab {
+    min-height: 38px;
+  }
+
+  /* Die Reiterzeile (Videos / Shorts / Livestreams / Playlists) rollt schon
+     von sich aus seitlich. Fehlt nur: Sie darf nicht umbrechen, und der
+     Schwung soll dem Finger folgen. */
+  .tabs {
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab {
+    white-space: nowrap;
+  }
+
+  /* ---- Wiedergabe: Der Player nimmt die volle Breite, ohne Rundung an den
+     Raendern - ein abgerundetes Video mit Rand daneben verschenkt auf einem
+     Telefon spuerbar Bildflaeche. */
+  .buehne {
+    border-radius: 0;
+    margin: 0 -12px;
+    width: calc(100% + 24px);
+    max-height: 56vh;
+  }
+
+  .watch h1 {
+    font-size: 18px;
+    line-height: 1.35;
+  }
+
+  .watch-zeile {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .aktionen {
+    flex-wrap: wrap;
+  }
+
+  /* ---- Tabellen (Speicher, Einstellungen, Warteschlange) duerfen seitlich
+     rollen, statt die Seite breiter zu machen. Ohne das scrollt der ganze
+     Bildschirm waagerecht, und man verliert die Navigation aus dem Blick. */
+  .tabelle {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  .karten {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Sehr schmale Geraete: Der Schriftzug ist schon weg, jetzt geht es um die
+   letzten Pixel neben der Suche. */
+@media (max-width: 380px) {
+  .marke-zeichen {
+    width: 24px;
+    height: 24px;
+  }
+
+  .kopf {
+    gap: 6px;
+  }
+}
+
+/* Ohne Browserleiste laeuft die App bis an die Kanten des Bildschirms. Der
+   Kopf muss dann den Bereich unter der Statusleiste selbst freihalten - sonst
+   liegt der Menueknopf unter der Uhrzeit. */
+@media (display-mode: standalone) {
+  .kopf {
+    height: calc(var(--kopf-hoehe) + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .huelle {
+    grid-template-rows: calc(var(--kopf-hoehe) + env(safe-area-inset-top)) 1fr;
+  }
+
+  .leiste,
+  .leiste-schatten {
+    top: calc(var(--kopf-hoehe) + env(safe-area-inset-top));
+  }
+}

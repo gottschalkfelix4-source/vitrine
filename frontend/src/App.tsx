@@ -5,6 +5,7 @@ import { Fortschrittsleiste } from "./components/Fortschritt";
 import { api } from "./lib/api";
 import { thumbUrl } from "./lib/api";
 import { useApi } from "./hooks/useApi";
+import { SCHMAL, useMedienabfrage } from "./hooks/useMedienabfrage";
 import { KanalAnlegenDialog } from "./pages/KanalAnlegen";
 import { Kanalseite } from "./pages/Kanal";
 import { Einstellungenseite } from "./pages/Einstellungen";
@@ -72,7 +73,16 @@ function Kopfleiste({
   );
 }
 
-function Seitenleiste({ schmal }: { schmal: boolean }) {
+function Seitenleiste({
+  schmal,
+  schubladeOffen,
+  aufSchliessen,
+}: {
+  schmal: boolean;
+  /** Nur auf schmalen Geraeten: Liegt die Leiste gerade ueber dem Inhalt? */
+  schubladeOffen: boolean;
+  aufSchliessen: () => void;
+}) {
   const ort = useLocation();
   const { daten: kanaele } = useApi(() => api.kanaele(), [], LEISTE_INTERVALL);
   const { daten: auftraege } = useApi(() => api.auftraege(), [], LEISTE_INTERVALL);
@@ -87,12 +97,13 @@ function Seitenleiste({ schmal }: { schmal: boolean }) {
   ];
 
   return (
-    <nav className="leiste" data-schmal={schmal}>
+    <nav className="leiste" data-schmal={schmal} data-offen={schubladeOffen}>
       <div className="leiste-gruppe">
         {punkte.map((p) => (
           <Link
             key={p.pfad}
             to={p.pfad}
+            onClick={aufSchliessen}
             className="nav-punkt"
             data-aktiv={p.pfad === "/" ? ort.pathname === "/" : ort.pathname.startsWith(p.pfad)}
           >
@@ -110,6 +121,7 @@ function Seitenleiste({ schmal }: { schmal: boolean }) {
             <Link
               key={k.id}
               to={`/kanal/${k.id}`}
+              onClick={aufSchliessen}
               className="nav-punkt kanal-punkt"
               data-aktiv={ort.pathname === `/kanal/${k.id}`}
               title={`${k.videos_archiviert} von ${k.videos_gesamt} archiviert`}
@@ -135,16 +147,51 @@ export default function App() {
   const ort = useLocation();
   const aufWiedergabe = ort.pathname.startsWith("/video/");
   const [vonHand, setVonHand] = useState<boolean | null>(null);
-  const schmal = vonHand ?? aufWiedergabe;
   const [dialogOffen, setDialogOffen] = useState(false);
 
+  // Auf dem Telefon hat derselbe Knopf eine andere Bedeutung: Dort gibt es
+  // keine schmale Leiste neben dem Inhalt - sie waere breiter als das Geraet -,
+  // sondern eine Schublade, die darueberliegt. Standard ist zu.
+  const handbetrieb = useMedienabfrage(SCHMAL);
+  const [schubladeOffen, setSchubladeOffen] = useState(false);
+  const schmal = handbetrieb ? false : (vonHand ?? aufWiedergabe);
+
+  // Beim Seitenwechsel schliessen. Sonst bliebe die Schublade nach einem
+  // Zurueck-Wisch offen ueber der Seite liegen, auf die man wollte.
+  useEffect(() => setSchubladeOffen(false), [ort.pathname]);
+
+  // Solange die Schublade offen ist, darf der Inhalt darunter nicht mitscrollen.
+  useEffect(() => {
+    if (!schubladeOffen) return;
+    const vorher = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = vorher;
+    };
+  }, [schubladeOffen]);
+
   return (
-    <div className="huelle">
+    <div className="huelle" data-handbetrieb={handbetrieb || undefined}>
       <Kopfleiste
-        aufLeiste={() => setVonHand(!schmal)}
+        aufLeiste={() =>
+          handbetrieb ? setSchubladeOffen((o) => !o) : setVonHand(!schmal)
+        }
         aufKanalAnlegen={() => setDialogOffen(true)}
       />
-      <Seitenleiste schmal={schmal} />
+      {/* Der Schatten liegt zwischen Inhalt und Schublade: Ein Tipp daneben
+          schliesst sie, wie man es von jeder App kennt. */}
+      {handbetrieb && schubladeOffen ? (
+        <div
+          className="leiste-schatten"
+          onClick={() => setSchubladeOffen(false)}
+          aria-hidden="true"
+        />
+      ) : null}
+      <Seitenleiste
+        schmal={schmal}
+        schubladeOffen={handbetrieb && schubladeOffen}
+        aufSchliessen={() => setSchubladeOffen(false)}
+      />
       <main className="inhalt">
         <Fortschrittsleiste />
         <Routes>
