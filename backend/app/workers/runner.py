@@ -51,7 +51,16 @@ def _gruppen() -> list[Gruppe]:
     return [
         Gruppe(
             "netz",
-            [JobType.CHANNEL_SYNC, JobType.PLAYLIST_SYNC, JobType.VIDEO_ARCHIVE],
+            [
+                JobType.CHANNEL_SYNC,
+                JobType.PLAYLIST_SYNC,
+                JobType.VIDEO_ARCHIVE,
+                # Ein Hochstufen ist ein vollwertiger Download und muss sich
+                # dieselbe schmale Spur teilen: YouTube drosselt pro
+                # IP-Adresse, und ein eigener Strang dafuer waere nichts
+                # anderes als eine Umgehung der eigenen Begrenzung.
+                JobType.VIDEO_UPGRADE,
+            ],
             settings.download_concurrency,
         ),
         # Immer genau einer: Mehr bringt nichts, weil ffmpeg ohnehin alle Kerne
@@ -84,6 +93,18 @@ class Arbeiterwerk:
         fehlend = [t for t in JobType if t not in jobs.HANDLERS]
         if fehlend:
             log.warning("Kein Bearbeiter fuer: %s", ", ".join(fehlend))
+
+        # Ein Bearbeiter allein genuegt nicht - der Auftragstyp muss auch einer
+        # Gruppe zugeordnet sein, sonst holt ihn niemand ab. Genau das ist beim
+        # Hochstufen passiert: Der Bearbeiter war da, die Zuordnung fehlte, und
+        # der Auftrag stand still auf "wartet", ohne Fehler und ohne Hinweis.
+        zugeordnet = {t for g in _gruppen() for t in g.typen}
+        heimatlos = [t for t in JobType if t not in zugeordnet]
+        if heimatlos:
+            log.error(
+                "Keine Arbeitergruppe zustaendig fuer: %s - solche Auftraege bleiben "
+                "unbearbeitet in der Warteschlange stehen.", ", ".join(heimatlos),
+            )
         self.anpassen()
 
     def anpassen(self) -> dict[str, int]:

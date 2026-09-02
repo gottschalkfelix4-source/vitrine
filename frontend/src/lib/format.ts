@@ -138,6 +138,7 @@ export const AUFTRAG_TEXT: Record<string, string> = {
   video_archive: "Archivierung",
   video_recode: "Verkleinerung",
   video_prepare: "Vorbereitung",
+  video_upgrade: "Qualität anheben",
 };
 
 export function zustandText(status: string): string {

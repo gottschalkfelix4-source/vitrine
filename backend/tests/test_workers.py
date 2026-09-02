@@ -855,3 +855,149 @@ def test_fortschritt_wird_gedrosselt(umgebung, monkeypatch):
     assert len(schreibvorgaenge) == 1, f"{len(schreibvorgaenge)} Schreibvorgaenge statt einem"
     # Der Wert im Speicher bleibt trotzdem aktuell.
     assert job.progress == pytest.approx(49 / 50)
+
+
+# ------------------------------------------------ Qualitaet nachtraeglich anheben
+#
+# Die wichtigste Zusage dieses Vorgangs ist nicht, dass er bessere Qualitaet
+# bringt - sondern dass er im Fehlerfall nichts kostet. Wer 500 archivierte
+# Videos hochstufen laesst und dabei welche verliert, hat ein schlechteres
+# Archiv als vorher.
+
+
+@pytest.fixture
+def archiviertes_video(umgebung):
+    from app.config import settings
+    from app.models import Video, VideoStatus
+
+    db, _tmp = umgebung
+    buendel = settings.bundle_dir / "altbestand.zip"
+    buendel.parent.mkdir(parents=True, exist_ok=True)
+    buendel.write_bytes(b"altes buendel")
+    v = db.get(Video, "vid1")
+    v.status = VideoStatus.ARCHIVED
+    v.width, v.height = 1920, 1080
+    v.bundle_file = str(buendel)
+    v.bundle_bytes = buendel.stat().st_size
+    db.commit()
+    return db, v, buendel
+
+
+def test_kein_download_wenn_die_quelle_nichts_besseres_hat(archiviertes_video, monkeypatch):
+    """Der Schritt, der die ganze Sache erst brauchbar macht: erst nachsehen,
+    dann laden. Ohne ihn laedt man bei einem Kanal, der in 1080p produziert,
+    hunderte Videos erneut, um am Ende dieselbe Qualitaet zu haben."""
+    from app.models import Job, JobStatus, JobType
+    from app.services import jobs, ytdlp
+    from app.workers import archive
+
+    db, _v, _b = archiviertes_video
+    job = jobs.enqueue(db, JobType.VIDEO_UPGRADE, "vid1", payload={"ziel": 2160})
+
+    geladen: list[str] = []
+    monkeypatch.setattr(archive.ytdlp, "fetch_video_info", lambda vid: {
+        "formats": [{"vcodec": "vp09", "width": 1920, "height": 1080}]
+    })
+    monkeypatch.setattr(archive.ytdlp, "download_video",
+                        lambda *a, **k: geladen.append("x") or ytdlp.DownloadResult(path=None, info={}))
+
+    archive.hochstufen(db, job)
+
+    assert geladen == [], "es wurde geladen, obwohl die Quelle nichts Besseres hat"
+    frisch = db.get(Job, job.id)
+    assert frisch.status == JobStatus.DONE
+    assert "1080p" in frisch.message
+
+
+def test_altes_buendel_ueberlebt_einen_fehlschlag(archiviertes_video, monkeypatch):
+    """Die Zusage: Geht beim Hochstufen etwas schief, hat man weiterhin die
+    bisherige Fassung - abspielbar und unveraendert."""
+    from app.models import JobType, Video, VideoStatus
+    from app.services import jobs
+    from app.workers import archive
+
+    db, _video, buendel = archiviertes_video
+    job = jobs.enqueue(db, JobType.VIDEO_UPGRADE, "vid1", payload={"ziel": 2160})
+
+    monkeypatch.setattr(archive.ytdlp, "fetch_video_info", lambda vid: {
+        "formats": [{"vcodec": "vp09", "width": 3840, "height": 2160}]
+    })
+
+    def download_scheitert(*a, **k):
+        raise RuntimeError("Netz weg")
+
+    monkeypatch.setattr(archive.ytdlp, "download_video", download_scheitert)
+    with pytest.raises(RuntimeError):
+        archive.hochstufen(db, job)
+
+    frisch = db.get(Video, "vid1")
+    assert frisch.status == VideoStatus.ARCHIVED, "das Video gilt nicht mehr als archiviert"
+    assert frisch.bundle_file == str(buendel)
+    assert buendel.read_bytes() == b"altes buendel", "das alte Buendel wurde angetastet"
+    assert (frisch.width, frisch.height) == (1920, 1080)
+
+
+def test_kein_austausch_ohne_gewinn(archiviertes_video, monkeypatch):
+    """Kommt trotz Anforderung dieselbe Qualitaet an, wird das Ergebnis
+    verworfen statt eingesetzt - sonst taeuschte der Vorgang einen Fortschritt
+    vor und schriebe dabei ein frisches Buendel ueber ein gleichwertiges."""
+    from app.config import settings
+    from app.models import Job, JobStatus, JobType, Video
+    from app.services import jobs, ytdlp
+    from app.workers import archive
+
+    db, _video, buendel = archiviertes_video
+    job = jobs.enqueue(db, JobType.VIDEO_UPGRADE, "vid1", payload={"ziel": 2160})
+
+    monkeypatch.setattr(archive.ytdlp, "fetch_video_info", lambda vid: {
+        "formats": [{"vcodec": "vp09", "width": 3840, "height": 2160}]
+    })
+
+    def download(video_id, ordner, **kw):
+        ordner.mkdir(parents=True, exist_ok=True)
+        datei = ordner / f"{video_id}.mkv"
+        datei.write_bytes(b"x" * 100)
+        return ytdlp.DownloadResult(path=datei, info={"title": "V"})
+
+    monkeypatch.setattr(archive.ytdlp, "download_video", download)
+    # Es kam wieder nur 1080p an.
+    monkeypatch.setattr(archive.media, "probe", lambda p: archive.media.MediaInfo(
+        duration_s=10.0, width=1920, height=1080, fps=30.0,
+        video_codec="vp9", audio_codec="opus", bitrate=None, size_bytes=100,
+    ))
+
+    archive.hochstufen(db, job)
+
+    assert db.get(Job, job.id).status == JobStatus.DONE
+    assert "kein Gewinn" in db.get(Job, job.id).message
+    assert buendel.read_bytes() == b"altes buendel"
+    assert (db.get(Video, "vid1").width, db.get(Video, "vid1").height) == (1920, 1080)
+    assert settings.tmp_dir.exists()
+
+
+def test_jeder_auftragstyp_hat_eine_zustaendige_gruppe():
+    """Regression: Beim Hochstufen gab es einen Bearbeiter, aber keine
+    Zuordnung zu einer Arbeitergruppe. Der Auftrag stand daraufhin still auf
+    "wartet" - kein Fehler, keine Meldung, nur nichts.
+
+    Die vorhandene Startpruefung sah das nicht: Sie prueft, ob es zu jedem Typ
+    einen Bearbeiter gibt, nicht ob ihn jemand abholt."""
+    from app.models import JobType
+    from app.workers import archive, prepare, sync  # noqa: F401  - Bearbeiter registrieren
+    from app.workers.runner import _gruppen
+
+    zugeordnet = {t for g in _gruppen() for t in g.typen}
+    heimatlos = [t for t in JobType if t not in zugeordnet]
+    assert heimatlos == [], f"Niemand holt diese Auftraege ab: {heimatlos}"
+
+
+def test_hochstufen_teilt_sich_die_download_spur():
+    """Ein Hochstufen ist ein vollwertiger Download. Ein eigener Strang dafuer
+    waere eine Umgehung der eigenen Begrenzung - YouTube drosselt pro
+    IP-Adresse, nicht pro Auftragsart."""
+    from app.models import JobType
+    from app.workers.runner import _gruppen
+
+    netz = next(g for g in _gruppen() if g.name == "netz")
+    assert JobType.VIDEO_UPGRADE in netz.typen
+    assert JobType.VIDEO_ARCHIVE in netz.typen

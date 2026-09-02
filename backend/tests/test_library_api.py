@@ -776,3 +776,77 @@ def test_ohne_archivierung_bleibt_die_aufloesung_leer(umgebung):
     assert k["hoehe"] is None
     assert k["breite"] is None
     assert k["fps"] is None
+
+
+# ------------------------------------------- Qualitaet nachtraeglich anheben
+
+
+@pytest.fixture
+def mit_aufloesungen(umgebung):
+    """v0 ist archiviert in 1080p, dazu ein hochkantiges und ein 4K-Video."""
+    client, db = umgebung
+    db.get(Video, "v0").width, db.get(Video, "v0").height = 1920, 1080
+    db.add(Video(id="hochkant000", channel_id="UCtest", title="Senkrecht",
+                 status=VideoStatus.ARCHIVED, width=1080, height=1920,
+                 bundle_bytes=200_000_000))
+    db.add(Video(id="schonvierk0", channel_id="UCtest", title="Schon 4K",
+                 status=VideoStatus.ARCHIVED, width=3840, height=2160,
+                 bundle_bytes=800_000_000))
+    db.commit()
+    return client, db
+
+
+def test_vorschau_zaehlt_nur_was_darunter_liegt(mit_aufloesungen):
+    client, _ = mit_aufloesungen
+    v = client.get("/api/upgrade/vorschau?ziel=2160").json()
+    # v0 und das hochkantige liegen bei 1080, das 4K-Video nicht.
+    assert v["videos"] == 2
+    assert v["nach_stufe"] == {"1080": 2}
+
+
+def test_vorschau_misst_die_kurze_seite(mit_aufloesungen):
+    """Ein hochkantiges 1080p-Video ist 1080x1920. Nach der Hoehe gemessen
+    laege es ueber 1440 und fiele faelschlich heraus."""
+    client, _ = mit_aufloesungen
+    v = client.get("/api/upgrade/vorschau?ziel=1440").json()
+    assert v["videos"] == 2, v["nach_stufe"]
+
+
+def test_vorschau_schaetzt_den_zusatzbedarf(mit_aufloesungen):
+    client, _ = mit_aufloesungen
+    v = client.get("/api/upgrade/vorschau?ziel=2160").json()
+    # 1080 -> 2160 ist die vierfache Pixelzahl.
+    assert v["geschaetzt_bytes"] == pytest.approx(v["jetzt_bytes"] * 4, rel=0.01)
+    assert v["zusatz_bytes"] == v["geschaetzt_bytes"] - v["jetzt_bytes"]
+
+
+def test_vorschau_nennt_die_untergrenze_der_dauer(mit_aufloesungen):
+    """Bei vielen Videos ist nicht die Leitung die Grenze, sondern YouTubes
+    Drosselung von rund 300 Videos je Stunde."""
+    client, _ = mit_aufloesungen
+    assert client.get("/api/upgrade/vorschau?ziel=2160").json()["stunden_mindestens"] >= 0
+
+
+def test_einreihen_erzeugt_je_video_einen_auftrag(mit_aufloesungen):
+    client, db = mit_aufloesungen
+    antwort = client.post("/api/upgrade?ziel=2160")
+    assert antwort.status_code == 202
+    assert antwort.json()["eingereiht"] == 2
+
+    auftraege = list(db.scalars(select(Job).where(Job.type == JobType.VIDEO_UPGRADE)))
+    assert {j.target_id for j in auftraege} == {"v0", "hochkant000"}
+    # Ganz hinten in der Warteschlange: Ein Hochstufen darf nie vor einem
+    # Video stehen, das ueberhaupt noch nicht im Archiv liegt.
+    assert all(j.priority >= 900 for j in auftraege)
+
+
+def test_unsinnige_zielstufe_wird_abgelehnt(mit_aufloesungen):
+    client, _ = mit_aufloesungen
+    assert client.post("/api/upgrade?ziel=1234").status_code == 400
+
+
+def test_einzelnes_video_hochstufen(mit_aufloesungen):
+    client, _ = mit_aufloesungen
+    assert client.post("/api/videos/v0/upgrade?ziel=2160").status_code == 202
+    assert client.post("/api/videos/v1/upgrade?ziel=2160").status_code == 409  # nicht archiviert
+    assert client.post("/api/videos/gibtsnicht/upgrade").status_code == 404

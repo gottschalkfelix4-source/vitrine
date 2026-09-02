@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 
+import { Hochstufen } from "../components/Hochstufen";
 import { Fehler, Skelettgitter } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
@@ -185,6 +186,10 @@ export function Speicherseite() {
           </div>
         </section>
       ) : null}
+
+      {/* ---- Nachtraeglich hoeher: gehoert hierher, weil man genau hier
+              merkt, dass Platz da ist. */}
+      <Hochstufen />
 
       {/* ---- Aufteilung nach Kanal */}
       {daten.je_kanal.some((x) => x.bytes > 0) ? (

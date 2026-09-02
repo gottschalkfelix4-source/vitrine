@@ -73,6 +73,10 @@ class JobType(StrEnum):
     #: im Hintergrund verkleinert.
     VIDEO_RECODE = "video_recode"
     VIDEO_PREPARE = "video_prepare"  # Heisskopie herstellen
+    #: Ein bereits archiviertes Video in besserer Qualitaet neu holen. Kein
+    #: Veredeln einer vorhandenen Datei - Qualitaet laesst sich nicht
+    #: nachtraeglich hinzufuegen -, sondern ein vollstaendiger Neu-Download.
+    VIDEO_UPGRADE = "video_upgrade"
 
 
 class JobStatus(StrEnum):

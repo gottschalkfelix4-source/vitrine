@@ -1943,3 +1943,33 @@
     top: calc(var(--kopf-hoehe) + env(safe-area-inset-top));
   }
 }
+
+/* ---- Qualitaet nachtraeglich anheben */
+.hs-kopf {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.hs-kopf select {
+  margin-left: 6px;
+}
+
+.hs-zahlen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--spalt);
+  margin-bottom: 12px;
+}
+
+.hs-nachfrage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-gedaempft);
+}

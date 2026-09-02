@@ -1048,6 +1048,115 @@ def einstellungen_schreiben(
     return ergebnis
 
 
+# ------------------------------------------------------- Qualitaet anheben
+
+
+#: Stufen, die zur Auswahl stehen. Mehr waere Ziererei - dazwischen liegt
+#: nichts, was YouTube regelmaessig anbietet.
+UPGRADE_STUFEN = (720, 1080, 1440, 2160, 4320)
+
+
+def _upgrade_kandidaten(db: Session, ziel: int, kanal: str | None):
+    """Archivierte Videos, die unterhalb der Zielstufe liegen.
+
+    Gemessen an der kurzen Seite, wie ueberall - ein hochkantiges 1080p-Video
+    ist 1080x1920 und darf nicht als "1920p" durchgehen.
+    """
+    anfrage = select(Video).where(
+        Video.status == VideoStatus.ARCHIVED,
+        Video.width.is_not(None),
+        Video.height.is_not(None),
+    )
+    if kanal:
+        anfrage = anfrage.where(Video.channel_id == kanal)
+    return [
+        v for v in db.scalars(anfrage)
+        if (ytdlp.guete({"width": v.width, "height": v.height}) or 0) < ziel
+    ]
+
+
+@router.get("/upgrade/vorschau")
+def upgrade_vorschau(
+    ziel: int = Query(2160, description="Zielstufe, gemessen an der kurzen Seite"),
+    kanal: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Was ein Hochstufen kosten wuerde - vor dem Klick, nicht danach.
+
+    Die Schaetzung ist bewusst konservativ und wird als solche ausgewiesen: Sie
+    rechnet mit dem Verhaeltnis der Pixelzahlen, also dem Quadrat des
+    Stufenverhaeltnisses. In der Praxis liegt der Faktor etwas hoeher - YouTube
+    gibt 4K rund das Vier- bis Fuenffache von 1080p mit, nicht genau das
+    Vierfache. Wer knapp plant, plant damit zu knapp; das steht auch so in der
+    Oberflaeche.
+    """
+    kandidaten = _upgrade_kandidaten(db, ziel, kanal)
+    jetzt_bytes = sum(v.bundle_bytes or 0 for v in kandidaten)
+    nachher_bytes = 0
+    nach_stufe: dict[int, int] = {}
+    for v in kandidaten:
+        vorher = ytdlp.guete({"width": v.width, "height": v.height}) or 0
+        nach_stufe[vorher] = nach_stufe.get(vorher, 0) + 1
+        if vorher > 0 and v.bundle_bytes:
+            nachher_bytes += int(v.bundle_bytes * (ziel / vorher) ** 2)
+
+    frei = cache.free_space()
+    return {
+        "ziel": ziel,
+        "videos": len(kandidaten),
+        "jetzt_bytes": jetzt_bytes,
+        "geschaetzt_bytes": nachher_bytes,
+        "zusatz_bytes": max(0, nachher_bytes - jetzt_bytes),
+        "freier_platz": frei,
+        "passt": (nachher_bytes - jetzt_bytes) < frei if frei else None,
+        #: Wie viele Videos je bisheriger Stufe betroffen sind.
+        "nach_stufe": {str(k): v for k, v in sorted(nach_stufe.items())},
+        #: Wie lange das Herunterladen mindestens dauert. YouTube drosselt bei
+        #: rund 300 Videos je Stunde - bei vielen Videos ist das die Grenze,
+        #: nicht die Bandbreite.
+        "stunden_mindestens": round(len(kandidaten) / 300, 1),
+    }
+
+
+@router.post("/upgrade", status_code=status.HTTP_202_ACCEPTED)
+def upgrade_einreihen(
+    ziel: int = Query(2160),
+    kanal: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Reiht alle Videos unterhalb der Zielstufe zum Hochstufen ein.
+
+    Eingereiht wird ohne vorherige Pruefung beim Anbieter - ob es die bessere
+    Fassung wirklich gibt, stellt der Auftrag selbst fest, mit einem
+    Metadatenabruf statt eines Downloads. Das hier vorab fuer tausende Videos
+    zu tun, wuerde die Anfrage minutenlang offen halten.
+    """
+    if ziel not in UPGRADE_STUFEN:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Zielstufe muss eine von {', '.join(str(s) for s in UPGRADE_STUFEN)} sein",
+        )
+    kandidaten = _upgrade_kandidaten(db, ziel, kanal)
+    for v in kandidaten:
+        jobs.enqueue(db, JobType.VIDEO_UPGRADE, v.id, priority=jobs.PRIO_RECODE,
+                     payload={"ziel": ziel})
+    return {"eingereiht": len(kandidaten), "ziel": ziel}
+
+
+@router.post("/videos/{video_id}/upgrade", status_code=status.HTTP_202_ACCEPTED)
+def video_hochstufen(
+    video_id: str, ziel: int = Query(2160), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    v = db.get(Video, video_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video unbekannt")
+    if v.status != VideoStatus.ARCHIVED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Video ist nicht archiviert")
+    job = jobs.enqueue(db, JobType.VIDEO_UPGRADE, video_id, priority=jobs.PRIO_RECODE,
+                       payload={"ziel": ziel})
+    return {"job_id": job.id, "status": job.status}
+
+
 @router.post("/settings/reset")
 def einstellungen_zuruecksetzen(
     namen: list[str] | None = None, db: Session = Depends(get_db)

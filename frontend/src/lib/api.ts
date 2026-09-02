@@ -109,6 +109,19 @@ export interface LaufenderAuftrag {
   meldung: string | null;
 }
 
+export interface UpgradeVorschau {
+  ziel: number;
+  videos: number;
+  jetzt_bytes: number;
+  geschaetzt_bytes: number;
+  zusatz_bytes: number;
+  freier_platz: number;
+  passt: boolean | null;
+  /** Wie viele Videos je bisheriger Stufe betroffen sind. */
+  nach_stufe: Record<string, number>;
+  stunden_mindestens: number;
+}
+
 export interface EinstellungsFeld {
   name: string;
   gruppe: string;
@@ -302,6 +315,15 @@ export const api = {
   auftraege: (status?: string) => hole<Auftrag[]>(`/api/jobs${frage({ status })}`),
   aktiveAuftraege: () =>
     hole<{ laufend: LaufenderAuftrag[]; wartend: number }>("/api/jobs/aktiv"),
+  upgradeVorschau: (ziel: number, kanal?: string) =>
+    hole<UpgradeVorschau>(
+      `/api/upgrade/vorschau?ziel=${ziel}${kanal ? `&kanal=${encodeURIComponent(kanal)}` : ""}`,
+    ),
+  upgradeEinreihen: (ziel: number, kanal?: string) =>
+    hole<{ eingereiht: number; ziel: number }>(
+      `/api/upgrade?ziel=${ziel}${kanal ? `&kanal=${encodeURIComponent(kanal)}` : ""}`,
+      { method: "POST" },
+    ),
   auftragAbbrechen: (id: number) => hole<void>(`/api/jobs/${id}/cancel`, { method: "POST" }),
   auftragWiederholen: (id: number) => hole<void>(`/api/jobs/${id}/retry`, { method: "POST" }),
 

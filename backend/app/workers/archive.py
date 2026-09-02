@@ -281,6 +281,112 @@ def _laden_mit_rueckfall(
     )
 
 
+def _ablegen(
+    db: Session,
+    job: Job,
+    video: Video,
+    ergebnis: ytdlp.DownloadResult,
+    *,
+    arbeitsordner: Path,
+    info_medien: media.Medieninfo,
+    quelle_bytes: int,
+    qualitaetshinweis: str | None,
+    zustaende_pflegen: bool = True,
+) -> media.Medieninfo:
+    """Packt um, buendelt und zieht die Datenbank nach. Liefert die Medieninfo
+    der abgelegten Datei - nach dem Umpacken kann sie sich geaendert haben.
+
+    Wird von zwei Wegen benutzt: vom erstmaligen Archivieren und vom
+    nachtraeglichen Hochstufen. ``zustaende_pflegen`` unterscheidet sie: Beim
+    Hochstufen liegt bereits ein spielbares Buendel vor, und der Zustand des
+    Videos bleibt die ganze Zeit "archiviert". Wuerde er hier auf "wird
+    umgepackt" gesetzt, verschwaende das Video fuer die Dauer des Vorgangs aus
+    der Oberflaeche, obwohl die alte Fassung durchgehend abspielbar ist.
+    """
+    video_id = video.id
+
+    # ---- Umpacken in einen browsertauglichen Behaelter (60 bis 80 %)
+    plan = media.plan_container(info_medien)
+    medien_datei = ergebnis.path
+    if ergebnis.path.suffix.lower() != plan.suffix:
+        if zustaende_pflegen:
+            _status(db, video, VideoStatus.REMUXING, plan.grund)
+        jobs.fortschritt(db, job, 0.62, f"Umpacken: {plan.grund}")
+        # Eigenes Unterverzeichnis, damit der Dateiname sauber bleibt: Er
+        # landet unveraendert als Medienname im Buendel, und dort will
+        # niemand ein "demo1.zwischenschritt.mp4" wiederfinden.
+        fertig_ordner = arbeitsordner / "fertig"
+        fertig_ordner.mkdir(parents=True, exist_ok=True)
+        umgepackt = fertig_ordner / f"{video_id}{plan.suffix}"
+        media.run_ffmpeg(
+            media.build_remux_cmd(ergebnis.path, umgepackt, plan),
+            dauer_s=info_medien.duration_s,
+            fortschritt=lambda a: jobs.fortschritt(db, job, 0.62 + a * 0.18),
+            abbruch=abbruch.laeuft_herunter,
+        )
+        medien_datei = umgepackt
+        info_medien = media.probe(medien_datei)
+
+    # ---- Buendeln (80 bis 100 %)
+    if zustaende_pflegen:
+        _status(db, video, VideoStatus.BUNDLING)
+    jobs.fortschritt(db, job, 0.82, "Buendel wird geschrieben")
+
+    ziel = bundle.bundle_path_for(settings.bundle_dir, video.channel_id, video_id)
+    manifest = bundle.BundleManifest(
+        schema_version=bundle.SCHEMA_VERSION,
+        video_id=video_id,
+        channel_id=video.channel_id,
+        title=ergebnis.info.get("title") or video.title,
+        media_name="",
+        media_bytes=0,
+        mime_type="",
+        source_bytes=quelle_bytes,
+        recoded=False,
+        video_codec=info_medien.video_codec,
+        audio_codec=info_medien.audio_codec,
+        width=info_medien.width,
+        height=info_medien.height,
+        fps=info_medien.fps,
+        duration_s=info_medien.duration_s,
+        created_at=utcnow().isoformat(),
+    )
+    # Schreibt nach <name>.part und benennt erst am Ende um. Deshalb bleibt die
+    # bisherige Fassung bis zur letzten Sekunde lesbar - beim Hochstufen ist
+    # genau das die Zusage: Geht etwas schief, hat man weiterhin das alte Video.
+    bundle.write_bundle(
+        ziel,
+        manifest=manifest,
+        media_file=medien_datei,
+        info_json=ergebnis.info,
+        thumbnail=ergebnis.thumbnail,
+        subtitles=ergebnis.subtitles,
+    )
+
+    # ---- Datenbank nachziehen
+    _metadaten_uebernehmen(db, video, ergebnis.info)
+    _untertitel_uebernehmen(db, video, manifest.subtitles)
+    video.thumb_file = _thumbnail_ablegen(video_id, ergebnis.thumbnail)
+    video.bundle_file = str(ziel)
+    video.bundle_bytes = ziel.stat().st_size
+    video.source_bytes = quelle_bytes
+    video.media_name = manifest.media_name
+    video.video_codec = info_medien.video_codec
+    video.audio_codec = info_medien.audio_codec
+    video.width = info_medien.width
+    video.height = info_medien.height
+    video.fps = info_medien.fps
+    video.recoded = False
+    video.archived_at = utcnow()
+    video.retry_count = 0
+    # Ein Hinweis wie "Quelle bietet hoechstens 720p" bleibt sichtbar -
+    # sonst wundert man sich spaeter, warum ein Video nicht in 1080p da ist.
+    _status(db, video, VideoStatus.ARCHIVED, qualitaetshinweis)
+
+    _in_suche_aufnehmen(db, video, ergebnis.subtitles)
+    return info_medien
+
+
 @jobs.register(JobType.VIDEO_ARCHIVE)
 def archivieren(db: Session, job: Job) -> None:
     video_id = job.target_id
@@ -332,80 +438,14 @@ def archivieren(db: Session, job: Job) -> None:
                 "Shorts sind fuer diesen Kanal abgeschaltet"
             )
 
-        # ---- 3. In einen browsertauglichen Behaelter umpacken (60 bis 80 %)
-        plan = media.plan_container(info_medien)
-        medien_datei = ergebnis.path
-        if ergebnis.path.suffix.lower() != plan.suffix:
-            _status(db, video, VideoStatus.REMUXING, plan.grund)
-            jobs.fortschritt(db, job, 0.62, f"Umpacken: {plan.grund}")
-            # Eigenes Unterverzeichnis, damit der Dateiname sauber bleibt: Er
-            # landet unveraendert als Medienname im Buendel, und dort will
-            # niemand ein "demo1.zwischenschritt.mp4" wiederfinden.
-            fertig_ordner = arbeitsordner / "fertig"
-            fertig_ordner.mkdir(parents=True, exist_ok=True)
-            umgepackt = fertig_ordner / f"{video_id}{plan.suffix}"
-            media.run_ffmpeg(
-                media.build_remux_cmd(ergebnis.path, umgepackt, plan),
-                dauer_s=info_medien.duration_s,
-                fortschritt=lambda a: jobs.fortschritt(db, job, 0.62 + a * 0.18),
-                abbruch=abbruch.laeuft_herunter,
-            )
-            medien_datei = umgepackt
-            info_medien = media.probe(medien_datei)
-
-        # ---- 4. Buendeln (80 bis 100 %)
-        _status(db, video, VideoStatus.BUNDLING)
-        jobs.fortschritt(db, job, 0.82, "Buendel wird geschrieben")
-
-        ziel = bundle.bundle_path_for(settings.bundle_dir, video.channel_id, video_id)
-        manifest = bundle.BundleManifest(
-            schema_version=bundle.SCHEMA_VERSION,
-            video_id=video_id,
-            channel_id=video.channel_id,
-            title=ergebnis.info.get("title") or video.title,
-            media_name="",
-            media_bytes=0,
-            mime_type="",
-            source_bytes=quelle_bytes,
-            recoded=False,
-            video_codec=info_medien.video_codec,
-            audio_codec=info_medien.audio_codec,
-            width=info_medien.width,
-            height=info_medien.height,
-            fps=info_medien.fps,
-            duration_s=info_medien.duration_s,
-            created_at=utcnow().isoformat(),
+        # ---- 3. bis 5.: umpacken, buendeln, Datenbank nachziehen
+        info_medien = _ablegen(
+            db, job, video, ergebnis,
+            arbeitsordner=arbeitsordner,
+            info_medien=info_medien,
+            quelle_bytes=quelle_bytes,
+            qualitaetshinweis=qualitaetshinweis,
         )
-        bundle.write_bundle(
-            ziel,
-            manifest=manifest,
-            media_file=medien_datei,
-            info_json=ergebnis.info,
-            thumbnail=ergebnis.thumbnail,
-            subtitles=ergebnis.subtitles,
-        )
-
-        # ---- 5. Datenbank nachziehen
-        _metadaten_uebernehmen(db, video, ergebnis.info)
-        _untertitel_uebernehmen(db, video, manifest.subtitles)
-        video.thumb_file = _thumbnail_ablegen(video_id, ergebnis.thumbnail)
-        video.bundle_file = str(ziel)
-        video.bundle_bytes = ziel.stat().st_size
-        video.source_bytes = quelle_bytes
-        video.media_name = manifest.media_name
-        video.video_codec = info_medien.video_codec
-        video.audio_codec = info_medien.audio_codec
-        video.width = info_medien.width
-        video.height = info_medien.height
-        video.fps = info_medien.fps
-        video.recoded = False
-        video.archived_at = utcnow()
-        video.retry_count = 0
-        # Ein Hinweis wie "Quelle bietet hoechstens 720p" bleibt sichtbar -
-        # sonst wundert man sich spaeter, warum ein Video nicht in 1080p da ist.
-        _status(db, video, VideoStatus.ARCHIVED, qualitaetshinweis)
-
-        _in_suche_aufnehmen(db, video, ergebnis.subtitles)
 
         # ---- 6. Recodierung nachgelagert einreihen, falls sie sich lohnt
         codec = media.ArchiveCodec(kanal.archive_codec) if kanal and kanal.archive_codec else settings.archive_codec
@@ -588,3 +628,125 @@ def enqueue_alle_offenen(begrenzung: int = 500) -> int:
             jobs.enqueue_archive(db, v.id)
             anzahl += 1
         return anzahl
+
+
+@jobs.register(JobType.VIDEO_UPGRADE)
+def hochstufen(db: Session, job: Job) -> None:
+    """Holt ein bereits archiviertes Video in besserer Qualitaet neu.
+
+    "Hochstufen" ist die freundliche Bezeichnung fuer einen vollstaendigen
+    Neu-Download. Qualitaet laesst sich einer vorhandenen Datei nicht
+    hinzufuegen - was in 1080p gespeichert ist, enthaelt die fehlenden Pixel
+    nicht irgendwo versteckt. Der Vorgang kostet also dieselbe Bandbreite und
+    dieselbe Zeit wie das erste Archivieren, und er zaehlt genauso gegen
+    YouTubes Drosselung von rund 300 Videos je Stunde.
+
+    Drei Vorsichtsmassnahmen machen den Unterschied zum blossen Neuladen:
+
+    Erstens wird **vorher nachgesehen**, ob es ueberhaupt etwas Besseres gibt.
+    Das ist ein Metadatenabruf statt eines Downloads. Ohne diesen Schritt
+    laedt man bei einem Kanal, der ueberwiegend in 1080p produziert, hunderte
+    Videos erneut, um am Ende dieselbe Qualitaet zu haben.
+
+    Zweitens bleibt das **alte Buendel bis zuletzt unangetastet**. Das Video
+    ist waehrend des gesamten Vorgangs abspielbar, sein Zustand bleibt
+    "archiviert", und der Austausch geschieht in einem Schritt. Geht etwas
+    schief, hat man weiterhin die bisherige Fassung - ein Hochstufen darf
+    niemals ein vorhandenes Video kosten.
+
+    Drittens wird **nach dem Download geprueft**, ob wirklich mehr angekommen
+    ist. Kommt dieselbe oder eine schlechtere Qualitaet, wird das Ergebnis
+    verworfen statt eingesetzt.
+    """
+    video_id = job.target_id
+    if not video_id:
+        raise ValueError("Hochstufungsauftrag ohne Video-ID")
+
+    video = db.get(Video, video_id)
+    if video is None:
+        raise ValueError(f"Video {video_id} nicht in der Datenbank")
+    if video.status != VideoStatus.ARCHIVED or not video.bundle_file:
+        raise ValueError(f"Video {video_id} ist nicht archiviert - nichts zum Hochstufen")
+
+    ziel_guete = int(jobs.payload_of(job).get("ziel") or settings.archive_min_height)
+    vorher = ytdlp.guete({"width": video.width, "height": video.height}) or 0
+
+    # ---- 1. Lohnt es sich ueberhaupt? Ein Metadatenabruf, kein Download.
+    jobs.fortschritt(db, job, 0.03, "Angebot wird geprueft")
+    try:
+        angebot_info = ytdlp.fetch_video_info(video_id)
+    except ytdlp.VideoUnavailable as e:
+        # Das Video ist bei der Quelle weg. Das archivierte bleibt, wie es ist -
+        # genau dafuer gibt es ein Archiv.
+        jobs.erledigt(db, job, f"bei der Quelle nicht mehr verfuegbar, Buendel bleibt: {e}")
+        return
+
+    angebot = ytdlp.angebotene_guete(angebot_info) or 0
+    erreichbar = min(angebot, ziel_guete)
+    if erreichbar <= vorher:
+        jobs.erledigt(
+            db, job,
+            f"schon {vorher}p - die Quelle bietet hoechstens {angebot}p",
+        )
+        return
+
+    # ---- 2. Herunterladen, in einen eigenen Ordner.
+    arbeitsordner = settings.tmp_dir / f"{video_id}.hochstufen"
+    shutil.rmtree(arbeitsordner, ignore_errors=True)
+    waehler = (
+        f"bestvideo[height>={erreichbar}][width>={erreichbar}]+bestaudio"
+        f"/bestvideo+bestaudio/best"
+    )
+    try:
+        jobs.fortschritt(db, job, 0.05, f"{vorher}p → {erreichbar}p wird geladen")
+        ergebnis = ytdlp.download_video(
+            video_id, arbeitsordner,
+            format_selector=waehler,
+            fortschritt=lambda anteil, text: jobs.fortschritt(db, job, 0.05 + anteil * 0.55, text),
+        )
+
+        # ---- 3. Ist wirklich mehr angekommen?
+        info_medien = media.probe(ergebnis.path)
+        nachher = ytdlp.guete({"width": info_medien.width, "height": info_medien.height}) or 0
+        if nachher <= vorher:
+            jobs.erledigt(
+                db, job,
+                f"kein Gewinn: wieder {nachher}p - das bisherige Buendel bleibt",
+            )
+            return
+
+        # ---- 4. Erst jetzt wird ausgetauscht.
+        alt_bytes = video.bundle_bytes or 0
+        _ablegen(
+            db, job, video, ergebnis,
+            arbeitsordner=arbeitsordner,
+            info_medien=info_medien,
+            quelle_bytes=ergebnis.path.stat().st_size,
+            qualitaetshinweis=None,
+            # Der Zustand bleibt "archiviert": Die bisherige Fassung ist bis
+            # zum Austausch abspielbar, und ein "wird umgepackt" liesse das
+            # Video solange aus der Oberflaeche verschwinden.
+            zustaende_pflegen=False,
+        )
+
+        # Eine Recodierung des alten Standes ist gegenstandslos geworden.
+        if media.should_recode(info_medien, settings.archive_codec)[0]:
+            jobs.enqueue(db, JobType.VIDEO_RECODE, video_id, priority=jobs.PRIO_RECODE)
+
+        zuwachs = (video.bundle_bytes or 0) - alt_bytes
+        jobs.erledigt(
+            db, job,
+            f"{vorher}p → {nachher}p, {zuwachs / 1e6:+.1f} MB",
+        )
+        log.info("%s hochgestuft: %dp -> %dp (%+.1f MB)", video_id, vorher, nachher, zuwachs / 1e6)
+
+    except abbruch.Abgebrochen:
+        jobs.unterbrochen(db, job, "beim Herunterfahren unterbrochen")
+        raise
+    except Exception as e:
+        # Nichts am Video anfassen: Es ist weiterhin archiviert und spielbar,
+        # nur eben in der bisherigen Qualitaet.
+        jobs.gescheitert(db, job, f"{type(e).__name__}: {e}")
+        raise
+    finally:
+        shutil.rmtree(arbeitsordner, ignore_errors=True)
