@@ -565,3 +565,62 @@ def test_hochkant_wird_vor_dem_buendeln_verworfen(umgebung, monkeypatch, tmp_pat
     assert job.status == JobStatus.DONE, "bewusst uebersprungen ist kein Fehlschlag"
     assert not list((settings.bundle_dir).rglob("*.zip")), "es darf kein Buendel entstehen"
     assert not (settings.tmp_dir / "vid1").exists(), "Arbeitsordner muss weg sein"
+
+
+# --------------------------------------------- Geloeschte Playlist-Eintraege
+
+
+def test_leichen_in_playlists_werden_erkannt(umgebung, monkeypatch):
+    """Wird ein Video geloescht oder privat gestellt, bleibt sein Platz in
+    fremden Playlists stehen - yt-dlp liefert dann nur noch die ID. Beim
+    JP-Kanal waren das 156 Kacheln "(ohne Titel)" mit einem Laden-Knopf, der
+    nie etwas geholt haette."""
+    from app.models import Channel
+    from app.services import ytdlp
+    from app.services.ytdlp import ListedVideo
+    from app.workers import sync
+
+    db, _tmp = umgebung
+    kanal = db.get(Channel, "UCtest")
+    eintraege = [
+        # So kommt ein geloeschtes Video an: nur die ID, sonst nichts.
+        ListedVideo(id="tot1", title="(ohne Titel)", duration_s=None, upload_date=None, view_count=None),
+        ListedVideo(id="echt1", title="Ein echtes", duration_s=300, upload_date=None, view_count=99),
+        # Ein Video mit fehlendem Titel, aber vorhandener Dauer ist KEINE
+        # Leiche - ein einzelnes fehlendes Feld darf nicht reichen.
+        ListedVideo(id="echt2", title="(ohne Titel)", duration_s=120, upload_date=None, view_count=None),
+    ]
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: eintraege)
+
+    sync._sammlung_abgleichen(db, kanal, playlist_id="PLx", titel="Mit Leiche",
+                              art="playlist", url="egal", einreihen=False)
+
+    assert db.get(Video, "tot1").status == VideoStatus.UNAVAILABLE
+    assert "geloescht" in (db.get(Video, "tot1").status_message or "")
+    assert db.get(Video, "echt1").status == VideoStatus.NEW
+    assert db.get(Video, "echt2").status == VideoStatus.NEW, "nur ein fehlendes Feld ist keine Leiche"
+
+
+def test_bereits_archiviertes_bleibt_trotz_loeschung(umgebung, monkeypatch):
+    """Der Sinn eines Archivs: Was einmal gesichert ist, bleibt spielbar -
+    auch wenn die Quelle es zurueckzieht. Genau dafuer macht man das."""
+    from app.models import Channel
+    from app.services import ytdlp
+    from app.services.ytdlp import ListedVideo
+    from app.workers import sync
+
+    db, _tmp = umgebung
+    v = db.get(Video, "vid1")
+    v.status = VideoStatus.ARCHIVED
+    v.title = "Laengst gesichert"
+    db.commit()
+
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: [
+        ListedVideo(id="vid1", title="(ohne Titel)", duration_s=None, upload_date=None, view_count=None),
+    ])
+    sync._sammlung_abgleichen(db, db.get(Channel, "UCtest"), playlist_id="PLx",
+                              titel="X", art="playlist", url="egal", einreihen=False)
+
+    v = db.get(Video, "vid1")
+    assert v.status == VideoStatus.ARCHIVED, "archiviertes Video darf nicht entwertet werden"
+    assert v.title == "Laengst gesichert", "der Titel darf nicht verloren gehen"

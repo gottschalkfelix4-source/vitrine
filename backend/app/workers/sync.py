@@ -43,6 +43,26 @@ from app.services import jobs, ytdlp
 log = logging.getLogger(__name__)
 
 
+def _ist_verschwunden(eintrag: ytdlp.ListedVideo) -> bool:
+    """Erkennt geloeschte oder privat gestellte Videos in einer Playlist.
+
+    Wird ein Video geloescht oder auf privat gestellt, bleibt sein Platz in
+    fremden Playlists bestehen - YouTube zeigt dort "Deleted video" bzw.
+    "Private video". yt-dlp liefert davon nur noch die ID: kein Titel, keine
+    Dauer, kein Datum, keine Aufrufe.
+
+    Genau diese Kombination ist das Erkennungsmerkmal. Ein einzelnes fehlendes
+    Feld reicht bewusst nicht - ein Titel kann auch mal fehlen, waehrend das
+    Video existiert. Erst wenn ueberhaupt nichts da ist, ist es eine Leiche.
+    """
+    return (
+        eintrag.title in (None, "", "(ohne Titel)")
+        and eintrag.duration_s is None
+        and eintrag.upload_date is None
+        and eintrag.view_count is None
+    )
+
+
 def _video_anlegen(
     db: Session,
     kanal_id: str | None,
@@ -73,8 +93,16 @@ def _video_anlegen(
             v.title = eintrag.title
         if eintrag.view_count is not None:
             v.view_count = eintrag.view_count
+        # Ein Video, das seit dem letzten Abgleich verschwunden ist, wird
+        # nachgezogen - aber nur, solange es noch nicht archiviert ist. Was
+        # einmal im Archiv liegt, bleibt spielbar, auch wenn die Quelle es
+        # zurueckzieht. Das ist der Sinn eines Archivs.
+        if _ist_verschwunden(eintrag) and v.status in (VideoStatus.NEW, VideoStatus.QUEUED):
+            v.status = VideoStatus.UNAVAILABLE
+            v.status_message = "bei der Quelle geloescht oder privat"
         return v, False
 
+    verschwunden = _ist_verschwunden(eintrag)
     v = Video(
         id=eintrag.id,
         channel_id=kanal_id,
@@ -82,7 +110,11 @@ def _video_anlegen(
         duration_s=eintrag.duration_s,
         upload_date=eintrag.upload_date,
         view_count=eintrag.view_count,
-        status=VideoStatus.NEW,
+        # Geloeschte und privat gestellte Videos gar nicht erst als "neu"
+        # fuehren: Sie liessen sich nie herunterladen, und ein Laden-Knopf
+        # daneben waere ein leeres Versprechen.
+        status=VideoStatus.UNAVAILABLE if verschwunden else VideoStatus.NEW,
+        status_message="bei der Quelle geloescht oder privat" if verschwunden else None,
     )
     db.add(v)
     if bekannt is not None:

@@ -84,7 +84,7 @@ export const ZUSTAND_TEXT: Record<string, string> = {
   bundling: "wird gebündelt",
   archived: "archiviert",
   failed: "fehlgeschlagen",
-  unavailable: "nicht mehr verfügbar",
+  unavailable: "nicht mehr bei der Quelle",
   skipped: "übersprungen",
 };
 

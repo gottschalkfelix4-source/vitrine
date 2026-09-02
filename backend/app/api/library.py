@@ -126,7 +126,9 @@ class PlaylistPosition(BaseModel):
 def _kanal_kurz(db: Session, k: Channel) -> KanalKurz:
     gesamt, archiviert, bytes_ = db.execute(
         select(
-            func.count(Video.id),
+            # Verschwundene zaehlen nicht mit: "2 von 3363" waere irrefuehrend,
+            # wenn 156 davon geloescht sind und nie erreichbar werden.
+            func.count(Video.id).filter(Video.status != VideoStatus.UNAVAILABLE),
             func.count(Video.id).filter(Video.status == VideoStatus.ARCHIVED),
             func.coalesce(func.sum(Video.bundle_bytes), 0),
         ).where(Video.channel_id == k.id)
@@ -202,19 +204,27 @@ def kanal(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
 
     # Die Tab-Zaehler kommen aus der Datenbank, nicht aus der gerade geladenen
     # Seite - sonst stuende an "Videos" die Zahl der zufaellig ersten 60.
-    lang, shorts, live = db.execute(
+    # Verschwundene bleiben aussen vor - sonst verspricht die Zahl am Tab
+    # mehr, als die Liste darunter zeigt.
+    lang, shorts, live, verschwunden = db.execute(
         select(
             func.count(Video.id).filter(Video.is_short.is_(False), Video.was_live.is_(False)),
             func.count(Video.id).filter(Video.is_short.is_(True)),
             func.count(Video.id).filter(Video.was_live.is_(True)),
-        ).where(Video.channel_id == kanal_id)
+            func.count(Video.id).filter(Video.status == VideoStatus.UNAVAILABLE),
+        ).where(Video.channel_id == kanal_id, Video.status != VideoStatus.UNAVAILABLE)
     ).one()
+    verschwunden = db.scalar(
+        select(func.count(Video.id)).where(
+            Video.channel_id == kanal_id, Video.status == VideoStatus.UNAVAILABLE
+        )
+    ) or 0
 
     return {
         "kanal": _kanal_kurz(db, k),
         "beschreibung": k.description,
         "banner": k.banner_file,
-        "zaehler": {"videos": lang, "shorts": shorts, "live": live},
+        "zaehler": {"videos": lang, "shorts": shorts, "live": live, "verschwunden": verschwunden},
         # Die Tabs entsprechen der YouTube-Gliederung: Videos, Shorts,
         # Livestreams, Playlists.
         "sammlungen": [
@@ -487,6 +497,14 @@ def videos(
         anfrage = anfrage.where(Video.status == status_filter)
     elif nur_archiviert:
         anfrage = anfrage.where(Video.status == VideoStatus.ARCHIVED)
+    else:
+        # Auch bei "alles zeigen" bleiben verschwundene Videos draussen: Sie
+        # sind bei der Quelle geloescht oder privat, liessen sich also nie
+        # holen. In der Videoliste waeren sie nur Rauschen - in der Playlist
+        # stehen sie weiterhin an ihrer Position, denn dort ist genau das die
+        # Information, die zaehlt. Wer sie sehen will, filtert ausdruecklich
+        # nach status=unavailable.
+        anfrage = anfrage.where(Video.status != VideoStatus.UNAVAILABLE)
     # Die Art wird serverseitig gefiltert, nicht im Client. Sonst stimmt das
     # Blaettern nicht: Wer Seite fuer Seite laedt und erst im Browser die
     # Shorts aussiebt, bekommt mal 60, mal 3 sichtbare Videos pro Seite.

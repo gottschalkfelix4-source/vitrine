@@ -64,7 +64,12 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
         <div style={{ minWidth: 0, flex: 1 }}>
           <h3 className="kachel-titel" title={video.titel}>
             {position != null ? <span style={{ color: "var(--text-schwach)" }}>{position + 1}. </span> : null}
-            {video.titel}
+            {/* "(ohne Titel)" sagt nicht, was los ist. Bei einem verschwundenen
+                Video ist der fehlende Titel gerade die Aussage - dann lieber
+                benennen, was passiert ist. */}
+            {status === "unavailable" && video.titel === "(ohne Titel)"
+              ? "Gelöscht oder privat gestellt"
+              : video.titel}
           </h3>
           <div className="kachel-zeile">
             {!ohneKanal && video.kanal_name ? (

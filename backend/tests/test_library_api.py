@@ -69,7 +69,9 @@ def test_kanalliste_zaehlt_richtig(umgebung):
     client, _ = umgebung
     (k,) = client.get("/api/channels").json()
     assert k["name"] == "Testkanal"
-    assert k["videos_gesamt"] == 3
+    # v2 ist unavailable und zaehlt nicht mit: "1 von 3" waere irrefuehrend,
+    # wenn eines davon geloescht ist und nie erreichbar wird.
+    assert k["videos_gesamt"] == 2
     assert k["videos_archiviert"] == 1
     assert k["belegung_bytes"] == 1_000_000
 
@@ -136,7 +138,7 @@ def test_videoliste_sortierung(umgebung):
     alt = [v["id"] for v in client.get("/api/videos", params=p | {"sortierung": "alt"}).json()]
     assert neu == list(reversed(alt))
     aufrufe = [v["id"] for v in client.get("/api/videos", params=p | {"sortierung": "aufrufe"}).json()]
-    assert aufrufe[0] == "v2"
+    assert aufrufe[0] == "v1", "v2 ist verschwunden und faellt aus der Liste"
 
 
 def test_videosuche(umgebung):
@@ -269,7 +271,8 @@ def test_videoliste_filtert_nach_art(umgebung):
     assert shorts == {"s1"}
     assert live == {"l1"}
     assert "s1" not in nur_videos and "l1" not in nur_videos
-    assert {"v0", "v1", "v2"} <= nur_videos
+    # v2 fehlt bewusst: verschwundene Videos gehoeren nicht in die Liste.
+    assert {"v0", "v1"} <= nur_videos and "v2" not in nur_videos
 
 
 def test_kanaldetail_zaehlt_nach_art(umgebung):
@@ -278,7 +281,7 @@ def test_kanaldetail_zaehlt_nach_art(umgebung):
     db.add(Video(id="l1", channel_id="UCtest", title="Stream", was_live=True))
     db.commit()
     z = client.get("/api/channels/UCtest").json()["zaehler"]
-    assert z == {"videos": 3, "shorts": 1, "live": 1}
+    assert z == {"videos": 2, "shorts": 1, "live": 1, "verschwunden": 1}
 
 
 # ---------------------------------------------------------- Kanal entfernen
@@ -509,3 +512,35 @@ def test_aktive_auftraege_knapp_gehalten(umgebung):
 def test_aktive_auftraege_leer(umgebung):
     client, _ = umgebung
     assert client.get("/api/jobs/aktiv").json() == {"laufend": [], "wartend": 0}
+
+
+# ------------------------------------------------- Verschwundene Videos
+
+
+def test_verschwundene_fallen_aus_der_videoliste(umgebung):
+    """Geloeschte und privat gestellte Videos liessen sich nie holen - in der
+    Videoliste waeren sie nur Rauschen. Beim JP-Kanal waren das 156 Kacheln
+    "(ohne Titel)" mit einem Laden-Knopf, der nichts bewirkt haette."""
+    client, _ = umgebung
+    alle = {v["id"] for v in client.get("/api/videos", params={"nur_archiviert": False}).json()}
+    assert "v2" not in alle, "verschwundenes Video steht noch in der Liste"
+
+    # Wer sie sehen will, fragt ausdruecklich danach.
+    gezielt = {v["id"] for v in client.get("/api/videos", params={"status": "unavailable"}).json()}
+    assert gezielt == {"v2"}
+
+
+def test_verschwundene_bleiben_in_der_playlist(umgebung):
+    """Der Gegenpol: In der Playlist zaehlt gerade die Information, dass an
+    Position 3 mal etwas war. Das ist der Unterschied zu TubeArchivist."""
+    client, _ = umgebung
+    d = client.get("/api/playlists/PLabc").json()
+    zustaende = {p["video"]["id"]: p["video"]["status"] for p in d["positionen"]}
+    assert zustaende["v2"] == "unavailable"
+    assert len(d["positionen"]) == 3, "die Position darf nicht verschwinden"
+
+
+def test_verschwundene_zaehlen_nicht_als_ladbar(umgebung):
+    """Sonst verspricht "Alle laden (N)" mehr, als es einloesen kann."""
+    client, _ = umgebung
+    assert client.get("/api/channels/UCtest/downloadable").json()["anzahl"] == 0

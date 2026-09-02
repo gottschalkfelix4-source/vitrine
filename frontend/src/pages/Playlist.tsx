@@ -13,7 +13,10 @@ export function Playlistseite() {
   if (laedt && !daten) return <Skelettgitter anzahl={8} />;
   if (!daten) return null;
 
-  const fehlend = daten.positionen.length - daten.anzahl_archiviert;
+  const verschwunden = daten.positionen.filter((p) => p.video.status === "unavailable").length;
+  // Nicht archiviert heisst hier: noch holbar. Verschwundene zaehlen getrennt,
+  // sonst klingt es nach Arbeit, die man noch erledigen koennte.
+  const fehlend = daten.positionen.length - daten.anzahl_archiviert - verschwunden;
   const anteil = daten.positionen.length ? daten.anzahl_archiviert / daten.positionen.length : 0;
 
   return (
@@ -40,15 +43,24 @@ export function Playlistseite() {
         Eine Liste, die stillschweigend nur das Vorhandene zeigt, verschweigt
         genau die Information, die man in einem Archiv braucht: was fehlt.
       */}
-      {fehlend > 0 ? (
+      {fehlend > 0 || verschwunden > 0 ? (
         <div className="hinweis" data-art="arbeit">
           <div>
             <strong>
-              {fehlend} {fehlend === 1 ? "Position ist" : "Positionen sind"} noch nicht im Archiv.
+              {fehlend > 0
+                ? `${fehlend} ${fehlend === 1 ? "Position ist" : "Positionen sind"} noch nicht im Archiv.`
+                : "Alles Verfügbare ist archiviert."}
             </strong>
             <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
-              Sie stehen trotzdem an ihrer Stelle in der Liste, damit die Reihenfolge des Kanals
-              erhalten bleibt und sichtbar ist, was fehlt.
+              {verschwunden > 0 ? (
+                <>
+                  {verschwunden}{" "}
+                  {verschwunden === 1 ? "Video wurde" : "Videos wurden"} bei YouTube gelöscht oder
+                  privat gestellt und {verschwunden === 1 ? "ist" : "sind"} nicht mehr zu holen.{" "}
+                </>
+              ) : null}
+              Alle Positionen bleiben an ihrer Stelle, damit die Reihenfolge des Kanals erhalten
+              bleibt und sichtbar ist, was fehlt.
             </div>
           </div>
         </div>
