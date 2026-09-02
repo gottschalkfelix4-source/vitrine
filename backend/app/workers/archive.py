@@ -209,6 +209,78 @@ def _fortsetzmarke_einloesen(ordner: Path) -> bool:
     return True
 
 
+#: Wie oft nach einem verfehlten Qualitaetsziel eine Stufe tiefer erneut
+#: versucht wird. Zwei reichen: Von 4K aus liegen damit 1440p und 1080p im
+#: Zugriff, und jeder Versuch kostet einen vollen Download.
+RUECKFALL_VERSUCHE = 2
+
+
+def _laden_mit_rueckfall(
+    db: Session,
+    job: Job,
+    video_id: str,
+    ordner: Path,
+    *,
+    format_selector: str | None,
+) -> tuple[ytdlp.DownloadResult, str | None]:
+    """Laedt ein Video und geht bei verfehlter Qualitaet eine Stufe tiefer.
+
+    Bisher endete dieser Fall als Fehlschlag: "nur X erhalten, obwohl die
+    Quelle Y anbietet - Video wurde NICHT als archiviert verbucht". Das ist
+    richtig, wenn die Kette gestoert ist, aber falsch, wenn die gewuenschte
+    Stufe schlicht nicht zusammen mit einer passenden Tonspur zu haben ist.
+    Der Nutzer sieht dann eine Liste roter Fehler und hat trotzdem nichts.
+
+    Jetzt wird die naechste Stufe unterhalb des Angebots ausdruecklich
+    angefordert. Bleibt auch die aus, wird das Beste behalten, was angekommen
+    ist, und der Unterschied als Hinweis vermerkt - ein 720p-Video im Archiv
+    ist mehr wert als ein roter Eintrag in der Warteschlange.
+
+    Der harte Abbruch bleibt, wo er hingehoert: Format 18, reine Tonspur und
+    alles unterhalb des absoluten Bodens sind Zeichen einer gestoerten
+    Sitzung. Dort waere ein Rueckfall genau das Falsche - man archivierte
+    dauerhaft Notfassungen, ohne es zu merken.
+    """
+    ziel = format_selector
+    letzter: ytdlp.DownloadResult | None = None
+    letzter_fehler: ytdlp.QualitaetVerfehlt | None = None
+
+    for versuch in range(RUECKFALL_VERSUCHE + 1):
+        ergebnis = ytdlp.download_video(
+            video_id, ordner,
+            format_selector=ziel,
+            fortschritt=lambda anteil, text: jobs.fortschritt(db, job, anteil * 0.6, text),
+        )
+        try:
+            hinweis = ytdlp.check_not_degraded(
+                ergebnis.info,
+                mindesthoehe=settings.archive_min_height,
+                boden=settings.recode_min_height,
+            )
+            return ergebnis, hinweis
+        except ytdlp.QualitaetVerfehlt as e:
+            letzter, letzter_fehler = ergebnis, e
+            stufe = ytdlp.naechste_stufe(e.angeboten + 1)  # das Angebot selbst zuerst
+            if versuch >= RUECKFALL_VERSUCHE or stufe is None:
+                break
+            ziel = f"bestvideo[height>={stufe}][width>={stufe}]+bestaudio/bestvideo+bestaudio/best"
+            log.info(
+                "%s: %dp erhalten, Quelle bietet %dp - neuer Versuch auf %dp",
+                video_id, e.erhalten, e.angeboten, stufe,
+            )
+            jobs.fortschritt(db, job, 0.02, f"Erneuter Versuch mit {stufe}p")
+            # Sauber neu anfangen: Die Teildateien gehoeren zum alten Format
+            # und wuerden sonst mit dem neuen vermischt.
+            shutil.rmtree(ordner, ignore_errors=True)
+
+    # Aufgeben heisst hier: behalten, was da ist, und es benennen.
+    assert letzter is not None and letzter_fehler is not None
+    return letzter, (
+        f"{letzter_fehler.erhalten}p statt der gewuenschten "
+        f"{settings.archive_min_height}p - die Quelle gibt hier nicht mehr her"
+    )
+
+
 @jobs.register(JobType.VIDEO_ARCHIVE)
 def archivieren(db: Session, job: Job) -> None:
     video_id = job.target_id
@@ -232,20 +304,9 @@ def archivieren(db: Session, job: Job) -> None:
         jobs.fortschritt(db, job, 0.02, "Download beginnt")
 
         kanal = video.channel
-        ergebnis = ytdlp.download_video(
-            video_id,
-            arbeitsordner,
+        ergebnis, qualitaetshinweis = _laden_mit_rueckfall(
+            db, job, video_id, arbeitsordner,
             format_selector=(kanal.format_selector if kanal else None),
-            fortschritt=lambda anteil, text: jobs.fortschritt(db, job, anteil * 0.6, text),
-        )
-
-        # ---- 2. Pruefen, ob wirklich die gewuenschte Qualitaet ankam
-        # Muss vor allem anderen passieren: Ein stiller 360p-Rueckfall darf
-        # niemals als archiviert verbucht werden.
-        qualitaetshinweis = ytdlp.check_not_degraded(
-            ergebnis.info,
-            mindesthoehe=settings.archive_min_height,
-            boden=settings.recode_min_height,
         )
 
         quelle_bytes = ergebnis.path.stat().st_size

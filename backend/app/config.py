@@ -220,18 +220,42 @@ class Settings(BaseSettings):
         heisst also NICHT "hoechstens 1080p": Bietet die Quelle 4K, wird 4K
         geladen, solange keine Obergrenze gesetzt ist.
 
-        Bei hochkantigen Videos zaehlt yt-dlp die lange Seite als Hoehe. Ein
-        Short in voller Qualitaet ist 1080x1920 - eine Obergrenze von 1080
-        haette davon die 608x1080-Fassung gewaehlt.
+        Gemessen wird die **kurze Seite**, nicht die Hoehe - so, wie YouTube
+        selbst zaehlt: Es nennt das Format 1080x1920 eines hochkantigen Videos
+        ``1080p``. yt-dlp meldet dafuer ``height: 1920``.
+
+        Ein reiner Hoehenfilter ist deshalb bei Hochkant falsch, und zwar in
+        beide Richtungen. ``[height>=1080]`` liess bei einem senkrechten Video
+        die 720er-Fassung (720x1280) durch, weil 1280 groesser als 1080 ist -
+        genau daran sind bei einem echten Kanalabgleich reihenweise Downloads
+        gescheitert. Und ``[height<=1080]`` haette umgekehrt die volle
+        1080er-Fassung ausgeschlossen, weil sie 1920 hoch ist.
+
+        Die Loesung fuer die Untergrenze ist einfach: "kurze Seite >= n" ist
+        dasselbe wie "beide Seiten >= n". Fuer die Obergrenze geht das nicht in
+        einem Ausdruck - yt-dlp kennt kein ODER innerhalb eines Filters -,
+        deshalb zwei Zweige: erst quer (Hoehe ist die kurze Seite), dann
+        hochkant (Breite ist die kurze Seite). Der erste passende gewinnt.
         """
         if self.ytdlp_format:
             return self.ytdlp_format
-        deckel = f"[height<={self.archive_max_height}]" if self.archive_max_height > 0 else ""
+
+        n, c = self.archive_min_height, self.archive_max_height
+        mind = f"[height>={n}][width>={n}]" if n > 0 else ""
         stufen: list[str] = []
-        if self.archive_min_height > 0:
-            stufen.append(f"bestvideo[height>={self.archive_min_height}]{deckel}+bestaudio")
-        stufen.append(f"bestvideo{deckel}+bestaudio")
-        stufen.append(f"best{deckel}")
+
+        if c > 0:
+            if mind:
+                stufen.append(f"bestvideo{mind}[height<={c}]+bestaudio")
+                stufen.append(f"bestvideo{mind}[width<={c}]+bestaudio")
+            stufen.append(f"bestvideo[height<={c}]+bestaudio")
+            stufen.append(f"bestvideo[width<={c}]+bestaudio")
+        elif mind:
+            stufen.append(f"bestvideo{mind}+bestaudio")
+
+        # Bietet die Quelle die Untergrenze nicht, wird das Beste genommen, was
+        # es gibt. Ein altes 720p-Video soll nicht ungesichert bleiben.
+        stufen.append("bestvideo+bestaudio")
         stufen.append("best")
         return "/".join(stufen)
 

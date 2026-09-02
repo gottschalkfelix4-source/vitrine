@@ -47,7 +47,7 @@ export function Wiedergabeseite() {
   if (!detail.daten) return <Skelettgitter anzahl={4} />;
 
   const { video: v, technik, kapitel, untertitel } = detail.daten;
-  const guete = qualitaet(technik.hoehe, technik.fps);
+  const guete = qualitaet(technik.breite, technik.hoehe, technik.fps);
   const ersparnis =
     technik.quelle_bytes && technik.buendel_bytes
       ? 1 - technik.buendel_bytes / technik.quelle_bytes
@@ -87,7 +87,7 @@ export function Wiedergabeseite() {
         */}
         {guete ? (
           <div className="watch-guete">
-            <span className="guete-marke" data-hoch={istHochaufloesend(technik.hoehe) || undefined}>
+            <span className="guete-marke" data-hoch={istHochaufloesend(technik.breite, technik.hoehe) || undefined}>
               {guete}
             </span>
             <span>

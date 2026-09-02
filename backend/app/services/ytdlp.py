@@ -359,14 +359,61 @@ class DegradedDownload(YtdlpError):
     """Der Download hat formal geklappt, aber nur eine Notfassung geliefert."""
 
 
-def angebotene_hoehe(info: dict[str, Any]) -> int | None:
-    """Die groesste Hoehe, die die Quelle laut Formatliste anbietet."""
-    hoehen = [
-        f.get("height")
-        for f in info.get("formats") or []
-        if f.get("vcodec") not in (None, "none") and f.get("height")
-    ]
-    return max(hoehen) if hoehen else None
+class QualitaetVerfehlt(YtdlpError):
+    """Weniger Qualitaet bekommen, als die Quelle anbietet.
+
+    Bewusst kein :class:`DegradedDownload`: Dort ist die Datei unbrauchbar und
+    wird verworfen. Hier ist sie in Ordnung, nur schlechter als moeglich - der
+    richtige Umgang ist ein erneuter Versuch auf einer benannten Stufe, nicht
+    das Wegwerfen eines fertigen Downloads.
+    """
+
+    def __init__(self, meldung: str, *, erhalten: int, angeboten: int) -> None:
+        super().__init__(meldung)
+        self.erhalten = erhalten
+        self.angeboten = angeboten
+
+
+#: Die uebliche Qualitaetsleiter, absteigend. Fuer den Rueckfall: Wird eine
+#: Stufe nicht erreicht, wird die naechste darunter ausdruecklich angefordert.
+STUFEN = (4320, 2160, 1440, 1080, 720, 480, 360, 240, 144)
+
+
+def naechste_stufe(unter: int) -> int | None:
+    """Die naechstniedrigere Stufe unterhalb von ``unter``."""
+    for s in STUFEN:
+        if s < unter:
+            return s
+    return None
+
+
+def guete(info: dict[str, Any]) -> int | None:
+    """Die Qualitaet in der Zaehlweise, die auch YouTube benutzt.
+
+    Gemessen wird die **kurze Seite**, nicht die Hoehe. Das ist keine
+    Feinheit, sondern die Ursache eines ganzen Schwungs falscher Fehlschlaege:
+
+    YouTube liefert fuer ein hochkantiges Video das Format 1080x1920 mit der
+    Angabe ``format_note: "1080p"`` - benennt es also nach der kurzen Seite.
+    yt-dlp meldet dafuer ``height: 1920``. Wer die Hoehe als Qualitaet liest,
+    haelt ein hochkantiges 1080p-Video fuer "1920p" und eine 720er-Fassung
+    (720x1280) fuer "1280p". Beim Kanalabgleich eines echten Kanals hat das
+    reihenweise einwandfreie Downloads verworfen, mit Meldungen wie
+    "nur 1280p erhalten, obwohl die Quelle 1920p anbietet".
+
+    Bei Querformat ist die kurze Seite die Hoehe - dort aendert sich nichts.
+    """
+    breite, hoehe = info.get("width"), info.get("height")
+    if breite and hoehe:
+        return min(int(breite), int(hoehe))
+    return int(hoehe) if hoehe else (int(breite) if breite else None)
+
+
+def angebotene_guete(info: dict[str, Any]) -> int | None:
+    """Die beste Qualitaet, die die Quelle laut Formatliste anbietet."""
+    werte = [g for f in info.get("formats") or []
+             if f.get("vcodec") not in (None, "none") and (g := guete(f)) is not None]
+    return max(werte) if werte else None
 
 
 def check_not_degraded(
@@ -388,14 +435,17 @@ def check_not_degraded(
     Problems und kein verlaesslicher Zeuge.
 
     ``mindesthoehe`` ist relativ zum Angebot. Liegt der Download darunter,
-    obwohl die Quelle mehr anbietet, ist die Kette gestoert. Bietet die Quelle
-    selbst nicht mehr - ein altes 720p-Video -, wird das Beste genommen, was es
-    gibt, und das als Hinweis zurueckgegeben statt als Fehler geworfen. Ein
-    altes Video soll nicht ungesichert bleiben, nur weil es keine 1080p hat.
+    obwohl die Quelle mehr anbietet, wird :class:`QualitaetVerfehlt` geworfen -
+    kein Fehlschlag, sondern die Aufforderung, es eine Stufe tiefer erneut zu
+    versuchen. Bietet die Quelle selbst nicht mehr - ein altes 720p-Video -,
+    wird das Beste genommen, was es gibt, und das als Hinweis zurueckgegeben.
+    Ein altes Video soll nicht ungesichert bleiben, nur weil es keine 1080p hat.
+
+    Gemessen wird durchgehend die kurze Seite, siehe :func:`guete`.
 
     Liefert ``None`` oder einen Hinweistext fuer die Statuszeile.
     """
-    hoehe = info.get("height")
+    hoehe = guete(info)
     format_id = str(info.get("format_id") or "")
     vcodec = str(info.get("vcodec") or "")
 
@@ -423,11 +473,14 @@ def check_not_degraded(
         )
 
     if hoehe < mindesthoehe:
-        angebot = angebotene_hoehe(info)
-        if angebot is not None and angebot >= mindesthoehe:
-            raise DegradedDownload(
-                f"nur {hoehe}p erhalten, obwohl die Quelle {angebot}p anbietet - "
-                "Kette gestoert, Video wurde NICHT als archiviert verbucht"
+        angebot = angebotene_guete(info)
+        if angebot is not None and angebot > hoehe:
+            # Es gibt Besseres. Nicht verwerfen - die Datei ist ja in Ordnung -,
+            # sondern eine Stufe gezielt nachfordern. Der Aufrufer entscheidet,
+            # wie oft er das versucht, und behaelt am Ende das Beste.
+            raise QualitaetVerfehlt(
+                f"{hoehe}p erhalten, die Quelle bietet {angebot}p",
+                erhalten=hoehe, angeboten=angebot,
             )
         return f"Quelle bietet hoechstens {angebot or hoehe}p (gewuenscht: {mindesthoehe}p)"
 

@@ -34,7 +34,7 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
   const spielbar = status === "archived";
   // Erst nach dem Archivieren bekannt - vorher nennt YouTube beim Auflisten
   // keine Aufloesung.
-  const guete = qualitaet(video.hoehe, video.fps);
+  const guete = qualitaet(video.breite, video.hoehe, video.fps);
   const bild = video.bild;
 
   async function holen(e: React.MouseEvent) {
@@ -59,7 +59,7 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
         {/* Qualitaet oben, Dauer unten - so ueberdecken sie sich nie, auch
             nicht bei "1440p60" neben "1:02:33". */}
         {guete ? (
-          <span className="guete" data-hoch={istHochaufloesend(video.hoehe) || undefined}>
+          <span className="guete" data-hoch={istHochaufloesend(video.breite, video.hoehe) || undefined}>
             {guete}
           </span>
         ) : null}

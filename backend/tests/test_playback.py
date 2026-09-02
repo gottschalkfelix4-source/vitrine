@@ -184,7 +184,7 @@ def test_kanal_sammelplaylists():
 def test_stiller_360p_rueckfall_wird_erkannt():
     """Der gefaehrlichste Fehler im Betrieb: yt-dlp meldet Erfolg, hat aber nur
     die Notfassung geholt. Ohne Pruefung archiviert man wochenlang 360p."""
-    from app.services.ytdlp import DegradedDownload, check_not_degraded
+    from app.services.ytdlp import DegradedDownload, QualitaetVerfehlt, check_not_degraded
 
     def angebot(*hoehen):
         return [{"vcodec": "vp09", "height": h} for h in hoehen]
@@ -214,12 +214,15 @@ def test_stiller_360p_rueckfall_wird_erkannt():
             {"height": 360, "format_id": "134+140", "vcodec": "avc1", "formats": angebot(360)}
         )
 
-    # 720p bekommen, obwohl die Quelle 1080p anbietet: Kette gestoert.
-    with pytest.raises(DegradedDownload, match="obwohl die Quelle 1080p"):
+    # 720p bekommen, obwohl die Quelle 1080p anbietet. Das ist KEIN Fehlschlag
+    # mehr, sondern die Aufforderung, eine Stufe tiefer erneut zu versuchen -
+    # die Datei ist ja in Ordnung, nur schlechter als moeglich.
+    with pytest.raises(QualitaetVerfehlt) as fund:
         check_not_degraded(
             {"height": 720, "format_id": "247+251", "vcodec": "vp09",
              "formats": angebot(360, 720, 1080)}
         )
+    assert (fund.value.erhalten, fund.value.angeboten) == (720, 1080)
 
     # 720p bekommen, die Quelle hat auch nicht mehr: annehmen, aber vermerken.
     hinweis = check_not_degraded(
@@ -239,14 +242,206 @@ def test_format_selektor_setzt_minimum_statt_maximum():
 
     s = Settings(archive_min_height=1080, archive_max_height=0)
     sel = s.format_selector()
-    assert sel.startswith("bestvideo[height>=1080]+bestaudio/")
+    # Beide Seiten, nicht nur die Hoehe: "kurze Seite >= 1080" ist dasselbe wie
+    # "beide Seiten >= 1080" und gilt fuer quer wie hochkant. Ein reiner
+    # Hoehenfilter liess bei senkrechten Videos die 720er-Fassung durch, weil
+    # deren Hoehe (1280) groesser als 1080 ist.
+    assert sel.startswith("bestvideo[height>=1080][width>=1080]+bestaudio/")
     assert "<=" not in sel, "ohne Obergrenze darf nichts gedeckelt werden"
     # Rueckfall auf das Beste, was die Quelle hat
     assert "/bestvideo+bestaudio/" in sel and sel.endswith("/best")
 
+    # Mit Obergrenze zwei Zweige: erst quer, dann hochkant. yt-dlp kennt kein
+    # ODER innerhalb eines Filters, und "kurze Seite <= c" ist bei Querformat
+    # die Hoehe, bei Hochkant die Breite.
     gedeckelt = Settings(archive_min_height=1080, archive_max_height=1440).format_selector()
-    assert "[height>=1080][height<=1440]" in gedeckelt
+    assert "bestvideo[height>=1080][width>=1080][height<=1440]+bestaudio" in gedeckelt
+    assert "bestvideo[height>=1080][width>=1080][width<=1440]+bestaudio" in gedeckelt
     assert gedeckelt.endswith("/best")
 
     eigener = Settings(ytdlp_format="bestvideo[height<=720]+bestaudio").format_selector()
     assert eigener == "bestvideo[height<=720]+bestaudio"
+
+
+# ------------------------------------------------- Hochkant und Rueckfall
+#
+# Regression aus einem echten Kanalabgleich. Ein ganzer Schwung Videos stand
+# als "fehlgeschlagen" da, mit Meldungen wie "nur 1280p erhalten, obwohl die
+# Quelle 1920p anbietet". Beide Zahlen sind keine Qualitaeten, sondern die
+# Hoehen hochkantiger Videos: 720x1280 und 1080x1920.
+#
+# YouTube nennt das Format 1080x1920 selbst "1080p" - es zaehlt die kurze
+# Seite. Wer die Hoehe liest, haelt ein senkrechtes 1080p-Video fuer "1920p"
+# und verwirft einwandfreie Downloads.
+
+
+def test_qualitaet_wird_an_der_kurzen_seite_gemessen():
+    from app.services.ytdlp import guete
+
+    assert guete({"width": 1920, "height": 1080}) == 1080   # quer
+    assert guete({"width": 1080, "height": 1920}) == 1080   # hochkant, dasselbe
+    assert guete({"width": 3840, "height": 2160}) == 2160
+    assert guete({"width": 2160, "height": 3840}) == 2160
+    assert guete({"width": 720, "height": 1280}) == 720
+    # Fehlt eine Angabe, wird genommen, was da ist.
+    assert guete({"height": 1080}) == 1080
+    assert guete({}) is None
+
+
+def test_hochkantes_video_gilt_nicht_mehr_als_verfehlt():
+    """Der gemeldete Fehler, direkt nachgestellt: 'Weisswurst suess sauer!'
+    mit 1080x1920. Vorher wurde das als 1920p gelesen und die 720er-Fassung
+    (720x1280) als '1280p' - beides falsch."""
+    from app.services.ytdlp import check_not_degraded
+
+    formate = [{"vcodec": "vp09", "width": w, "height": h}
+               for w, h in ((640, 1138), (720, 1280), (1080, 1920))]
+    # Volle Qualitaet eines senkrechten Videos: geht glatt durch.
+    assert check_not_degraded(
+        {"width": 1080, "height": 1920, "format_id": "248+251", "vcodec": "vp09",
+         "formats": formate}
+    ) is None
+
+
+def test_senkrechtes_4k_wird_erkannt():
+    """'Warum haben wir zwei Karts?' - 2160x3840. Vorher meldete die Pruefung
+    'die Quelle 3840p anbietet'."""
+    from app.services.ytdlp import angebotene_guete, check_not_degraded
+
+    formate = [{"vcodec": "vp09", "width": w, "height": h}
+               for w, h in ((1080, 1920), (1440, 2560), (2160, 3840))]
+    assert angebotene_guete({"formats": formate}) == 2160
+    assert check_not_degraded(
+        {"width": 2160, "height": 3840, "format_id": "313+251", "vcodec": "vp09",
+         "formats": formate}
+    ) is None
+
+
+def test_stufenleiter():
+    from app.services.ytdlp import naechste_stufe
+
+    assert naechste_stufe(2160) == 1440
+    assert naechste_stufe(1080) == 720
+    assert naechste_stufe(1081) == 1080
+    assert naechste_stufe(144) is None
+
+
+def test_rueckfall_holt_die_naechste_stufe(tmp_path, monkeypatch):
+    """Was der Nutzer wollte: nicht scheitern, sondern eine Stufe tiefer."""
+    from app.config import settings
+    from app.models import Channel, JobType, Video, VideoStatus
+    from app.services import jobs, ytdlp
+    from app.workers import archive
+    from tests.conftest import neue_sitzung
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    settings.ensure_dirs()
+    db = neue_sitzung()
+    db.add(Channel(id="UCt", name="T"))
+    db.add(Video(id="dQw4w9WgXcQ", channel_id="UCt", title="V", status=VideoStatus.QUEUED))
+    db.commit()
+    job = jobs.enqueue_archive(db, "dQw4w9WgXcQ")
+    assert job.type == JobType.VIDEO_ARCHIVE
+
+    angefordert: list[str | None] = []
+
+    def laden(video_id, ordner, *, format_selector=None, fortschritt=None):
+        angefordert.append(format_selector)
+        ordner.mkdir(parents=True, exist_ok=True)
+        datei = ordner / f"{video_id}.mkv"
+        datei.write_bytes(b"x")
+        # Erster Versuch liefert 720p, obwohl 1080p angeboten wird; der zweite
+        # trifft dann die geforderte Stufe.
+        hoehe = 720 if len(angefordert) == 1 else 1080
+        return ytdlp.DownloadResult(
+            path=datei,
+            info={"width": hoehe * 16 // 9, "height": hoehe, "vcodec": "vp09",
+                  "format_id": "x+y",
+                  "formats": [{"vcodec": "vp09", "width": 1920, "height": 1080}]},
+        )
+
+    monkeypatch.setattr(archive.ytdlp, "download_video", laden)
+    ergebnis, hinweis = archive._laden_mit_rueckfall(
+        db, job, "dQw4w9WgXcQ", tmp_path / "arbeit", format_selector=None,
+    )
+
+    assert len(angefordert) == 2, "es wurde kein zweiter Versuch unternommen"
+    assert "1080" in (angefordert[1] or ""), angefordert[1]
+    assert ergebnis.info["height"] == 1080
+    assert hinweis is None
+
+
+def test_rueckfall_behaelt_am_ende_das_beste(tmp_path, monkeypatch):
+    """Wenn auch die tieferen Stufen nichts bringen, wird behalten statt
+    verworfen - ein 720p-Video im Archiv ist mehr wert als ein roter Eintrag."""
+    from app.config import settings
+    from app.models import Channel, Video, VideoStatus
+    from app.services import jobs, ytdlp
+    from app.workers import archive
+    from tests.conftest import neue_sitzung
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    settings.ensure_dirs()
+    db = neue_sitzung()
+    db.add(Channel(id="UCt", name="T"))
+    db.add(Video(id="dQw4w9WgXcQ", channel_id="UCt", title="V", status=VideoStatus.QUEUED))
+    db.commit()
+    job = jobs.enqueue_archive(db, "dQw4w9WgXcQ")
+
+    versuche = []
+
+    def laden(video_id, ordner, *, format_selector=None, fortschritt=None):
+        versuche.append(format_selector)
+        ordner.mkdir(parents=True, exist_ok=True)
+        datei = ordner / f"{video_id}.mkv"
+        datei.write_bytes(b"x")
+        return ytdlp.DownloadResult(
+            path=datei,
+            info={"width": 1280, "height": 720, "vcodec": "vp09", "format_id": "x+y",
+                  "formats": [{"vcodec": "vp09", "width": 1920, "height": 1080}]},
+        )
+
+    monkeypatch.setattr(archive.ytdlp, "download_video", laden)
+    ergebnis, hinweis = archive._laden_mit_rueckfall(
+        db, job, "dQw4w9WgXcQ", tmp_path / "arbeit", format_selector=None,
+    )
+
+    assert len(versuche) == archive.RUECKFALL_VERSUCHE + 1
+    assert ergebnis.info["height"] == 720
+    assert hinweis and "720p" in hinweis, hinweis
+
+
+def test_gestoerte_kette_faellt_weiterhin_hart_durch(tmp_path, monkeypatch):
+    """Die Gegenprobe, die wichtiger ist als der Rueckfall selbst: Format 18
+    ist kein Qualitaetsproblem, sondern das Zeichen einer kaputten Sitzung.
+    Ein Rueckfall waere hier genau falsch - man archivierte dauerhaft
+    Notfassungen, ohne es zu merken."""
+    from app.config import settings
+    from app.models import Channel, Video, VideoStatus
+    from app.services import jobs, ytdlp
+    from app.workers import archive
+    from tests.conftest import neue_sitzung
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    settings.ensure_dirs()
+    db = neue_sitzung()
+    db.add(Channel(id="UCt", name="T"))
+    db.add(Video(id="dQw4w9WgXcQ", channel_id="UCt", title="V", status=VideoStatus.QUEUED))
+    db.commit()
+    job = jobs.enqueue_archive(db, "dQw4w9WgXcQ")
+
+    def laden(video_id, ordner, *, format_selector=None, fortschritt=None):
+        ordner.mkdir(parents=True, exist_ok=True)
+        datei = ordner / f"{video_id}.mkv"
+        datei.write_bytes(b"x")
+        return ytdlp.DownloadResult(
+            path=datei,
+            info={"width": 640, "height": 360, "vcodec": "avc1", "acodec": "mp4a",
+                  "format_id": "18", "formats": []},
+        )
+
+    monkeypatch.setattr(archive.ytdlp, "download_video", laden)
+    with pytest.raises(ytdlp.DegradedDownload, match="Format 18"):
+        archive._laden_mit_rueckfall(
+            db, job, "dQw4w9WgXcQ", tmp_path / "arbeit", format_selector=None,
+        )

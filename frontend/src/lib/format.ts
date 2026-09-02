@@ -72,32 +72,45 @@ export function bytes(n: number | null | undefined, nachkomma = 1): string {
 /**
  * Kurzes Qualitätsetikett: "4K", "1080p", "1080p60".
  *
- * Gemessen wird an der **Höhe**, nicht an der kürzeren Seite. Das ist bei
- * hochkantigen Videos ein Unterschied: Ein Short mit 608×1080 hätte nach der
- * kurzen Seite "608p", nach der Höhe "1080p". Die Höhe ist hier richtig, weil
- * das ganze Archiv auf dieser Achse rechnet — die Einstellung heißt
- * `archive_min_height`, der Formatwähler fordert `height>=1080` an, und die
- * Prüfung auf stille 360p-Rückfälle vergleicht ebenfalls die Höhe. Ein Video,
- * das die Untergrenze von 1080p erfüllt hat, darf hier nicht als "608p"
- * erscheinen; das würde der eigenen Einstellung widersprechen.
+ * Gemessen wird die **kürzere Seite** — so, wie YouTube selbst zählt. Für ein
+ * hochkantiges Video liefert es das Format 1080×1920 mit der Angabe "1080p";
+ * die Höhe ist dort 1920 und wäre als Etikett schlicht falsch.
+ *
+ * Das war hier zuerst anders gelöst, mit der Höhe. Die Begründung lautete,
+ * das ganze Archiv rechne auf dieser Achse — was stimmte, aber nichts wert
+ * war: Die Achse selbst war der Fehler. Sie hat im Betrieb reihenweise
+ * einwandfreie Downloads senkrechter Videos verworfen, mit Meldungen wie
+ * "nur 1280p erhalten, obwohl die Quelle 1920p anbietet". Beides sind Höhen
+ * von 720p- und 1080p-Videos im Hochformat.
  *
  * Liefert `null`, solange nichts bekannt ist — vor dem Herunterladen nennt
  * YouTube beim Auflisten keine Auflösung.
  */
 export function qualitaet(
+  breite: number | null | undefined,
   hoehe: number | null | undefined,
   fps?: number | null,
 ): string | null {
-  if (!hoehe || !Number.isFinite(hoehe) || hoehe <= 0) return null;
-  const stufe = hoehe >= 4320 ? "8K" : hoehe >= 2160 ? "4K" : `${Math.round(hoehe)}p`;
+  const seiten = [breite, hoehe].filter(
+    (n): n is number => typeof n === "number" && Number.isFinite(n) && n > 0,
+  );
+  if (seiten.length === 0) return null;
+  const kurz = Math.round(Math.min(...seiten));
+  const stufe = kurz >= 4320 ? "8K" : kurz >= 2160 ? "4K" : `${kurz}p`;
   // Nur echte Hochbildraten anhängen. 29,97 ist der Normalfall und würde als
   // "1080p30" nur Platz kosten, ohne etwas zu sagen.
   return fps && fps >= 50 ? `${stufe}${Math.round(fps)}` : stufe;
 }
 
 /** Ist das eine Auflösung, die man als hochauflösend hervorhebt? */
-export function istHochaufloesend(hoehe: number | null | undefined): boolean {
-  return !!hoehe && hoehe >= 1440;
+export function istHochaufloesend(
+  breite: number | null | undefined,
+  hoehe: number | null | undefined,
+): boolean {
+  const seiten = [breite, hoehe].filter(
+    (n): n is number => typeof n === "number" && Number.isFinite(n) && n > 0,
+  );
+  return seiten.length > 0 && Math.min(...seiten) >= 1440;
 }
 
 export function prozent(anteil: number | null | undefined, nachkomma = 0): string {
