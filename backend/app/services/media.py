@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import ArchiveCodec, HardwareAccel, settings
+from app.services import abbruch as abbruch_signal
 
 log = logging.getLogger(__name__)
 
@@ -326,6 +327,12 @@ def run_ffmpeg(
     ``abbruch`` wird regelmaessig abgefragt; liefert es True, wird der Prozess
     beendet. Ohne das laeuft ein abgebrochener Encode-Auftrag im Hintergrund
     stundenlang weiter.
+
+    Zwei Gruende fuehren hierher, und sie muessen auseinandergehalten werden:
+    Ein vom Nutzer abgebrochener Auftrag ist ein Fehlschlag und endet als
+    :class:`MediaError`. Ein Abbruch durch das Herunterfahren ist keiner - er
+    endet als :class:`~app.services.abbruch.Abgebrochen`, damit der Auftrag
+    wieder eingereiht statt rot vermerkt wird.
     """
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
@@ -340,6 +347,9 @@ def run_ffmpeg(
                     proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+                # Wirft Abgebrochen, wenn der Dienst herunterfaehrt - sonst
+                # faellt es durch und der Abbruch gilt als Fehlschlag.
+                abbruch_signal.pruefen()
                 raise MediaError("Kodierung abgebrochen")
             if fortschritt and dauer_s:
                 treffer = _PROGRESS_TIME.search(zeile)

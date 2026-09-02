@@ -152,6 +152,27 @@ def erledigt(db: Session, job: Job, nachricht: str | None = None) -> None:
     log.info("Auftrag %s erledigt (%s %s)", job.id, job.type, job.target_id or "")
 
 
+def unterbrochen(db: Session, job: Job, nachricht: str) -> None:
+    """Legt einen Auftrag zurueck in die Warteschlange, ohne ihn zu bewerten.
+
+    Fuer das Herunterfahren gedacht und nur dafuer. Der Unterschied zu
+    :func:`gescheitert` ist nicht kosmetisch: Ein gescheiterter Auftrag zaehlt
+    einen Versuch hoch und wird nach genug Versuchen aufgegeben. Ein Update des
+    Containers waehrend eines langen Downloads darf aber kein Video verbrennen -
+    und der Nutzer soll danach keine Liste roter Fehlschlaege sehen, die keine
+    sind.
+
+    Der Versuchszaehler bleibt deshalb unberuehrt, und der Auftrag steht sofort
+    wieder auf "wartet". Beim naechsten Start nimmt ihn der erste freie Strang.
+    """
+    job.status = JobStatus.PENDING
+    job.started_at = None
+    job.progress = 0.0
+    job.message = nachricht[:1000]
+    db.commit()
+    log.info("Auftrag %s unterbrochen und wieder eingereiht (%s)", job.id, job.type)
+
+
 def gescheitert(db: Session, job: Job, fehler: str) -> None:
     """Vermerkt einen Fehlschlag - auch dann, wenn die Sitzung blockiert ist.
 

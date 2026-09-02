@@ -33,7 +33,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import bundle, jobs, media, suche, ytdlp
+from app.services import abbruch, bundle, jobs, media, suche, ytdlp
 
 log = logging.getLogger(__name__)
 
@@ -172,6 +172,43 @@ class ShortUebersprungen(Exception):
     eine bewusste Entscheidung, die als 'uebersprungen' vermerkt wird."""
 
 
+#: Liegt diese Datei im Arbeitsordner, wurde der letzte Lauf durch das
+#: Herunterfahren unterbrochen und der Ordner darf weiterverwendet werden.
+FORTSETZMARKE = ".unterbrochen"
+
+
+def _fortsetzmarke_setzen(ordner: Path) -> None:
+    """Haelt fest, dass hier nichts kaputt ist, sondern nur Schluss war.
+
+    Ohne diese Marke waere nicht unterscheidbar, ob der Ordner von einem
+    sauberen Abbruch stammt oder von einem Absturz mitten im Umpacken. Im
+    zweiten Fall darf nichts davon weiterverwendet werden.
+    """
+    try:
+        ordner.mkdir(parents=True, exist_ok=True)
+        (ordner / FORTSETZMARKE).touch()
+    except OSError:
+        # Ohne Marke wird der Ordner beim naechsten Lauf verworfen und der
+        # Download beginnt von vorn. Aergerlich, aber unschaedlich - kein Grund,
+        # das Herunterfahren daran scheitern zu lassen.
+        log.warning("Fortsetzmarke in %s liess sich nicht setzen", ordner, exc_info=True)
+
+
+def _fortsetzmarke_einloesen(ordner: Path) -> bool:
+    """Liefert True, wenn hier fortgesetzt werden darf, und raeumt die Marke ab.
+
+    Die Marke wird sofort entfernt: Bricht dieser Lauf anders als durch ein
+    Herunterfahren ab, soll der naechste den Ordner verwerfen statt auf
+    Truemmern aufzubauen.
+    """
+    marke = ordner / FORTSETZMARKE
+    if not marke.is_file():
+        return False
+    marke.unlink(missing_ok=True)
+    log.info("Setze unterbrochenen Download in %s fort", ordner)
+    return True
+
+
 @jobs.register(JobType.VIDEO_ARCHIVE)
 def archivieren(db: Session, job: Job) -> None:
     video_id = job.target_id
@@ -183,7 +220,10 @@ def archivieren(db: Session, job: Job) -> None:
         raise ValueError(f"Video {video_id} nicht in der Datenbank")
 
     arbeitsordner = settings.tmp_dir / video_id
-    if arbeitsordner.exists():
+    fortsetzbar = _fortsetzmarke_einloesen(arbeitsordner)
+    if arbeitsordner.exists() and not fortsetzbar:
+        # Reste eines abgestuerzten oder gescheiterten Laufs. Was davon
+        # brauchbar ist, laesst sich nicht feststellen - also weg damit.
         shutil.rmtree(arbeitsordner, ignore_errors=True)
 
     try:
@@ -247,6 +287,7 @@ def archivieren(db: Session, job: Job) -> None:
                 media.build_remux_cmd(ergebnis.path, umgepackt, plan),
                 dauer_s=info_medien.duration_s,
                 fortschritt=lambda a: jobs.fortschritt(db, job, 0.62 + a * 0.18),
+                abbruch=abbruch.laeuft_herunter,
             )
             medien_datei = umgepackt
             info_medien = media.probe(medien_datei)
@@ -316,6 +357,15 @@ def archivieren(db: Session, job: Job) -> None:
 
         jobs.erledigt(db, job, f"archiviert, {video.bundle_bytes / 1e6:.1f} MB")
 
+    except abbruch.Abgebrochen:
+        # Kein Fehlschlag, sondern das Herunterfahren. Der Auftrag geht zurueck
+        # in die Warteschlange, das Video zurueck auf "wartet", und der
+        # angefangene Download bleibt liegen - der naechste Start setzt ihn
+        # fort, statt hunderte Megabyte erneut zu holen.
+        _fortsetzmarke_setzen(arbeitsordner)
+        _status(db, video, VideoStatus.QUEUED, "beim Herunterfahren unterbrochen")
+        jobs.unterbrochen(db, job, "beim Herunterfahren unterbrochen")
+        raise
     except ShortUebersprungen as e:
         # Bewusst uebersprungen, kein Fehlschlag: Auftrag gilt als erledigt,
         # das Video bleibt mit Begruendung sichtbar und laesst sich holen,
@@ -338,7 +388,10 @@ def archivieren(db: Session, job: Job) -> None:
         jobs.gescheitert(db, job, f"{type(e).__name__}: {e}")
         raise
     finally:
-        shutil.rmtree(arbeitsordner, ignore_errors=True)
+        # Beim Herunterfahren bleibt der Ordner stehen - er ist der halbe
+        # Download, aus dem der naechste Start fortsetzt.
+        if not (arbeitsordner / FORTSETZMARKE).is_file():
+            shutil.rmtree(arbeitsordner, ignore_errors=True)
 
 
 @jobs.register(JobType.VIDEO_RECODE)
@@ -400,6 +453,7 @@ def recodieren(db: Session, job: Job) -> None:
             media.build_archive_cmd(entpackt, ziel_datei, codec),
             dauer_s=info_vorher.duration_s,
             fortschritt=lambda a: jobs.fortschritt(db, job, 0.1 + a * 0.8),
+            abbruch=abbruch.laeuft_herunter,
         )
 
         neu = ziel_datei.stat().st_size
@@ -440,6 +494,14 @@ def recodieren(db: Session, job: Job) -> None:
         jobs.erledigt(db, job, f"recodiert, {ersparnis:.1f} % kleiner")
         log.info("%s recodiert: %.1f MB -> %.1f MB (%.1f %%)", video_id, alt / 1e6, neu / 1e6, ersparnis)
 
+    except abbruch.Abgebrochen:
+        # Anders als beim Download gibt es hier nichts fortzusetzen: ffmpeg
+        # kann einen halben Encode nicht wiederaufnehmen. Der Auftrag wird
+        # aber wieder eingereiht statt als gescheitert vermerkt, und das alte
+        # Buendel steht unangetastet - das Video bleibt abspielbar.
+        _status(db, video, VideoStatus.ARCHIVED, "Verkleinerung beim Herunterfahren unterbrochen")
+        jobs.unterbrochen(db, job, "beim Herunterfahren unterbrochen")
+        raise
     except Exception as e:
         # Das alte Buendel steht noch - das Video bleibt abspielbar.
         _fehler_vermerken(db, video_id, VideoStatus.ARCHIVED, f"Recodierung fehlgeschlagen: {e}")

@@ -9,6 +9,12 @@ services:
     image: vitrine:latest
     container_name: vitrine
     restart: unless-stopped
+    # Dockers Standard sind 10 Sekunden - zu wenig. In der Zeit muss ein
+    # laufender Download seine Teildatei sauber liegenlassen und ffmpeg sich
+    # beenden; wird vorher SIGKILL geschickt, faengt das Video beim naechsten
+    # Start wieder bei null an. Der Dienst braucht die Frist im Normalfall
+    # nicht: Er meldet sich zurueck, sobald er fertig ist.
+    stop_grace_period: 45s
     ports:
       - "${YTA_PORT:-8000}:8000"
     volumes:

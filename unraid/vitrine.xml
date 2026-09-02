@@ -24,7 +24,13 @@ Hinweis zu den Variablen unten: Sie sind Startwerte. Wer dieselbe Einstellung sp
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/gottschalkfelix4-source/vitrine/main/unraid/vitrine.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/gottschalkfelix4-source/vitrine/main/unraid/vitrine.png</Icon>
-  <ExtraParams>--stop-timeout 30</ExtraParams>
+  <!-- Die Frist beim Stoppen. Dockers Standard von 10 Sekunden reicht nicht:
+       In der Zeit muss ein laufender Download seine Teildatei sauber
+       liegenlassen und ffmpeg sich beenden. Kommt SIGKILL vorher, faengt das
+       Video beim naechsten Start wieder bei null an - bei einem 4K-Video sind
+       das schnell mehrere hundert Megabyte. Im Normalfall wird die Frist nicht
+       ausgeschoepft, der Dienst meldet sich zurueck, sobald er fertig ist. -->
+  <ExtraParams>--stop-timeout 45</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>

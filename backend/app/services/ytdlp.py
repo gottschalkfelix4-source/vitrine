@@ -24,6 +24,7 @@ import yt_dlp
 from yt_dlp.utils import UnsupportedError, YoutubeDLError
 
 from app.config import settings
+from app.services import abbruch
 
 log = logging.getLogger(__name__)
 
@@ -282,6 +283,11 @@ def download_video(
     ziel.mkdir(parents=True, exist_ok=True)
 
     def _hook(d: dict[str, Any]) -> None:
+        # Die einzige Stelle, an der wir waehrend eines laufenden Downloads
+        # ueberhaupt zum Zug kommen - yt-dlp ruft sie mehrmals je Sekunde auf.
+        # Die Ausnahme verlaesst den Download sofort und laesst die
+        # .part-Dateien liegen, aus denen der naechste Lauf fortsetzt.
+        abbruch.pruefen()
         if not fortschritt:
             return
         if d.get("status") == "downloading":
@@ -324,6 +330,11 @@ def download_video(
             # "Object of type FFmpegMergerPP is not JSON serializable", und
             # zwar erst nach dem vollstaendigen Download.
             info = ydl.sanitize_info(info)
+    except abbruch.Abgebrochen:
+        # Muss VOR YoutubeDLError stehen und ungefiltert durch: Das ist kein
+        # Downloadfehler, sondern das Herunterfahren. Als YtdlpError verpackt
+        # wuerde der Auftrag als gescheitert vermerkt statt fortgesetzt.
+        raise
     except YoutubeDLError as e:
         text = str(e).lower()
         if any(w in text for w in ("private", "unavailable", "removed", "deleted")):

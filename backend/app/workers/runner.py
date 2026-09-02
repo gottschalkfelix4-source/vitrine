@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 
 from app.config import settings
 from app.db import session_scope
 from app.models import JobType
-from app.services import jobs
+from app.services import abbruch, jobs
 
 log = logging.getLogger(__name__)
 
@@ -91,10 +92,29 @@ class Arbeiterwerk:
             ", ".join(f"{g.name}x{max(1, g.straenge)}" for g in _gruppen()),
         )
 
-    def stop(self, timeout: float = 10.0) -> None:
+    def stop(self, timeout: float = 20.0) -> None:
+        """Beendet die Straenge und wartet, bis sie wirklich draussen sind.
+
+        Zuerst das Abbruchsignal: Ein Strang, der gerade laedt oder kodiert,
+        merkt das ohne es gar nicht - er steckt tief in yt-dlp oder ffmpeg und
+        wuerde erst nach Stunden das naechste Mal auf ``self._stop`` schauen.
+
+        Danach wird gewartet, und zwar auf alle zusammen statt auf jeden
+        einzeln mit einem Bruchteil der Zeit. Bei acht Straengen bekaeme sonst
+        jeder zweieinhalb Sekunden - zu wenig, damit ffmpeg sich beendet, und
+        der einzige, der ueberhaupt Zeit braucht, ist ohnehin nur einer.
+        """
+        abbruch.anfordern()
         self._stop.set()
+        frist = time.monotonic() + timeout
         for t in self._threads:
-            t.join(timeout=timeout / max(1, len(self._threads)))
+            t.join(timeout=max(0.0, frist - time.monotonic()))
+        noch_da = [t.name for t in self._threads if t.is_alive()]
+        if noch_da:
+            log.warning(
+                "Arbeiter nicht rechtzeitig beendet: %s - sie werden mit dem "
+                "Prozess abgeraeumt", ", ".join(noch_da),
+            )
 
     def _schleife(self, gruppe: Gruppe) -> None:
         while not self._stop.is_set():
@@ -113,6 +133,16 @@ class Arbeiterwerk:
                     log.info("[%s] %s %s beginnt", gruppe.name, job.type, job.target_id or "")
                     try:
                         bearbeiter(db, job)
+                    except abbruch.Abgebrochen:
+                        # Der Bearbeiter hat den Auftrag bereits zurueck in die
+                        # Warteschlange gelegt. Hier wird nur noch der Strang
+                        # beendet - weiterzumachen waere sinnlos, das naechste
+                        # Video traefe sofort wieder auf dasselbe Signal.
+                        log.info(
+                            "[%s] %s %s beim Herunterfahren unterbrochen",
+                            gruppe.name, job.type, job.target_id or "",
+                        )
+                        return
                     except Exception:
                         # Der Bearbeiter hat den Auftrag bereits als gescheitert
                         # vermerkt; hier geht es nur noch darum, den Strang am

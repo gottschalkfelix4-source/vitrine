@@ -20,7 +20,7 @@ from starlette.types import Scope
 from app.api import library, stream
 from app.config import settings
 from app.db import init_db, session_scope
-from app.services import cache, einstellungen, jobs
+from app.services import abbruch, cache, einstellungen, jobs
 from app.workers.runner import werk
 
 logging.basicConfig(
@@ -87,6 +87,11 @@ def _werkzeuge_pruefen() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Ein frischer Prozess hat ohnehin ein leeres Signal. Wichtig ist das fuer
+    # Tests und fuer jeden Fall, in dem die Anwendung im selben Prozess erneut
+    # hochfaehrt - ein stehengebliebenes Signal wuerde jeden Auftrag sofort
+    # wieder abbrechen.
+    abbruch.zuruecksetzen()
     init_db()
     with session_scope() as db:
         # Muss VOR allem anderen laufen: Was in der Oberflaeche eingestellt
@@ -105,6 +110,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     log.info("%s bereit - Daten unter %s", settings.app_name, settings.data_dir)
     yield
 
+    # Reihenfolge zaehlt: Erst das Abbruchsignal, damit ein laufender
+    # Download oder Encode ueberhaupt mitbekommt, dass Schluss ist. werk.stop()
+    # setzt es zwar auch, wartet aber gleich darauf - ohne das vorherige Signal
+    # waere die Wartezeit sicher vergeblich.
+    abbruch.anfordern()
     _stop.set()
     werk.stop()
 
