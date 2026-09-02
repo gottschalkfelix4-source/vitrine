@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.api import library
 from app.config import settings
@@ -396,3 +397,115 @@ def test_nicht_archiviertes_video_entfernen_gibt_409(umgebung):
     client, _ = umgebung
     assert client.delete("/api/videos/v1").status_code == 409
     assert client.delete("/api/videos/nixda").status_code == 404
+
+
+# ------------------------------------------------- Erst erfassen, dann laden
+
+
+def test_kanal_wird_standardmaessig_nur_erfasst():
+    """Der Standard muss "nur erfassen" sein: Ein Kanal mit tausenden Videos
+    wuerde sonst beim Aufnehmen eine tagelange Warteschlange erzeugen, bevor
+    man ueberhaupt gesehen hat, was drin ist."""
+    from app.api.library import KanalAnlegen
+
+    assert KanalAnlegen(url="@test").sofort_archivieren is False
+    # SQLAlchemy setzt Vorgabewerte erst beim Schreiben, nicht beim Erzeugen.
+    from app.models import Channel as C
+
+    assert C.__table__.c.auto_archive.default.arg is False
+
+
+def test_offene_zaehlen_vor_dem_klick(umgebung):
+    """Die Oberflaeche soll vor dem Herunterladen sagen koennen, worauf man
+    sich einlaesst."""
+    client, db = umgebung
+    for i in range(3):
+        db.add(Video(id=f"o{i}", channel_id="UCtest", title=f"Offen {i}",
+                     status=VideoStatus.NEW, duration_s=600))
+    db.commit()
+
+    d = client.get("/api/channels/UCtest/downloadable").json()
+    # v1 (queued) und v2 (unavailable) zaehlen nicht, v0 ist archiviert.
+    assert d["anzahl"] == 3
+    assert d["dauer_s"] == 1800
+    assert d["bytes_geschaetzt"] > 0
+
+
+def test_offene_zaehlen_beachtet_die_kanalregeln(umgebung):
+    """Ein Kanal ohne Shorts darf sie auch hier nicht mitzaehlen - sonst
+    verspricht die Anzeige mehr, als der Download liefert."""
+    client, db = umgebung
+    db.add(Video(id="s1", channel_id="UCtest", title="Short", status=VideoStatus.NEW,
+                 is_short=True, duration_s=30))
+    db.add(Video(id="n1", channel_id="UCtest", title="Normal", status=VideoStatus.NEW,
+                 duration_s=300))
+    db.commit()
+
+    assert client.get("/api/channels/UCtest/downloadable").json()["anzahl"] == 1
+
+    db.get(Channel, "UCtest").archive_shorts = True
+    db.commit()
+    assert client.get("/api/channels/UCtest/downloadable").json()["anzahl"] == 2
+
+
+def test_alle_laden_reiht_ein(umgebung):
+    client, db = umgebung
+    db.add(Video(id="o1", channel_id="UCtest", title="Offen", status=VideoStatus.NEW))
+    db.add(Video(id="f1", channel_id="UCtest", title="Fehlgeschlagen", status=VideoStatus.FAILED))
+    db.add(Video(id="u1", channel_id="UCtest", title="Uebersprungen", status=VideoStatus.SKIPPED))
+    db.commit()
+
+    r = client.post("/api/channels/UCtest/download-all")
+    assert r.status_code == 202
+    # Fehlgeschlagene und uebersprungene werden wieder aufgenommen - wer hier
+    # klickt, will alles haben.
+    assert r.json()["eingereiht"] == 3
+
+    eingereiht = {j.target_id for j in db.scalars(select(Job).where(Job.type == JobType.VIDEO_ARCHIVE))}
+    assert eingereiht == {"o1", "f1", "u1"}
+    assert db.get(Video, "o1").status == VideoStatus.QUEUED
+
+
+def test_alle_laden_verdoppelt_nichts(umgebung):
+    client, db = umgebung
+    db.add(Video(id="o1", channel_id="UCtest", title="Offen", status=VideoStatus.NEW))
+    db.commit()
+
+    client.post("/api/channels/UCtest/download-all")
+    zweiter = client.post("/api/channels/UCtest/download-all").json()
+    assert zweiter["eingereiht"] == 0, "bereits eingereihte duerfen nicht doppelt kommen"
+    assert len(list(db.scalars(select(Job).where(Job.type == JobType.VIDEO_ARCHIVE)))) == 1
+
+
+def test_alle_laden_bei_unbekanntem_kanal(umgebung):
+    client, _ = umgebung
+    assert client.post("/api/channels/UCnix/download-all").status_code == 404
+    assert client.get("/api/channels/UCnix/downloadable").status_code == 404
+
+
+# ------------------------------------------------------- Fortschrittsanzeige
+
+
+def test_aktive_auftraege_knapp_gehalten(umgebung):
+    """Die Oberflaeche fragt das im Sekundentakt ab - die Antwort muss klein
+    bleiben und trotzdem den Titel nennen, sonst steht dort nur eine ID."""
+    client, db = umgebung
+    from app.services import jobs as j
+
+    j.enqueue_archive(db, "v1")
+    laufend = j.claim_next(db, [JobType.VIDEO_ARCHIVE])
+    j.fortschritt(db, laufend, 0.42, "Lade 42 %")
+    j.enqueue_channel_sync(db, "UCtest")
+
+    d = client.get("/api/jobs/aktiv").json()
+    assert d["wartend"] == 1
+    (eintrag,) = d["laufend"]
+    assert eintrag["art"] == JobType.VIDEO_ARCHIVE
+    assert eintrag["titel"] == "Video 1"
+    assert eintrag["fortschritt"] == pytest.approx(0.42)
+    assert eintrag["meldung"] == "Lade 42 %"
+
+
+def test_aktive_auftraege_leer(umgebung):
+    client, _ = umgebung
+    assert client.get("/api/jobs/aktiv").json() == {"laufend": [], "wartend": 0}

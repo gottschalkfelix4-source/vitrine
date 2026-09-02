@@ -1463,3 +1463,93 @@
     min-width: 0;
   }
 }
+
+/* ======================================================= Fortschrittsleiste */
+
+/* Immer sichtbar, solange etwas laeuft - sonst wirkt das Programm nach einem
+   Klick eingefroren, weil der Fortschritt nur auf der Warteschlangenseite
+   steht. */
+.fortschrittsleiste {
+  display: block;
+  background: var(--flaeche);
+  border: 1px solid var(--rand-zart);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: var(--spalt);
+  transition: border-color var(--uebergang);
+}
+
+.fortschrittsleiste:hover {
+  border-color: var(--rand);
+}
+
+.fl-balken {
+  height: 3px;
+  background: var(--flaeche-hoch);
+  position: relative;
+  overflow: hidden;
+}
+
+.fl-balken span {
+  display: block;
+  height: 100%;
+  background: var(--zu-arbeit);
+  transition: width 500ms ease;
+}
+
+/* Ohne Fortschrittswert laeuft der Balken durch, statt bei 0 % zu stehen und
+   Stillstand vorzutaeuschen. */
+.fl-balken[data-unbestimmt="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 35%;
+  background: var(--zu-arbeit);
+  animation: fl-wandern 1.4s ease-in-out infinite;
+}
+
+@keyframes fl-wandern {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+.fl-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  font-size: 13px;
+  color: var(--text-gedaempft);
+}
+
+.fl-text strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.fl-titel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 42ch;
+}
+
+.fl-meldung {
+  color: var(--text-schwach);
+}
+
+.fl-prozent {
+  font-variant-numeric: tabular-nums;
+  color: var(--zu-arbeit);
+}
+
+.fl-rest {
+  margin-left: auto;
+  color: var(--text-schwach);
+  white-space: nowrap;
+}

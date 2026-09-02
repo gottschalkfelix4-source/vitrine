@@ -95,6 +95,15 @@ export interface VideoDetail {
   statusmeldung: string | null;
 }
 
+export interface LaufenderAuftrag {
+  id: number;
+  art: string;
+  ziel: string | null;
+  titel: string | null;
+  fortschritt: number;
+  meldung: string | null;
+}
+
 export interface EinstellungsFeld {
   name: string;
   gruppe: string;
@@ -235,6 +244,12 @@ export const api = {
     shorts: boolean;
     livestreams: boolean;
   }) => hole<KanalKurz>("/api/channels", { method: "POST", body: JSON.stringify(daten) }),
+  kanalOffene: (id: string) =>
+    hole<{ anzahl: number; dauer_s: number; bytes_geschaetzt: number }>(
+      `/api/channels/${id}/downloadable`,
+    ),
+  kanalAlleLaden: (id: string) =>
+    hole<{ eingereiht: number }>(`/api/channels/${id}/download-all`, { method: "POST" }),
   kanalAbgleichen: (id: string, voll = false) =>
     hole<{ job_id: number }>(`/api/channels/${id}/sync${frage({ voll })}`, { method: "POST" }),
 
@@ -266,6 +281,8 @@ export const api = {
     fetch(`/api/videos/${id}/playback-ended`, { method: "POST", keepalive: true }),
 
   auftraege: (status?: string) => hole<Auftrag[]>(`/api/jobs${frage({ status })}`),
+  aktiveAuftraege: () =>
+    hole<{ laufend: LaufenderAuftrag[]; wartend: number }>("/api/jobs/aktiv"),
   auftragAbbrechen: (id: number) => hole<void>(`/api/jobs/${id}/cancel`, { method: "POST" }),
   auftragWiederholen: (id: number) => hole<void>(`/api/jobs/${id}/retry`, { method: "POST" }),
 

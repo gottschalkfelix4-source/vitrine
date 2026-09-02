@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -101,7 +102,9 @@ class KanalKurz(BaseModel):
 
 class KanalAnlegen(BaseModel):
     url: str = Field(description="Kanal-URL, Handle (@name) oder Kanal-ID (UC...)")
-    sofort_archivieren: bool = True
+    #: Standard aus: Erst erfassen, dann entscheiden. Sonst laeuft bei einem
+    #: grossen Kanal sofort eine tagelange Warteschlange an.
+    sofort_archivieren: bool = False
     shorts: bool = False
     livestreams: bool = False
 
@@ -234,6 +237,69 @@ def kanal(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     }
 
 
+@router.get("/channels/{kanal_id}/downloadable")
+def kanal_offene_zaehlen(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Wie viele Videos liessen sich jetzt herunterladen?
+
+    Getrennt vom Ausloesen, damit die Oberflaeche vor dem Klick sagen kann,
+    worauf man sich einlaesst - bei einem grossen Kanal sind das schnell
+    Tage an Downloads.
+    """
+    from app.workers.sync import _soll_archiviert_werden
+
+    kanal = db.get(Channel, kanal_id)
+    if kanal is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kanal unbekannt")
+
+    offen = db.scalars(
+        select(Video).where(
+            Video.channel_id == kanal_id,
+            Video.status.in_([VideoStatus.NEW, VideoStatus.FAILED, VideoStatus.SKIPPED]),
+        )
+    )
+    passend = [v for v in offen if _soll_archiviert_werden(kanal, v)]
+    dauer = sum(v.duration_s or 0 for v in passend)
+    return {
+        "anzahl": len(passend),
+        "dauer_s": dauer,
+        # Grobe Hausnummer, absichtlich vorsichtig: gemessene Buendel liegen
+        # bei 1080p um 0,3 MB je Sekunde. Bei 4K ein Vielfaches - deshalb steht
+        # in der Oberflaeche "grob geschaetzt" daneben.
+        "bytes_geschaetzt": int(dauer * 0.3 * 1024**2),
+    }
+
+
+@router.post("/channels/{kanal_id}/download-all", status_code=status.HTTP_202_ACCEPTED)
+def kanal_alle_laden(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Reiht alle noch nicht archivierten Videos des Kanals ein.
+
+    Beachtet die Regeln des Kanals - ein Kanal ohne Shorts bekommt auch hier
+    keine. Bereits laufende oder wartende Auftraege werden nicht verdoppelt,
+    darum kuemmert sich die Warteschlange selbst.
+    """
+    from app.workers.sync import _offene_einreihen
+
+    kanal = db.get(Channel, kanal_id)
+    if kanal is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kanal unbekannt")
+
+    # Fehlgeschlagene und uebersprungene wieder aufnehmen: Wer hier klickt,
+    # will alles haben, auch die Nachzuegler von letzter Woche.
+    db.execute(
+        sa_update(Video)
+        .where(
+            Video.channel_id == kanal_id,
+            Video.status.in_([VideoStatus.FAILED, VideoStatus.SKIPPED]),
+        )
+        .values(status=VideoStatus.NEW, status_message=None)
+    )
+    db.commit()
+
+    anzahl = _offene_einreihen(db, kanal)
+    log.info("Kanal %s: %d Videos zum Herunterladen eingereiht", kanal_id, anzahl)
+    return {"eingereiht": anzahl}
+
+
 @router.delete("/channels/{kanal_id}")
 def kanal_entfernen(
     kanal_id: str,
@@ -257,7 +323,6 @@ def kanal_entfernen(
     from pathlib import Path as _Path
 
     from sqlalchemy import delete as sa_delete
-    from sqlalchemy import update as sa_update
 
     k = db.get(Channel, kanal_id)
     if k is None:
@@ -691,6 +756,41 @@ def warteschlange(
             "erstellt": j.created_at.isoformat() if j.created_at else None,
         })
     return ergebnis
+
+
+@router.get("/jobs/aktiv")
+def laufende_auftraege(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Knappe Auskunft fuer die Fortschrittsanzeige.
+
+    Bewusst schmal gehalten, weil die Oberflaeche das im Sekundentakt abfragt -
+    die vollstaendige Warteschlange mit Titeln waere dafuer zu schwer.
+    """
+    laufend = list(
+        db.scalars(
+            select(Job).where(Job.status == JobStatus.RUNNING).order_by(Job.priority, Job.id)
+        )
+    )
+    wartend = db.scalar(select(func.count(Job.id)).where(Job.status == JobStatus.PENDING)) or 0
+
+    eintraege = []
+    for j in laufend:
+        titel = None
+        if j.target_id:
+            if j.type == JobType.CHANNEL_SYNC:
+                k = db.get(Channel, j.target_id)
+                titel = k.name if k else None
+            else:
+                v = db.get(Video, j.target_id)
+                titel = v.title if v else None
+        eintraege.append({
+            "id": j.id,
+            "art": j.type,
+            "ziel": j.target_id,
+            "titel": titel,
+            "fortschritt": j.progress,
+            "meldung": j.message,
+        })
+    return {"laufend": eintraege, "wartend": wartend}
 
 
 @router.post("/jobs/{job_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)

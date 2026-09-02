@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
+import { Fortschrittsleiste } from "./components/Fortschritt";
 import { api } from "./lib/api";
 import { thumbUrl } from "./lib/api";
 import { useApi } from "./hooks/useApi";
@@ -145,6 +146,7 @@ export default function App() {
       />
       <Seitenleiste schmal={schmal} />
       <main className="inhalt">
+        <Fortschrittsleiste />
         <Routes>
           <Route path="/" element={<Startseite />} />
           <Route path="/kanaele" element={<Kanaeleseite aufAnlegen={() => setDialogOffen(true)} />} />

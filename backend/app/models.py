@@ -112,7 +112,13 @@ class Channel(Base):
     # Archivierungs-Regeln je Kanal (ueberschreiben die globalen Defaults)
     archive_codec: Mapped[str | None] = mapped_column(String(16))
     format_selector: Mapped[str | None] = mapped_column(String(512))
-    auto_archive: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Beim Abgleich gefundene Videos sofort zum Herunterladen einreihen.
+    #:
+    #: Standard ist bewusst AUS: Ein Kanal mit tausenden Videos wuerde sonst
+    #: beim Aufnehmen eine Warteschlange erzeugen, die tagelang laeuft und
+    #: hunderte Gigabyte belegt - bevor man ueberhaupt gesehen hat, was der
+    #: Kanal enthaelt. Erst erfassen, dann entscheiden.
+    auto_archive: Mapped[bool] = mapped_column(Boolean, default=False)
     archive_shorts: Mapped[bool] = mapped_column(Boolean, default=False)
     archive_live: Mapped[bool] = mapped_column(Boolean, default=False)
     #: Nur Videos ab diesem Datum holen. Schuetzt vor dem versehentlichen

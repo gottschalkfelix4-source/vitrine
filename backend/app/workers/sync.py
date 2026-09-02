@@ -91,8 +91,15 @@ def _video_anlegen(
 
 
 def _soll_archiviert_werden(kanal: Channel, video: Video) -> bool:
-    if not kanal.auto_archive:
-        return False
+    """Passt dieses Video zu den inhaltlichen Regeln des Kanals?
+
+    Bewusst OHNE ``auto_archive``: Das steuert nur, ob der Abgleich von sich
+    aus einreiht. Wer in der Oberflaeche auf "Alle laden" klickt, trifft eine
+    eigene Entscheidung - die inhaltlichen Regeln (keine Shorts, keine
+    Livestreams, nichts vor Datum X) gelten dort weiter, das Automatik-Flag
+    nicht. Waere es hier mit drin, bliebe der Knopf bei jedem Kanal ohne
+    Automatik wirkungslos.
+    """
     if video.is_short and not kanal.archive_shorts:
         return False
     if video.was_live and not kanal.archive_live:
@@ -145,7 +152,7 @@ def _sammlung_abgleichen(
     liste.last_synced_at = utcnow()
     db.commit()
 
-    if einreihen:
+    if einreihen and kanal.auto_archive:
         for eintrag in eintraege:
             video = db.get(Video, eintrag.id)
             if video and video.status == VideoStatus.NEW and _soll_archiviert_werden(kanal, video):
@@ -156,10 +163,18 @@ def _sammlung_abgleichen(
     return neu
 
 
-def _offene_einreihen(db: Session, kanal: Channel) -> int:
+def _offene_einreihen(db: Session, kanal: Channel, *, nur_bei_automatik: bool = False) -> int:
     """Reiht alle noch unarchivierten Videos des Kanals ein, die den Regeln
     des Kanals entsprechen. Laeuft bewusst erst NACH der Kennzeichnung von
-    Shorts und Livestreams."""
+    Shorts und Livestreams.
+
+    ``nur_bei_automatik`` unterscheidet die beiden Aufrufer: Der Abgleich
+    setzt es und tut damit nichts, wenn der Kanal auf "nur erfassen" steht.
+    Der Knopf in der Oberflaeche setzt es nicht - dort hat der Nutzer die
+    Entscheidung gerade selbst getroffen.
+    """
+    if nur_bei_automatik and not kanal.auto_archive:
+        return 0
     anzahl = 0
     for video in db.scalars(
         select(Video).where(Video.channel_id == kanal.id, Video.status == VideoStatus.NEW)
@@ -247,7 +262,7 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
                 log.info("%s fuer %s nicht vorhanden: %s", titel, kanal_id, e)
 
         # Jetzt, mit vollstaendiger Kennzeichnung, einreihen.
-        eingereiht = _offene_einreihen(db, kanal)
+        eingereiht = _offene_einreihen(db, kanal, nur_bei_automatik=True)
         log.info("%s: %d Videos zum Archivieren eingereiht", kanal_id, eingereiht)
 
         # ---- Die vom Kanal angelegten Playlists

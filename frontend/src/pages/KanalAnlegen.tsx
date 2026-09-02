@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => void }) {
   const navigate = useNavigate();
   const [url, setUrl] = useState("");
-  const [sofort, setSofort] = useState(true);
+  const [sofort, setSofort] = useState(false);
   const [shorts, setShorts] = useState(false);
   const [live, setLive] = useState(false);
   const [laeuft, setLaeuft] = useState(false);
@@ -43,8 +43,9 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
       <form className="dialog" onSubmit={absenden}>
         <h2>Kanal aufnehmen</h2>
         <p className="erklaerung">
-          Adresse, Handle oder Kanal-ID. Vitrine liest die Videos und Playlists des Kanals und lädt
-          sie im Hintergrund – das kann bei großen Kanälen eine Weile dauern.
+          Adresse, Handle oder Kanal-ID. Vitrine erfasst zunächst nur, welche Videos und Playlists
+          es gibt – das dauert bei großen Kanälen einige Minuten. Heruntergeladen wird erst, wenn
+          du es auslöst.
         </p>
 
         <div className="feld">
@@ -62,10 +63,11 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
         <label className="schalter">
           <input type="checkbox" checked={sofort} onChange={(e) => setSofort(e.target.checked)} />
           <span>
-            Videos gleich archivieren
+            Videos sofort herunterladen
             <div style={{ color: "var(--text-schwach)", fontSize: 12 }}>
-              Ohne Haken wird der Kanal nur beobachtet; einzelne Videos lassen sich später gezielt
-              holen.
+              Ohne Haken wird der Kanal nur erfasst – du siehst dann, was es gibt, und lädst
+              einzeln oder alles auf einmal. Bei großen Kanälen ist das der ruhigere Weg: Ein
+              Kanal mit 3000 Videos beschäftigt die Warteschlange sonst tagelang.
             </div>
           </span>
         </label>

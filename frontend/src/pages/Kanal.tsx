@@ -1,11 +1,19 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { Fehler, Gitter, Leer, Skelettgitter, Videokachel } from "../components/ui";
+import { Fehler, Gitter, Hinweis, Leer, Skelettgitter, Videokachel } from "../components/ui";
 import { useApi, useVideostapel } from "../hooks/useApi";
 import type { Sammlung } from "../lib/api";
 import { api, thumbUrl } from "../lib/api";
 import { bytes, datum } from "../lib/format";
+
+/** Grobe Dauerangabe fuer die Nachfrage - Sekunden helfen dort niemandem. */
+function dauerGrob(sekunden: number): string {
+  const std = sekunden / 3600;
+  if (std < 1) return `${Math.round(sekunden / 60)} Minuten`;
+  if (std < 48) return `${Math.round(std)} Stunden`;
+  return `${Math.round(std / 24)} Tage`;
+}
 
 /** Reihenfolge der Tabs wie bei YouTube: Videos, Shorts, Livestreams, Playlists. */
 const ART_TEXT: Record<Sammlung["art"], string> = {
@@ -24,8 +32,15 @@ export function Kanalseite() {
   const tab = (suchparameter.get("tab") ?? "videos") as Tab;
   const [abgleichLaeuft, setAbgleichLaeuft] = useState(false);
   const [entfernenOffen, setEntfernenOffen] = useState(false);
+  // Herunterladen in zwei Schritten: Bei einem grossen Kanal geht es um Tage
+  // und hunderte Gigabyte - das soll niemand mit einem Klick ausloesen, ohne
+  // die Zahl gesehen zu haben.
+  const [ladenNachfrage, setLadenNachfrage] = useState(false);
+  const [ladenLaeuft, setLadenLaeuft] = useState(false);
+  const [ladenMeldung, setLadenMeldung] = useState<string | null>(null);
 
   const kanal = useApi(() => api.kanal(kanalId), [kanalId]);
+  const offene = useApi(() => api.kanalOffene(kanalId), [kanalId]);
 
   // Die Videos kommen serverseitig gefiltert und seitenweise. Der Filter
   // MUSS auf dem Server liegen: Wer Seite fuer Seite laedt und erst im Browser
@@ -69,6 +84,17 @@ export function Kanalseite() {
 
   return (
     <>
+      {ladenMeldung ? (
+        <Hinweis>
+          <div>
+            {ladenMeldung} Der Fortschritt steht oben und in der{" "}
+            <Link to="/warteschlange" style={{ textDecoration: "underline" }}>
+              Warteschlange
+            </Link>
+            .
+          </div>
+        </Hinweis>
+      ) : null}
       <div className="kanal-kopf">
         {thumbUrl(d.banner) ? <img className="banner" src={thumbUrl(d.banner)!} alt="" /> : null}
         <div className="kanal-zeile">
@@ -93,6 +119,42 @@ export function Kanalseite() {
             ) : null}
           </div>
           <div className="aktionen">
+            {offene.daten && offene.daten.anzahl > 0 ? (
+              ladenNachfrage ? (
+                <>
+                  <span style={{ color: "var(--text-gedaempft)", fontSize: 13 }}>
+                    {offene.daten.anzahl} Videos, {dauerGrob(offene.daten.dauer_s)}, grob{" "}
+                    {bytes(offene.daten.bytes_geschaetzt)}
+                  </span>
+                  <button
+                    className="knopf"
+                    data-art="stark"
+                    disabled={ladenLaeuft}
+                    onClick={async () => {
+                      setLadenLaeuft(true);
+                      try {
+                        const r = await api.kanalAlleLaden(kanalId);
+                        setLadenMeldung(`${r.eingereiht} Videos eingereiht.`);
+                        setLadenNachfrage(false);
+                        offene.neuLaden();
+                        stapel.neuLaden();
+                      } finally {
+                        setLadenLaeuft(false);
+                      }
+                    }}
+                  >
+                    {ladenLaeuft ? "wird eingereiht …" : "Ja, alle laden"}
+                  </button>
+                  <button className="knopf" onClick={() => setLadenNachfrage(false)}>
+                    Abbrechen
+                  </button>
+                </>
+              ) : (
+                <button className="knopf" data-art="stark" onClick={() => setLadenNachfrage(true)}>
+                  ↓ Alle laden ({offene.daten.anzahl})
+                </button>
+              )
+            ) : null}
             <button className="knopf" onClick={abgleichen} disabled={abgleichLaeuft}>
               {abgleichLaeuft ? "wird eingereiht …" : "Jetzt abgleichen"}
             </button>
