@@ -6,6 +6,7 @@ import { thumbUrl } from "./lib/api";
 import { useApi } from "./hooks/useApi";
 import { KanalAnlegenDialog } from "./pages/KanalAnlegen";
 import { Kanalseite } from "./pages/Kanal";
+import { Einstellungenseite } from "./pages/Einstellungen";
 import { Kanaeleseite } from "./pages/Kanaele";
 import { Playlistseite } from "./pages/Playlist";
 import { Speicherseite } from "./pages/Speicher";
@@ -81,6 +82,7 @@ function Seitenleiste({ schmal }: { schmal: boolean }) {
     { pfad: "/kanaele", zeichen: "≡", text: "Kanäle", zahl: kanaele?.length },
     { pfad: "/warteschlange", zeichen: "⇅", text: "Warteschlange", zahl: offen || undefined },
     { pfad: "/speicher", zeichen: "▤", text: "Speicher" },
+    { pfad: "/einstellungen", zeichen: "⚙", text: "Einstellungen" },
   ];
 
   return (
@@ -152,6 +154,7 @@ export default function App() {
           <Route path="/suche" element={<Suchseite />} />
           <Route path="/warteschlange" element={<Warteschlangeseite />} />
           <Route path="/speicher" element={<Speicherseite />} />
+          <Route path="/einstellungen" element={<Einstellungenseite />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

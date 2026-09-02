@@ -17,6 +17,8 @@ Kaltspeicher: ein Buendel je Video, aus dem direkt gestreamt wird - ohne Entpack
 Zwei Pfade, bewusst getrennt: /data (Datenbank, Vorschaubilder, Heissspeicher) gehoert auf den Cache-Pool - klein und oft gelesen. /data/bundles (die Videos) gehoert auf das Array - gross und selten angefasst; die Platten duerfen schlafen.
 
 Ein Container, SQLite, kein Elasticsearch. Bringt ffmpeg, Deno und yt-dlp mit.
+
+Hinweis zu den Variablen unten: Sie sind Startwerte. Wer dieselbe Einstellung spaeter in der Oberflaeche unter "Einstellungen" aendert, ueberschreibt sie dauerhaft - das Feld hier bewirkt dann nichts mehr. Die Oberflaeche zeigt bei jedem Wert an, woher er kommt, und laesst ihn zurueckstellen.
   </Overview>
   <Category>MediaServer:Video Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>

@@ -752,6 +752,49 @@ def speicher(db: Session = Depends(get_db)) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------- Einstellungen
+
+
+@router.get("/settings")
+def einstellungen_lesen(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Alle aenderbaren Einstellungen samt Herkunft.
+
+    Die Herkunft ist wichtig genug fuer die Oberflaeche: Wer im Unraid-Template
+    eine Variable setzt, die er zuvor hier geaendert hat, wuerde sich sonst
+    wundern, warum sein Eintrag dort nichts bewirkt.
+    """
+    from app.services import einstellungen
+
+    felder = einstellungen.lesen(db)
+    gruppen: list[str] = []
+    for f in felder:
+        if f["gruppe"] not in gruppen:
+            gruppen.append(f["gruppe"])
+    return {"gruppen": gruppen, "felder": felder}
+
+
+@router.put("/settings")
+def einstellungen_schreiben(
+    aenderungen: dict[str, Any], db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    from app.services import einstellungen
+
+    try:
+        return einstellungen.schreiben(db, aenderungen)
+    except einstellungen.Ungueltig as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+
+
+@router.post("/settings/reset")
+def einstellungen_zuruecksetzen(
+    namen: list[str] | None = None, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    """Entfernt gespeicherte Werte - danach gilt wieder Umgebung bzw. Standard."""
+    from app.services import einstellungen
+
+    return {"zurueckgesetzt": einstellungen.zuruecksetzen(db, namen)}
+
+
 @router.get("/thumbs/{datei}")
 def thumbnail(datei: str) -> FileResponse:
     """Liefert ein Vorschaubild.

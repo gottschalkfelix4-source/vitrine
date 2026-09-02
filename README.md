@@ -90,7 +90,23 @@ oder `UC…`). Zwei Hinweise:
 
 ## Konfiguration
 
-Alles ueber Umgebungsvariablen mit Praefix `YTA_`. Die wichtigsten:
+Das meiste laesst sich in der Oberflaeche unter **Einstellungen** aendern -
+Qualitaet, Codec, Fristen, Untertitel, Arbeiter. Aenderungen wirken sofort fuer
+neue Auftraege; was nur beim Start gelesen wird, ist als *Neustart* markiert.
+
+Es gibt drei Quellen, in dieser Rangfolge:
+
+1. **Oberflaeche** (in der Datenbank) - gewinnt.
+2. **Umgebung** (Unraid-Template, compose-Datei).
+3. **Standard** aus dem Code.
+
+Dass die Oberflaeche gewinnt, ist Absicht - sonst waere eine Aenderung dort
+nach jedem Neustart wieder weg. Damit das nicht verwirrt, zeigt jedes Feld
+seine Herkunft an ("aus der Umgebung", "hier geändert") und laesst sich
+einzeln zuruecksetzen; danach gilt wieder Umgebung bzw. Standard.
+
+Wer alles per Umgebungsvariable steuern will, aendert einfach nichts in der
+Oberflaeche. Die wichtigsten Variablen:
 
 | Variable | Standard | Bedeutung |
 |---|---|---|

@@ -1299,3 +1299,167 @@
     height: 36px;
   }
 }
+
+/* ============================================================ Einstellungen */
+
+.einst-gruppe {
+  margin-bottom: 34px;
+  max-width: 860px;
+}
+
+.einst-gruppe h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-gedaempft);
+  margin: 0 0 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rand-zart);
+}
+
+.einst-zeile {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spalt-gross);
+  padding: 14px 10px;
+  border-radius: var(--radius-klein);
+  border-left: 2px solid transparent;
+}
+
+.einst-zeile:hover {
+  background: var(--flaeche);
+}
+
+/* Ungespeicherte Aenderungen sichtbar machen - sonst weiss man nach dem
+   Scrollen nicht mehr, was man angefasst hat. */
+.einst-zeile[data-geaendert="true"] {
+  background: var(--flaeche);
+  border-left-color: var(--zu-arbeit);
+}
+
+.einst-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.einst-text label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.einst-text p {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-gedaempft);
+  max-width: 62ch;
+}
+
+.einst-marke,
+.einst-herkunft {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: var(--radius-rund);
+  background: var(--flaeche-hoch);
+  color: var(--text-schwach);
+}
+
+.einst-marke {
+  color: var(--zu-arbeit);
+}
+
+.einst-herkunft[data-h="datenbank"] {
+  color: var(--zu-archiviert);
+}
+
+.einst-zuruecksetzen {
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--text-gedaempft);
+  text-decoration: underline;
+}
+
+.einst-zuruecksetzen:hover {
+  color: var(--text);
+}
+
+.einst-eingabe {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-width: 210px;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.einst-eingabe input[type="number"],
+.einst-eingabe input[type="text"],
+.einst-eingabe select {
+  background: var(--flaeche-hoch);
+  border: 1px solid var(--rand);
+  border-radius: var(--radius-klein);
+  padding: 7px 10px;
+  outline: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.einst-eingabe input[type="number"] {
+  width: 110px;
+}
+
+.einst-eingabe input[type="text"] {
+  width: 190px;
+}
+
+.einst-eingabe select {
+  min-width: 130px;
+}
+
+.einst-eingabe input:focus,
+.einst-eingabe select:focus {
+  border-color: var(--text-schwach);
+}
+
+.einst-einheit {
+  font-size: 12.5px;
+  color: var(--text-schwach);
+  min-width: 46px;
+}
+
+/* Bleibt am unteren Rand stehen, damit man nach dem Scrollen nicht suchen muss. */
+.speicherleiste {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  padding: 14px 18px;
+  margin: 0 -24px -24px;
+  background: var(--flaeche-schwebend);
+  border-top: 1px solid var(--rand);
+  font-size: 13.5px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.speicherleiste span {
+  margin-right: auto;
+  color: var(--zu-arbeit);
+}
+
+@media (max-width: 720px) {
+  .einst-zeile {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .einst-eingabe {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+}

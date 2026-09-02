@@ -20,7 +20,7 @@ from starlette.types import Scope
 from app.api import library, stream
 from app.config import settings
 from app.db import init_db, session_scope
-from app.services import cache, jobs
+from app.services import cache, einstellungen, jobs
 from app.workers.runner import werk
 
 logging.basicConfig(
@@ -88,6 +88,11 @@ def _werkzeuge_pruefen() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_db()
+    with session_scope() as db:
+        # Muss VOR allem anderen laufen: Was in der Oberflaeche eingestellt
+        # wurde, gewinnt ueber Umgebung und Standard - und die Arbeiter lesen
+        # gleich darauf ihre Straenge-Anzahl daraus.
+        einstellungen.anwenden(db)
     _werkzeuge_pruefen()
     with session_scope() as db:
         jobs.reset_stale(db)

@@ -95,6 +95,23 @@ export interface VideoDetail {
   statusmeldung: string | null;
 }
 
+export interface EinstellungsFeld {
+  name: string;
+  gruppe: string;
+  titel: string;
+  beschreibung: string;
+  art: "int" | "float" | "bool" | "text" | "auswahl" | "liste";
+  wert: unknown;
+  /** Woher der geltende Wert kommt - die Datenbank gewinnt ueber die Umgebung. */
+  herkunft: "datenbank" | "umgebung" | "standard";
+  neustart: boolean;
+  min: number | null;
+  max: number | null;
+  auswahl: string[];
+  einheit: string | null;
+  standard: unknown;
+}
+
 export interface Untertitelfund {
   video: VideoKurz;
   start_s: number;
@@ -253,6 +270,19 @@ export const api = {
   auftragWiederholen: (id: number) => hole<void>(`/api/jobs/${id}/retry`, { method: "POST" }),
 
   speicher: () => hole<Speicher>("/api/storage"),
+
+  einstellungen: () =>
+    hole<{ gruppen: string[]; felder: EinstellungsFeld[] }>("/api/settings"),
+  einstellungenSpeichern: (aenderungen: Record<string, unknown>) =>
+    hole<{ geaendert: string[]; neustart_noetig: string[] }>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(aenderungen),
+    }),
+  einstellungenZuruecksetzen: (namen: string[]) =>
+    hole<{ zurueckgesetzt: string[] }>("/api/settings/reset", {
+      method: "POST",
+      body: JSON.stringify(namen),
+    }),
 
   suchen: (q: string, limit = 40) => hole<Suchergebnis>(`/api/search${frage({ q, limit })}`),
   suchindexNeuAufbauen: () =>
