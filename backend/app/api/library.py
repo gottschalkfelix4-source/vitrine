@@ -840,14 +840,26 @@ def auftrag_wiederholen(job_id: int, db: Session = Depends(get_db)) -> dict[str,
 
 @router.get("/storage")
 def speicher(db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Der Blick, den YouTube nicht hat und ein Archiv braucht."""
-    kalt_bytes, quelle_bytes, archiviert = db.execute(
+    """Der Blick, den YouTube nicht hat und ein Archiv braucht.
+
+    Beantwortet drei Fragen auf einmal: Was liegt da? Was hat die Recodierung
+    gebracht? Und - die eigentlich wichtige - was kaeme noch dazu, wenn man
+    alles holt? Ohne die dritte Zahl entscheidet man ueber ein Archiv im
+    Blindflug.
+    """
+    import shutil as _shutil
+
+    kalt_bytes, quelle_bytes, archiviert, recodiert, dauer_archiviert = db.execute(
         select(
             func.coalesce(func.sum(Video.bundle_bytes), 0),
             func.coalesce(func.sum(Video.source_bytes), 0),
             func.count(Video.id).filter(Video.status == VideoStatus.ARCHIVED),
+            func.count(Video.id).filter(Video.recoded.is_(True)),
+            func.coalesce(func.sum(Video.duration_s).filter(Video.status == VideoStatus.ARCHIVED), 0),
         )
     ).one()
+    kalt_bytes, quelle_bytes = int(kalt_bytes or 0), int(quelle_bytes or 0)
+
     nach_status = dict(
         db.execute(select(Video.status, func.count(Video.id)).group_by(Video.status)).all()
     )
@@ -855,18 +867,91 @@ def speicher(db: Session = Depends(get_db)) -> dict[str, Any]:
         select(func.count(Job.id)).where(
             Job.type == JobType.VIDEO_RECODE, Job.status == JobStatus.PENDING
         )
-    )
+    ) or 0
+
+    # ---- Was liegt je Kanal? Zeigt, wer den Platz belegt.
+    je_kanal = [
+        {
+            "id": kid,
+            "name": name,
+            "videos": anzahl,
+            "bytes": int(groesse or 0),
+        }
+        for kid, name, anzahl, groesse in db.execute(
+            select(
+                Channel.id,
+                Channel.name,
+                func.count(Video.id).filter(Video.status == VideoStatus.ARCHIVED),
+                func.coalesce(func.sum(Video.bundle_bytes), 0),
+            )
+            .join(Video, Video.channel_id == Channel.id, isouter=True)
+            .group_by(Channel.id)
+            .order_by(func.coalesce(func.sum(Video.bundle_bytes), 0).desc())
+        ).all()
+    ]
+
+    # ---- Die groessten Buendel. Bei knappem Platz die erste Stellschraube.
+    groesste = [
+        {"id": v.id, "titel": v.title, "bytes": v.bundle_bytes, "kanal": v.channel.name if v.channel else None}
+        for v in db.scalars(
+            select(Video)
+            .where(Video.status == VideoStatus.ARCHIVED, Video.bundle_bytes.is_not(None))
+            .order_by(Video.bundle_bytes.desc())
+            .limit(8)
+        )
+    ]
+
+    # ---- Hochrechnung auf das, was noch fehlt.
+    # Grundlage ist der gemessene eigene Schnitt (Bytes je Sekunde), nicht eine
+    # Faustzahl - sobald ein paar Videos da sind, ist das die ehrlichste
+    # Schaetzung. Vorher eine vorsichtige Annahme fuer 1080p.
+    je_sekunde = (kalt_bytes / dauer_archiviert) if dauer_archiviert else 0.3 * 1024**2
+    offen_anzahl, offen_dauer = db.execute(
+        select(
+            func.count(Video.id),
+            func.coalesce(func.sum(Video.duration_s), 0),
+        ).where(Video.status.in_([VideoStatus.NEW, VideoStatus.QUEUED, VideoStatus.FAILED]))
+    ).one()
+
+    # ---- Der Datentraeger. Kaltspeicher und Heissspeicher koennen auf
+    # verschiedenen liegen (Unraid: Array und Cache-Pool) - dann sind es zwei.
+    def _traeger(pfad) -> dict[str, Any] | None:
+        try:
+            g, b, f = _shutil.disk_usage(pfad)
+            return {"pfad": str(pfad), "gesamt": g, "belegt": b, "frei": f}
+        except OSError:
+            return None
+
+    traeger = [t for t in (_traeger(settings.bundle_dir), _traeger(settings.cache_dir)) if t]
+    # Gleicher Datentraeger? Dann nur einmal zeigen.
+    if len(traeger) == 2 and traeger[0]["gesamt"] == traeger[1]["gesamt"]:
+        traeger = [traeger[0] | {"pfad": "Daten und Videos"}]
+
     return {
         "kaltspeicher": {
-            "bytes": int(kalt_bytes or 0),
+            "bytes": kalt_bytes,
             "videos": archiviert,
-            "quelle_bytes": int(quelle_bytes or 0),
-            "gespart_bytes": int((quelle_bytes or 0) - (kalt_bytes or 0)),
+            "quelle_bytes": quelle_bytes,
+            "gespart_bytes": quelle_bytes - kalt_bytes,
+            "recodiert": recodiert,
+            "dauer_s": int(dauer_archiviert or 0),
+            "bytes_je_sekunde": round(je_sekunde),
         },
         "heissspeicher": cache.usage(db),
         "freier_platz": cache.free_space(),
+        "traeger": traeger,
         "videos_nach_status": nach_status,
-        "recodierungen_offen": offen_recode or 0,
+        "recodierungen_offen": offen_recode,
+        "je_kanal": je_kanal,
+        "groesste": groesste,
+        "hochrechnung": {
+            "offene_videos": offen_anzahl,
+            "offene_dauer_s": int(offen_dauer or 0),
+            "bytes_geschaetzt": int((offen_dauer or 0) * je_sekunde),
+            # Ob die Schaetzung auf eigenen Messwerten beruht oder nur auf einer
+            # Annahme, gehoert dazu - sonst liest man eine Hausnummer als Zusage.
+            "gemessen": bool(dauer_archiviert),
+        },
     }
 
 

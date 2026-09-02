@@ -1553,3 +1553,116 @@
   color: var(--text-schwach);
   white-space: nowrap;
 }
+
+/* ============================================================ Speicherseite */
+
+.sp-block {
+  margin-bottom: 30px;
+  max-width: 860px;
+}
+
+.sp-block h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-gedaempft);
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rand-zart);
+}
+
+.sp-balken {
+  height: 6px;
+  background: var(--flaeche-hoch);
+  border-radius: var(--radius-rund);
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.sp-balken span {
+  display: block;
+  height: 100%;
+  transition: width 400ms ease;
+}
+
+.sp-zeile-kopf {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spalt);
+  font-size: 13.5px;
+}
+
+.sp-zeile-kopf .zahl {
+  color: var(--text-gedaempft);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lange Videotitel duerfen die Zahl rechts nicht wegdruecken. */
+.sp-titel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sp-traeger + .sp-traeger {
+  margin-top: 16px;
+}
+
+.sp-pfad {
+  font-family: var(--schrift-zahl);
+  font-size: 12.5px;
+  color: var(--text-gedaempft);
+}
+
+.sp-reihe {
+  display: block;
+  padding: 9px 10px;
+  margin: 0 -10px;
+  border-radius: var(--radius-klein);
+  transition: background var(--uebergang);
+}
+
+.sp-reihe:hover {
+  background: var(--flaeche);
+}
+
+/* Die Hochrechnung ist die Zahl, wegen der man diese Seite aufruft - sie
+   bekommt deshalb mehr Gewicht als die Balken darunter. */
+.sp-prognose {
+  display: flex;
+  gap: var(--spalt-gross);
+  align-items: flex-start;
+  flex-wrap: wrap;
+  background: var(--flaeche);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.sp-prognose .wert {
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sp-prognose .zusatz {
+  font-size: 12.5px;
+  color: var(--text-gedaempft);
+  margin-top: 4px;
+}
+
+.sp-prognose p {
+  flex: 1;
+  min-width: 260px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-gedaempft);
+}
+
+.karte .sp-balken {
+  margin-top: 10px;
+}

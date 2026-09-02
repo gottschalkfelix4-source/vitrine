@@ -220,10 +220,51 @@ def test_auftrag_abbrechen_und_wiederholen(umgebung):
 def test_speicheruebersicht(umgebung):
     client, _ = umgebung
     d = client.get("/api/storage").json()
-    assert d["kaltspeicher"] == {
-        "bytes": 1_000_000, "videos": 1, "quelle_bytes": 2_000_000, "gespart_bytes": 1_000_000
-    }
+    k = d["kaltspeicher"]
+    assert (k["bytes"], k["videos"], k["quelle_bytes"], k["gespart_bytes"]) == (
+        1_000_000, 1, 2_000_000, 1_000_000
+    )
     assert d["videos_nach_status"] == {"archived": 1, "queued": 1, "unavailable": 1}
+    # v0 ist 600 s lang und belegt 1 MB - daraus rechnet sich die Prognose.
+    assert k["dauer_s"] == 600
+    assert k["bytes_je_sekunde"] == round(1_000_000 / 600)
+
+
+def test_speicher_je_kanal_und_groesste(umgebung):
+    client, _ = umgebung
+    d = client.get("/api/storage").json()
+    (kanal,) = d["je_kanal"]
+    assert kanal["name"] == "Testkanal" and kanal["videos"] == 1
+    assert [g["id"] for g in d["groesste"]] == ["v0"]
+
+
+def test_hochrechnung_nutzt_eigene_messwerte(umgebung):
+    """Die wichtigste Zahl der Seite: Was kaeme noch dazu? Sie beruht auf dem
+    eigenen Schnitt, sobald etwas archiviert ist - nicht auf einer Faustzahl."""
+    client, db = umgebung
+    db.add(Video(id="offen1", channel_id="UCtest", title="Offen", status=VideoStatus.NEW,
+                 duration_s=1200))
+    db.commit()
+
+    h = client.get("/api/storage").json()["hochrechnung"]
+    assert h["gemessen"] is True
+    assert h["offene_videos"] == 2  # v1 (queued, 300 s) und offen1 (1200 s)
+    # 1500 s zu je (1 MB / 600 s) = rund 2,5 MB
+    assert h["offene_dauer_s"] == 1500
+    assert h["bytes_geschaetzt"] == pytest.approx(2_500_000, rel=0.01)
+
+
+def test_hochrechnung_ohne_messwerte_ist_als_annahme_gekennzeichnet(umgebung):
+    """Ohne ein einziges archiviertes Video gibt es nichts zu messen - das
+    muss dabeistehen, sonst liest man eine Hausnummer als Zusage."""
+    client, db = umgebung
+    v = db.get(Video, "v0")
+    v.status = VideoStatus.NEW
+    v.bundle_bytes = None
+    db.commit()
+
+    h = client.get("/api/storage").json()["hochrechnung"]
+    assert h["gemessen"] is False
 
 
 # ---------------------------------------------------------------- Vorschaubild

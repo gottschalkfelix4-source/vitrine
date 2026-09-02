@@ -153,6 +153,10 @@ export interface Speicher {
     videos: number;
     quelle_bytes: number;
     gespart_bytes: number;
+    recodiert: number;
+    dauer_s: number;
+    /** Gemessener eigener Schnitt - Grundlage der Hochrechnung. */
+    bytes_je_sekunde: number;
   };
   heissspeicher: {
     anzahl: number;
@@ -161,8 +165,18 @@ export interface Speicher {
     in_wiedergabe: number;
   };
   freier_platz: number;
+  traeger: { pfad: string; gesamt: number; belegt: number; frei: number }[];
   videos_nach_status: Record<string, number>;
   recodierungen_offen: number;
+  je_kanal: { id: string; name: string; videos: number; bytes: number }[];
+  groesste: { id: string; titel: string; bytes: number | null; kanal: string | null }[];
+  hochrechnung: {
+    offene_videos: number;
+    offene_dauer_s: number;
+    bytes_geschaetzt: number;
+    /** false = grobe Annahme, weil noch nichts archiviert ist. */
+    gemessen: boolean;
+  };
 }
 
 export interface Wiedergabezustand {
