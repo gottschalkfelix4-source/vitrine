@@ -3,6 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Kapitel } from "../lib/api";
 import { api, streamUrl, untertitelUrl } from "../lib/api";
 import { dauer, prozent } from "../lib/format";
+import {
+  istVollbild,
+  vollbildUmschalten as umschaltenVollbild,
+  wegErmitteln,
+} from "../lib/vollbild";
 
 /**
  * Der Player.
@@ -289,11 +294,32 @@ export function Player({
   }, [zeit, kapitel, aufKapitel]);
 
   // ---- Vollbild ----------------------------------------------------------
+  //
+  // Drei Ereignisnamen, weil es drei Wege ins Vollbild gibt. Vorher wurde nur
+  // "fullscreenchange" beachtet - auf dem iPhone, wo Apples eigener Player
+  // aufgeht, kam davon nie etwas an, und das Symbol blieb auf "Vollbild"
+  // stehen, obwohl das Video bildfuellend lief.
   useEffect(() => {
-    const beim = () => setVollbild(!!document.fullscreenElement);
+    const el = videoRef.current;
+    const beim = () => setVollbild(istVollbild(videoRef.current));
     document.addEventListener("fullscreenchange", beim);
-    return () => document.removeEventListener("fullscreenchange", beim);
+    document.addEventListener("webkitfullscreenchange", beim);
+    el?.addEventListener("webkitbeginfullscreen", beim);
+    el?.addEventListener("webkitendfullscreen", beim);
+    return () => {
+      document.removeEventListener("fullscreenchange", beim);
+      document.removeEventListener("webkitfullscreenchange", beim);
+      el?.removeEventListener("webkitbeginfullscreen", beim);
+      el?.removeEventListener("webkitendfullscreen", beim);
+    };
   }, []);
+
+  // Kann dieses Geraet ueberhaupt Vollbild? Wird erst nach dem ersten Rendern
+  // bestimmt, weil dafuer die Elemente stehen muessen.
+  const [vollbildMoeglich, setVollbildMoeglich] = useState(true);
+  useEffect(() => {
+    setVollbildMoeglich(wegErmitteln(huelleRef.current, videoRef.current) !== "keiner");
+  }, [lage.art]);
 
   // ---- Steuerung ein-/ausblenden ----------------------------------------
   const zeigen = useCallback(() => {
@@ -334,10 +360,9 @@ export function Player({
   );
 
   const vollbildUmschalten = useCallback(() => {
-    const ziel = huelleRef.current;
-    if (!ziel) return;
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void ziel.requestFullscreen?.();
+    // Absichtlich ohne await: Safari auf iOS knuepft die Erlaubnis an den
+    // laufenden Klick. Wer vorher noch etwas abwartet, verliert sie.
+    void umschaltenVollbild(huelleRef.current, videoRef.current);
   }, []);
 
   const bildImBild = useCallback(() => {
@@ -731,8 +756,15 @@ export function Player({
             </button>
           ) : null}
 
-          {/* Vollbild */}
-          <button className="steuer-knopf" onClick={vollbildUmschalten} aria-label={vollbild ? "Vollbild beenden" : "Vollbild"}>
+          {/* Vollbild. Der Knopf verschwindet, wenn das Geraet nachweislich
+              keinen der drei Wege kennt - ein Knopf, der nichts tut, ist
+              schlimmer als keiner. */}
+          <button
+            className="steuer-knopf"
+            onClick={vollbildUmschalten}
+            hidden={!vollbildMoeglich}
+            aria-label={vollbild ? "Vollbild beenden" : "Vollbild"}
+          >
             {vollbild ? (
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M5 16h3v3h2v-5H5zm3-8H5v2h5V5H8zm6 11h2v-3h3v-2h-5zm2-11V5h-2v5h5V8z" fill="currentColor" />

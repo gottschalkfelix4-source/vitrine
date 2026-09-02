@@ -581,16 +581,18 @@
 }
 
 .watch[data-theater="true"] .buehne,
-.buehne[data-vollbild="true"] {
-  max-height: calc(100vh - 56px);
-  border-radius: 0;
-}
-
+/* Im Vollbild gilt nichts von dem, was die Buehne sonst begrenzt: weder das
+   feste Seitenverhaeltnis noch die gedeckelte Hoehe noch der negative Rand,
+   mit dem sie auf dem Telefon bis an die Bildschirmkanten reicht. Der zuletzt
+   genannte ist der Grund, warum das hier ausdruecklich zurueckgesetzt wird -
+   sonst saesse das Video im Vollbild 12 Pixel zu weit links. */
 .buehne[data-vollbild="true"] {
   max-height: 100vh;
   aspect-ratio: auto;
   width: 100vw;
   height: 100vh;
+  margin: 0;
+  border-radius: 0;
 }
 
 .player[data-laeuft="true"][data-steuerung="false"] {
