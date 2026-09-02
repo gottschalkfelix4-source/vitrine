@@ -10,7 +10,8 @@ export interface VideoKurz {
   dauer_s: number | null;
   hochgeladen: string | null;
   aufrufe: number | null;
-  thumb: string | null;
+  /** Fertige Adresse des Vorschaubilds, kein Dateiname - nicht durch thumbUrl schicken. */
+  bild: string | null;
   status: string;
   ist_short: boolean;
   war_live: boolean;
@@ -325,6 +326,13 @@ export function streamUrl(videoId: string): string {
   return `/api/videos/${videoId}/stream?support=${encodeURIComponent(faehigkeiten())}`;
 }
 
+/**
+ * Adresse eines abgelegten Bildes: Avatar, Banner, Playlist-Vorschau.
+ *
+ * Fuer Videos NICHT benutzen - deren Bild kann auch von der Quelle
+ * nachgeladen werden, und welcher Weg gilt, entscheidet der Server. Es
+ * steht fertig in `video.bild`.
+ */
 export function thumbUrl(datei: string | null): string | null {
   return datei ? `/api/thumbs/${encodeURIComponent(datei)}` : null;
 }

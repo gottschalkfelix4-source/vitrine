@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { VideoKurz } from "../lib/api";
-import { api, thumbUrl } from "../lib/api";
+import { api } from "../lib/api";
 import { aufrufe, dauer, vorZeit, zustandText } from "../lib/format";
 
 /** Zustandsmarke - im Archiv-Kontext das wichtigste Zusatzelement gegenueber
@@ -32,7 +32,7 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
   const [holFehler, setHolFehler] = useState<string | null>(null);
   const status = neuerStatus ?? video.status;
   const spielbar = status === "archived";
-  const bild = thumbUrl(video.thumb);
+  const bild = video.bild;
 
   async function holen(e: React.MouseEvent) {
     e.preventDefault();

@@ -173,6 +173,19 @@ class Video(Base):
     description: Mapped[str | None] = mapped_column(Text)
     duration_s: Mapped[int | None] = mapped_column(Integer)
     upload_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    #: Rang in der Uploads-Playlist des Kanals, 0 = neuestes Video.
+    #:
+    #: Beim flachen Auflisten liefert YouTube kein Datum - weder ``timestamp``
+    #: noch ``upload_date``, bei der Uploads-Playlist so wenig wie beim
+    #: /videos-Tab. Ein Datum gaebe es nur, indem man jedes Video einzeln
+    #: abfragt; bei 3000 Videos sind das 3000 Requests gegen ein Budget von
+    #: rund 300 je Stunde.
+    #:
+    #: Die Uploads-Playlist ist aber streng umgekehrt chronologisch sortiert.
+    #: Der Rang darin traegt deshalb dieselbe Ordnungsinformation wie das
+    #: Datum und kostet nichts. Er wird nur zum Sortieren benutzt und nie als
+    #: Datum ausgegeben - eine erfundene Zeitangabe waere schlimmer als keine.
+    uploads_position: Mapped[int | None] = mapped_column(Integer, index=True)
     view_count: Mapped[int | None] = mapped_column(BigInteger)
     like_count: Mapped[int | None] = mapped_column(BigInteger)
     thumb_file: Mapped[str | None] = mapped_column(String(512))

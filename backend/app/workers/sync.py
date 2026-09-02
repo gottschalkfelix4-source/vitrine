@@ -87,12 +87,29 @@ def _video_anlegen(
     if v is not None:
         if bekannt is not None:
             bekannt[eintrag.id] = v
-        # Vorhandene Videos nur behutsam auffrischen - Titel und Aufrufe
-        # aendern sich, der Archivzustand darf dabei nicht angefasst werden.
+        # Vorhandene Videos nur behutsam auffrischen - die Metadaten aendern
+        # sich, der Archivzustand darf dabei nicht angefasst werden.
+        #
+        # Jedes Feld einzeln und nur, wenn die Quelle wirklich etwas liefert.
+        # Das ist keine Vorsicht um ihrer selbst willen: Die beiden Quellen
+        # sind unterschiedlich lueckenhaft, und keine darf die andere
+        # ueberschreiben. Der RSS-Feed bringt ein Datum, aber nie eine Dauer;
+        # das flache Auflisten bringt Dauer und Aufrufe, aber nie ein Datum.
+        # Erst beide zusammen ergeben einen vollstaendigen Datensatz.
+        #
+        # Genau hier fehlte die Dauer: Ein Video, das der RSS-Schnellcheck
+        # zuerst gesehen hatte, existierte bereits, wenn kurz darauf die
+        # Uploads-Liste mit der Dauer kam - und dieser Zweig schrieb sie nie.
+        # Die 14 juengsten Videos des Kanals standen deshalb dauerhaft ohne
+        # Laufzeit da, obwohl YouTube sie bei jedem Abgleich mitgeliefert hat.
         if eintrag.title and eintrag.title != "(ohne Titel)":
             v.title = eintrag.title
         if eintrag.view_count is not None:
             v.view_count = eintrag.view_count
+        if eintrag.duration_s is not None:
+            v.duration_s = eintrag.duration_s
+        if eintrag.upload_date is not None:
+            v.upload_date = eintrag.upload_date
         # Ein Video, das seit dem letzten Abgleich verschwunden ist, wird
         # nachgezogen - aber nur, solange es noch nicht archiviert ist. Was
         # einmal im Archiv liegt, bleibt spielbar, auch wenn die Quelle es
@@ -177,6 +194,11 @@ def _sammlung_abgleichen(
             video.is_short = True
         if art == PlaylistKind.LIVE:
             video.was_live = True
+        # Nur die Uploads-Liste taugt als Zeitachse: Sie ist umgekehrt
+        # chronologisch und vollstaendig. Eine vom Kanal angelegte Playlist ist
+        # frei sortiert - ihre Position sagt ueber das Alter nichts aus.
+        if art == PlaylistKind.UPLOADS:
+            video.uploads_position = position
         neu += int(war_neu)
         db.add(PlaylistItem(playlist_id=playlist_id, video_id=eintrag.id, position=position))
 

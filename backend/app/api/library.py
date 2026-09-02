@@ -10,6 +10,8 @@ will, was ihm fehlt, muss es sehen koennen.
 from __future__ import annotations
 
 import logging
+import os
+import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -43,6 +45,34 @@ router = APIRouter(prefix="/api", tags=["bibliothek"])
 # ------------------------------------------------------------------ Schemata
 
 
+def _video_bild(v: Video) -> str | None:
+    """Adresse des Vorschaubilds - fertig, wie sie ins ``src`` gehoert.
+
+    Bewusst hier und nicht im Browser entschieden: Wo ein Bild herkommt, weiss
+    der Server. Es gibt zwei Quellen, in dieser Reihenfolge:
+
+    Das *archivierte* Bild liegt neben dem Buendel und gehoert uns. Sobald ein
+    Video geladen ist, wird nur noch dieses benutzt - vollstaendig offline.
+
+    Vorher gibt es dieses Bild noch nicht. Bis vor Kurzem hiess das: gar kein
+    Bild, und eine frisch erfasste Kanalseite bestand aus tausenden grauen
+    Kacheln. Dabei liefert YouTube die Adresse des Vorschaubilds bereits beim
+    Auflisten mit; sie laesst sich ausserdem allein aus der Video-ID bilden.
+    ``/thumbs/quelle/<id>`` holt es beim ersten Ansehen und legt es ab.
+
+    Verschwundene Videos bekommen nichts: Zu einem geloeschten Video gibt es
+    auch bei YouTube kein Bild mehr, ein Abruf waere sicher vergeblich.
+    """
+    if v.thumb_file:
+        return f"/api/thumbs/{v.thumb_file}"
+    if v.status == VideoStatus.UNAVAILABLE or not _VIDEO_ID.match(v.id):
+        # Kein Bild versprechen, das sich nicht einloesen laesst: Der Endpunkt
+        # nimmt nur echte YouTube-IDs an, und zu einem geloeschten Video hat
+        # auch YouTube keins mehr.
+        return None
+    return f"/api/thumbs/quelle/{v.id}"
+
+
 class VideoKurz(BaseModel):
     id: str
     titel: str
@@ -51,7 +81,8 @@ class VideoKurz(BaseModel):
     dauer_s: int | None
     hochgeladen: str | None
     aufrufe: int | None
-    thumb: str | None
+    #: Vollstaendige Adresse, kein Dateiname - siehe :func:`_video_bild`.
+    bild: str | None
     status: str
     ist_short: bool
     war_live: bool
@@ -75,7 +106,7 @@ class VideoKurz(BaseModel):
             dauer_s=v.duration_s,
             hochgeladen=v.upload_date.isoformat() if v.upload_date else None,
             aufrufe=v.view_count,
-            thumb=v.thumb_file,
+            bild=_video_bild(v),
             status=v.status,
             ist_short=v.is_short,
             war_live=v.was_live,
@@ -529,12 +560,23 @@ def videos(
                 return []
             anfrage = anfrage.where(Video.id.in_(treffer))
 
+    # Sortiert wird nach dem Rang in der Uploads-Liste, nicht nach dem Datum.
+    #
+    # Das Datum waere die naheliegende Wahl, taugt hier aber nicht: YouTube
+    # liefert beim Auflisten eines Kanals keines mit, und ein einzelner Abruf
+    # je Video verbietet sich bei mehreren tausend. In der Praxis hatten
+    # deshalb 3348 von 3363 Videos kein Datum - "neueste zuerst" ordnete dann
+    # 15 Videos richtig ein und haengte den Rest in Einfuegereihenfolge an.
+    #
+    # Der Rang in der Uploads-Playlist traegt dieselbe Ordnung und ist immer
+    # da. Das Datum bleibt als zweiter Schluessel, fuer Videos, die nur ueber
+    # eine fremde Playlist bekannt sind und keinen Rang haben.
     anfrage = anfrage.order_by(
-        {
-            "neu": Video.upload_date.desc(),
-            "alt": Video.upload_date.asc(),
-            "aufrufe": Video.view_count.desc(),
-            "titel": Video.title.asc(),
+        *{
+            "neu": (Video.uploads_position.asc().nulls_last(), Video.upload_date.desc()),
+            "alt": (Video.uploads_position.desc().nulls_last(), Video.upload_date.asc()),
+            "aufrufe": (Video.view_count.desc().nulls_last(),),
+            "titel": (Video.title.asc(),),
         }[sortierung]
     )
     return [VideoKurz.aus(v) for v in db.scalars(anfrage.limit(limit).offset(offset))]
@@ -996,6 +1038,101 @@ def einstellungen_zuruecksetzen(
     from app.services import einstellungen
 
     return {"zurueckgesetzt": einstellungen.zuruecksetzen(db, namen)}
+
+
+#: Form einer YouTube-Video-ID. Die Pruefung ist keine Formsache: Aus der ID
+#: wird gleich eine URL gebaut, die der Server selbst abruft. Ohne feste Form
+#: koennte ein Aufrufer ihn dazu bringen, beliebige Adressen zu kontaktieren.
+_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+#: Groessen, die YouTube unter fester Adresse anbietet, in der Reihenfolge des
+#: Versuchs. Die grossen gibt es nur bei neueren Videos und sie fehlen sonst
+#: mit 404; ``hqdefault`` existiert seit jeher fuer jedes Video und steht
+#: deshalb als letztes.
+#:
+#: An drei Videos dieses Archivs gemessen (Bytes):
+#:
+#: ===============  =======  =======  =======
+#: Groesse          Video A  Video B  Video C
+#: ===============  =======  =======  =======
+#: maxresdefault     80943   213323   176687
+#: hq720             80943   213323   176687
+#: sddefault         40594    90855    86648
+#: hqdefault         10711    28913    21596
+#: ===============  =======  =======  =======
+#:
+#: ``hq720`` liefert dieselbe Datei wie ``maxresdefault``, byteweise - es ist
+#: also keine kleinere Stufe, sondern nur eine zweite Adresse fuer dasselbe
+#: Bild. Es steht trotzdem drin, weil die beiden bei einzelnen Videos
+#: unterschiedlich verfuegbar sind.
+#:
+#: Die echte Sparstufe ist ``sddefault``. Sie wird bewusst nicht bevorzugt:
+#: Ueber einen Kanal mit 3363 Videos geht es um rund 200 MB Unterschied - auf
+#: einem Archiv, das fuer dieselben Videos mehrere Terabyte braucht, ist das
+#: kein Argument gegen ein scharfes Bild auf der Videoseite.
+_BILDGROESSEN = ("maxresdefault", "hq720", "sddefault", "hqdefault")
+
+#: Videos, fuer die YouTube gerade kein Bild hatte. Verhindert, dass eine
+#: Kanalseite bei jedem Aufbau erneut in denselben Fehlschlag laeuft. Bewusst
+#: nur im Arbeitsspeicher: Nach einem Neustart darf es wieder versucht werden,
+#: denn der Fehlschlag kann an einer Stoerung gelegen haben.
+_ohne_bild: set[str] = set()
+
+
+@router.get("/thumbs/quelle/{video_id}")
+def thumbnail_quelle(video_id: str) -> FileResponse:
+    """Vorschaubild eines noch nicht archivierten Videos.
+
+    Holt das Bild beim ersten Abruf von YouTube und legt es ab; jeder weitere
+    Abruf kommt von der Platte. Das Archiv wird dadurch mit der Zeit von allein
+    unabhaengiger von der Quelle, ohne dass beim Erfassen eines Kanals
+    tausende Bilder auf Verdacht geladen werden - geholt wird nur, was jemand
+    tatsaechlich ansieht.
+
+    Der Umweg ueber den Server ist Absicht. Wuerde die Seite direkt auf
+    ``i.ytimg.com`` verweisen, meldete jeder Seitenaufbau dem Betreiber, welche
+    Videos im eigenen Archiv angesehen werden - und ohne Netz bliebe die Seite
+    leer, auch fuer laengst archivierte Videos.
+    """
+    from pathlib import Path
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    if not _VIDEO_ID.match(video_id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "keine gueltige Video-ID")
+
+    # Eigener Unterordner: Die archivierten Bilder heissen ebenfalls nach der
+    # Video-ID und koennten je nach Endung genau gleich heissen.
+    ordner = settings.thumb_dir / "quelle"
+    ziel = ordner / f"{video_id}.jpg"
+    if ziel.is_file():
+        return FileResponse(ziel, headers={"Cache-Control": "public, max-age=604800"})
+    if video_id in _ohne_bild:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "kein Vorschaubild verfuegbar")
+
+    ordner.mkdir(parents=True, exist_ok=True)
+    for groesse in _BILDGROESSEN:
+        adresse = f"https://i.ytimg.com/vi/{video_id}/{groesse}.jpg"
+        try:
+            with urlopen(Request(adresse, headers={"User-Agent": "vitrine"}), timeout=10) as a:
+                if a.status != 200:
+                    continue
+                daten = a.read()
+        except (HTTPError, URLError, OSError):
+            continue
+        # YouTube antwortet auf fehlende Groessen auch mal mit einem winzigen
+        # Platzhalterbild statt mit 404. Unter 2 KB ist nichts Echtes dabei.
+        if len(daten) < 2048:
+            continue
+        # Erst vollstaendig schreiben, dann umbenennen: Bei zwei gleichzeitigen
+        # Abrufen darf niemals eine halb geschriebene Datei ausgeliefert werden.
+        vorlaeufig = Path(f"{ziel}.{os.getpid()}.teil")
+        vorlaeufig.write_bytes(daten)
+        vorlaeufig.replace(ziel)
+        return FileResponse(ziel, headers={"Cache-Control": "public, max-age=604800"})
+
+    _ohne_bild.add(video_id)
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "kein Vorschaubild verfuegbar")
 
 
 @router.get("/thumbs/{datei}")

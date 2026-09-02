@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import settings
 from app.models import Base
 
+log = logging.getLogger(__name__)
+
 
 def set_pragmas(dbapi_conn, _record=None) -> None:
     """Verbindungs-Einstellungen - auch fuer die Test-Engines gedacht.
@@ -54,10 +56,65 @@ engine = _create_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
 
 
+def _spalten_nachziehen(engine_: Engine) -> list[str]:
+    """Ergaenzt Spalten, die im Modell stehen, aber nicht in der Datenbank.
+
+    ``create_all`` legt fehlende *Tabellen* an, ruehrt vorhandene aber nicht
+    an. Eine neue Spalte im Modell fuehrt deshalb bei einem bestehenden Archiv
+    zu "no such column" - und zwar erst beim ersten Zugriff, nicht beim Start.
+
+    Ein vollwertiges Migrationswerkzeug waere hier zu viel: Das Schema ist
+    SQLite-only, und alles, was bisher dazugekommen ist, waren zusaetzliche
+    Spalten mit NULL-Vorgabe. Genau die - und nur die - zieht diese Funktion
+    nach. Umbenennungen, Typwechsel oder Loeschungen kann sie nicht und soll
+    sie nicht; wer so etwas braucht, holt sich Alembic dazu.
+
+    Liefert die Namen der ergaenzten Spalten, damit der Start es protokolliert.
+    """
+    from sqlalchemy import inspect, text
+
+    ergaenzt: list[str] = []
+    pruefer = inspect(engine_)
+    with engine_.begin() as conn:
+        for tabelle in Base.metadata.sorted_tables:
+            if not pruefer.has_table(tabelle.name):
+                continue  # legt gleich create_all an
+            vorhanden = {s["name"] for s in pruefer.get_columns(tabelle.name)}
+            for spalte in tabelle.columns:
+                if spalte.name in vorhanden:
+                    continue
+                # Nur nachruestbare Spalten: SQLite verlangt bei ADD COLUMN
+                # entweder NULL-Zulassung oder eine konstante Vorgabe. Alles
+                # andere waere ein echter Schemawechsel und wird bewusst
+                # uebersprungen statt halb ausgefuehrt.
+                if not spalte.nullable and spalte.server_default is None:
+                    log.warning(
+                        "Spalte %s.%s fehlt, laesst sich aber nicht nachtragen "
+                        "(NOT NULL ohne Vorgabe) - bitte von Hand migrieren.",
+                        tabelle.name, spalte.name,
+                    )
+                    continue
+                typ = spalte.type.compile(engine_.dialect)
+                conn.execute(text(f'ALTER TABLE "{tabelle.name}" ADD COLUMN "{spalte.name}" {typ}'))
+                ergaenzt.append(f"{tabelle.name}.{spalte.name}")
+
+    # Indizes entstehen sonst nur beim Anlegen der Tabelle. Eine nachgetragene
+    # Spalte mit index=True bekaeme ihren Index also nie - und ausgerechnet
+    # ueber die wird sortiert.
+    for tabelle in Base.metadata.sorted_tables:
+        if pruefer.has_table(tabelle.name):
+            for index in tabelle.indexes:
+                index.create(bind=engine_, checkfirst=True)
+    return ergaenzt
+
+
 def init_db() -> None:
     """Legt Verzeichnisse und Schema an. Idempotent."""
     settings.ensure_dirs()
     Base.metadata.create_all(engine)
+    nachgezogen = _spalten_nachziehen(engine)
+    if nachgezogen:
+        log.info("Schema ergaenzt: %s", ", ".join(nachgezogen))
 
     # Die Volltext-Tabellen sind virtuelle FTS5-Tabellen und stehen deshalb
     # nicht im SQLAlchemy-Modell - sie werden hier von Hand angelegt.

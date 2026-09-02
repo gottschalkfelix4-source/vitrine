@@ -2,7 +2,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { Fehler, Gitter, Leer, Skelettgitter, Videokachel } from "../components/ui";
 import { useApi } from "../hooks/useApi";
-import { api, thumbUrl } from "../lib/api";
+import { api } from "../lib/api";
 import { dauer } from "../lib/format";
 
 export function Suchseite() {
@@ -81,8 +81,8 @@ export function Suchseite() {
                 to={`/video/${f.video.id}?t=${Math.floor(f.start_s)}`}
               >
                 <div className="fundstelle-bild">
-                  {thumbUrl(f.video.thumb) ? (
-                    <img src={thumbUrl(f.video.thumb)!} alt="" loading="lazy" />
+                  {f.video.bild ? (
+                    <img src={f.video.bild!} alt="" loading="lazy" />
                   ) : (
                     <div className="platzhalter">▶</div>
                   )}

@@ -585,3 +585,166 @@ def test_verschwundene_zaehlen_nicht_als_ladbar(umgebung):
     """Sonst verspricht "Alle laden (N)" mehr, als es einloesen kann."""
     client, _ = umgebung
     assert client.get("/api/channels/UCtest/downloadable").json()["anzahl"] == 0
+
+
+# ------------------------------------------------- Vorschaubild aus der Quelle
+#
+# Der Anlass: Nach dem Erfassen eines Kanals mit 3363 Videos hatten 3361 davon
+# kein Vorschaubild, weil eines erst beim Herunterladen entsteht. YouTube
+# liefert die Adresse aber schon beim blossen Auflisten mit.
+
+
+def test_bild_zeigt_auf_die_abgelegte_datei_wenn_archiviert(umgebung):
+    client, db = umgebung
+    db.get(Video, "v0").thumb_file = "v0.webp"
+    db.commit()
+    (v,) = [x for x in client.get("/api/videos?kanal=UCtest").json() if x["id"] == "v0"]
+    assert v["bild"] == "/api/thumbs/v0.webp"
+
+
+def test_bild_verweist_auf_die_quelle_solange_nichts_archiviert_ist(umgebung):
+    """Der eigentliche Punkt: ein noch nicht geladenes Video hat trotzdem ein
+    Bild - sonst besteht eine frisch erfasste Kanalseite aus grauen Kacheln."""
+    client, db = umgebung
+    db.add(Video(id="dQw4w9WgXcQ", channel_id="UCtest", title="Frisch erfasst",
+                 status=VideoStatus.NEW))
+    db.commit()
+    (v,) = [x for x in client.get("/api/videos?kanal=UCtest&nur_archiviert=false").json()
+            if x["id"] == "dQw4w9WgXcQ"]
+    assert v["bild"] == "/api/thumbs/quelle/dQw4w9WgXcQ"
+
+
+def test_verschwundene_videos_bekommen_kein_bild_versprochen(umgebung):
+    """Zu einem geloeschten Video hat auch YouTube keins - ein Abruf waere
+    sicher vergeblich."""
+    client, db = umgebung
+    db.add(Video(id="aaaaaaaaaaa", channel_id="UCtest", title="(ohne Titel)",
+                 status=VideoStatus.UNAVAILABLE))
+    db.commit()
+    v = client.get("/api/videos?status=unavailable").json()
+    assert [x["bild"] for x in v if x["id"] == "aaaaaaaaaaa"] == [None]
+
+
+@pytest.mark.parametrize("kennung", [
+    "../../etc/passwd",
+    "kurz",
+    "evil.example.com/x",
+    "aaaaaaaaaa@",
+])
+def test_quellbild_nimmt_nur_echte_video_ids(umgebung, kennung):
+    """Aus der Kennung wird eine Adresse gebaut, die der Server selbst abruft.
+    Ohne feste Form liesse er sich zu beliebigen Zielen schicken."""
+    client, _ = umgebung
+    assert client.get(f"/api/thumbs/quelle/{kennung}").status_code in (400, 404)
+
+
+def test_quellbild_wird_nur_einmal_geholt(umgebung, monkeypatch):
+    """Beim zweiten Abruf darf nichts mehr ins Netz gehen - sonst laedt jeder
+    Seitenaufbau die Bilder erneut."""
+    client, _ = umgebung
+    import io
+
+    abrufe = []
+
+    class Antwort(io.BytesIO):
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+
+    def falscher_abruf(anfrage, timeout=None):
+        abrufe.append(anfrage.full_url)
+        return Antwort(b"\xff\xd8\xff\xe0" + b"x" * 5000)
+
+    monkeypatch.setattr(library, "_ohne_bild", set())
+    monkeypatch.setattr("urllib.request.urlopen", falscher_abruf)
+
+    for _ in range(3):
+        r = client.get("/api/thumbs/quelle/dQw4w9WgXcQ")
+        assert r.status_code == 200
+        assert r.content.startswith(b"\xff\xd8")
+    assert len(abrufe) == 1, f"Bild wurde {len(abrufe)}-mal geholt statt einmal"
+    assert "dQw4w9WgXcQ" in abrufe[0]
+
+
+def test_quellbild_faellt_auf_kleinere_groesse_zurueck(umgebung, monkeypatch):
+    """Die grossen Groessen gibt es nur bei neueren Videos; hqdefault immer.
+
+    Geprueft wird beides: dass ein 404 den naechsten Versuch ausloest, und dass
+    ein Platzhalterbild nicht als Treffer durchgeht - YouTube antwortet auf
+    fehlende Groessen auch mal mit einem winzigen Bild statt mit einem Fehler.
+    """
+    client, _ = umgebung
+    import io
+    from urllib.error import HTTPError
+
+    versucht = []
+
+    class Antwort(io.BytesIO):
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+
+    def falscher_abruf(anfrage, timeout=None):
+        versucht.append(anfrage.full_url.rsplit("/", 1)[-1])
+        if "hq720" in anfrage.full_url:
+            raise HTTPError(anfrage.full_url, 404, "Not Found", {}, None)
+        if "maxresdefault" in anfrage.full_url:
+            return Antwort(b"\xff\xd8" + b"x" * 100)  # Platzhalter, zu klein
+        return Antwort(b"\xff\xd8\xff\xe0" + b"x" * 5000)
+
+    monkeypatch.setattr(library, "_ohne_bild", set())
+    monkeypatch.setattr("urllib.request.urlopen", falscher_abruf)
+
+    assert client.get("/api/thumbs/quelle/dQw4w9WgXcQ").status_code == 200
+    # Nach dem 404 und dem Platzhalter bleibt die naechste Stufe - und dort
+    # wird abgebrochen, hqdefault gar nicht mehr geholt.
+    assert versucht == ["maxresdefault.jpg", "hq720.jpg", "sddefault.jpg"]
+
+
+def test_kein_bild_wird_nicht_bei_jedem_aufbau_neu_versucht(umgebung, monkeypatch):
+    """Sonst laeuft jeder Seitenaufbau in dieselben drei Fehlschlaege."""
+    client, _ = umgebung
+    from urllib.error import HTTPError
+
+    abrufe = []
+
+    def immer_weg(anfrage, timeout=None):
+        abrufe.append(anfrage.full_url)
+        raise HTTPError(anfrage.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(library, "_ohne_bild", set())
+    monkeypatch.setattr("urllib.request.urlopen", immer_weg)
+
+    for _ in range(3):
+        assert client.get("/api/thumbs/quelle/dQw4w9WgXcQ").status_code == 404
+    assert len(abrufe) == len(library._BILDGROESSEN), (
+        f"{len(abrufe)} Abrufe - nach dem ersten Fehlschlag darf nichts mehr ins Netz gehen"
+    )
+
+
+# ------------------------------------------------------------- Sortierung
+#
+# YouTube liefert beim Auflisten kein Datum. Sortiert wird deshalb nach dem
+# Rang in der Uploads-Liste, sonst steht eine frisch erfasste Kanalseite in
+# Einfuegereihenfolge da.
+
+
+def test_sortierung_folgt_dem_rang_auch_ohne_datum(umgebung):
+    client, db = umgebung
+    # Bewusst in unsortierter Reihenfolge angelegt: Ohne Sortierung nach Rang
+    # kaeme genau diese Einfuegereihenfolge zurueck.
+    raenge = {"mittleres00": 1, "neuestes000": 0, "aeltestes00": 2}
+    for kennung, rang in raenge.items():
+        db.add(Video(id=kennung, channel_id="UCtest", title=f"Ohne Datum {kennung}",
+                     status=VideoStatus.NEW, upload_date=None, uploads_position=rang))
+    db.commit()
+    ids = [v["id"] for v in client.get(
+        "/api/videos?kanal=UCtest&nur_archiviert=false&sortierung=neu").json()
+        if v["id"] in raenge]
+    # Rang 0 ist das neueste Video und gehoert nach vorn.
+    assert ids == ["neuestes000", "mittleres00", "aeltestes00"]
+
+    rueckwaerts = [v["id"] for v in client.get(
+        "/api/videos?kanal=UCtest&nur_archiviert=false&sortierung=alt").json()
+        if v["id"] in raenge]
+    assert rueckwaerts == ["aeltestes00", "mittleres00", "neuestes000"]

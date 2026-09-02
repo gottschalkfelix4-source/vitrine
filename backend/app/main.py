@@ -185,10 +185,23 @@ class _EinseitenDateien(StaticFiles):
         except StarletteHTTPException as e:
             if e.status_code != 404:
                 raise
+            # Starlette reicht den Pfad in der Schreibweise des Betriebssystems
+            # herein - unter Windows also mit Backslash. Ein Vergleich gegen
+            # "api/" ginge dort ins Leere und der Unterschied faellt erst im
+            # Container auf, wo genau umgekehrt getrennt wird.
+            teile = path.replace("\\", "/").strip("/").split("/")
+
             # Fehlende Dateien mit Endung bleiben ein ehrlicher 404 - sonst
             # bekaeme ein fehlendes Bild oder Skript stillschweigend HTML
             # zurueck, was die Fehlersuche unnoetig schwer macht.
-            if "." in path.rsplit("/", 1)[-1]:
+            if "." in teile[-1]:
+                raise
+            # Dasselbe gilt fuer die API: Wer sich in einer Adresse vertippt,
+            # bekam bisher die Oberflaeche mit Status 200 zurueck. Ein Aufrufer,
+            # der JSON erwartet, scheitert dann an einer HTML-Seite statt an
+            # einer klaren Fehlermeldung - und ein Test, der einen 404 prueft,
+            # ginge stillschweigend durch.
+            if teile[0] == "api":
                 raise
             return await super().get_response("index.html", scope)
 

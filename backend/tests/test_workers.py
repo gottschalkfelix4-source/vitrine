@@ -624,3 +624,74 @@ def test_bereits_archiviertes_bleibt_trotz_loeschung(umgebung, monkeypatch):
     v = db.get(Video, "vid1")
     assert v.status == VideoStatus.ARCHIVED, "archiviertes Video darf nicht entwertet werden"
     assert v.title == "Laengst gesichert", "der Titel darf nicht verloren gehen"
+
+
+def test_zweite_quelle_fuellt_die_luecken_der_ersten(umgebung, monkeypatch):
+    """Regression aus einem echten Kanalabgleich.
+
+    Der Abgleich hat zwei Quellen mit unterschiedlichen Luecken: Der
+    RSS-Schnellcheck kennt ein Datum, aber nie eine Dauer; das flache
+    Auflisten kennt Dauer und Aufrufe, aber nie ein Datum. Erst beide zusammen
+    ergeben einen vollstaendigen Datensatz.
+
+    Der Auffrisch-Zweig schrieb aber nur Titel und Aufrufe. Ein Video, das der
+    RSS-Feed zuerst gesehen hatte, existierte bereits, wenn kurz darauf die
+    Uploads-Liste mit der Dauer kam - und behielt dauerhaft keine Laufzeit.
+    Im Archiv des Nutzers standen so die 14 juengsten Videos ohne Dauer da,
+    obwohl YouTube sie bei jedem Abgleich mitgeliefert hat.
+    """
+    from datetime import UTC, datetime
+
+    from app.models import Channel, Video
+    from app.services import ytdlp
+    from app.workers import sync
+
+    db, _tmp = umgebung
+    kanal = db.get(Channel, "UCtest")
+
+    # Erst der RSS-Schnellcheck: Datum ja, Dauer nein.
+    aus_rss = ytdlp.ListedVideo(
+        id="neu1", title="Frisch", duration_s=None,
+        upload_date=datetime(2026, 5, 1, tzinfo=UTC), view_count=10,
+    )
+    sync._video_anlegen(db, kanal.id, aus_rss, {})
+    db.commit()
+    assert db.get(Video, "neu1").duration_s is None
+
+    # Dann die Uploads-Liste: Dauer ja, Datum nein.
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: [
+        ytdlp.ListedVideo(id="neu1", title="Frisch", duration_s=286,
+                          upload_date=None, view_count=42),
+    ])
+    sync._sammlung_abgleichen(
+        db, kanal, playlist_id="UUtest", titel="Alle Uploads", art="uploads",
+        url="egal", einreihen=False,
+    )
+
+    v = db.get(Video, "neu1")
+    assert v.duration_s == 286, "die Dauer aus der Uploads-Liste fehlt"
+    assert v.upload_date is not None, "das Datum aus dem RSS-Feed wurde ueberschrieben"
+    assert v.view_count == 42
+
+
+def test_rang_kommt_nur_aus_der_uploads_liste(umgebung, monkeypatch):
+    """Die Uploads-Liste ist umgekehrt chronologisch und taugt als Zeitachse.
+    Eine vom Kanal angelegte Playlist ist frei sortiert - ihre Position sagt
+    ueber das Alter nichts aus und darf den Rang nicht ueberschreiben."""
+    from app.models import Channel, Video
+    from app.services import ytdlp
+    from app.workers import sync
+
+    db, _tmp = umgebung
+    kanal = db.get(Channel, "UCtest")
+
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: _liste(["a", "b", "c"]))
+    sync._sammlung_abgleichen(db, kanal, playlist_id="UUtest", titel="Alle Uploads",
+                              art="uploads", url="egal", einreihen=False)
+    assert [db.get(Video, i).uploads_position for i in ("a", "b", "c")] == [0, 1, 2]
+
+    # Dieselben Videos in einer Playlist, andere Reihenfolge.
+    monkeypatch.setattr(ytdlp, "list_entries", lambda url, limit=None: _liste(["c", "a", "b"]))
+    sync._sammlung_abgleichen(db, kanal, playlist_id="PLy", titel="Bunt gemischt",
+                              art="playlist", url="egal", einreihen=False)
+    assert [db.get(Video, i).uploads_position for i in ("a", "b", "c")] == [0, 1, 2]
