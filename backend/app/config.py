@@ -9,9 +9,10 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class ArchiveCodec(StrEnum):
@@ -43,7 +44,9 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
     timezone: str = "Europe/Berlin"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:5173"]
+    )
 
     # -------------------------------------------------------------- Ablagen
     data_dir: Path = Path("/data")
@@ -142,7 +145,9 @@ class Settings(BaseSettings):
     ytdlp_max_sleep_interval: float = 6.0
     write_subtitles: bool = True
     write_auto_subtitles: bool = False
-    subtitle_languages: list[str] = Field(default_factory=lambda: ["de", "en"])
+    subtitle_languages: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["de", "en"]
+    )
     write_comments: bool = False
     sponsorblock: bool = True
 
@@ -164,9 +169,24 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", "subtitle_languages", mode="before")
     @classmethod
     def _split_csv(cls, v: object) -> object:
-        """Erlaubt sowohl JSON-Listen als auch simple Kommalisten in der .env."""
-        if isinstance(v, str) and not v.strip().startswith("["):
-            return [item.strip() for item in v.split(",") if item.strip()]
+        """Nimmt Kommalisten und JSON-Listen gleichermassen an.
+
+        Die Felder tragen dafuer ``NoDecode``, und das ist kein Beiwerk: Ohne
+        das versucht pydantic-settings bei Listen-Feldern zuerst selbst
+        ``json.loads`` - noch bevor dieser Validator ueberhaupt laeuft. Eine
+        ganz normale Eingabe wie ``de,en`` fuehrt dann zu einem
+        JSONDecodeError, an dem der Dienst schon beim Start scheitert.
+
+        Genau so ist der erste Unraid-Start gescheitert: Im Template stand
+        ``YTA_SUBTITLE_LANGUAGES=de,en``.
+        """
+        if isinstance(v, str):
+            text = v.strip()
+            if text.startswith("["):
+                import json
+
+                return json.loads(text)
+            return [item.strip() for item in text.split(",") if item.strip()]
         return v
 
     def format_selector(self) -> str:
