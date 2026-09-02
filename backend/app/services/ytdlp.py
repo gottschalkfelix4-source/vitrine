@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import yt_dlp
-from yt_dlp.utils import DownloadError, ExtractorError, UnsupportedError
+from yt_dlp.utils import UnsupportedError, YoutubeDLError
 
 from app.config import settings
 
@@ -68,7 +68,16 @@ def _base_opts() -> dict[str, Any]:
         "max_sleep_interval": settings.ytdlp_max_sleep_interval,
     }
     if settings.ytdlp_cookies_file:
-        opts["cookiefile"] = str(settings.ytdlp_cookies_file)
+        # Erst pruefen, dann setzen: yt-dlp bricht bei einem unlesbaren
+        # cookiefile jeden Aufruf ab, auch das blosse Auflisten eines Kanals.
+        # Ein Tippfehler im Pfad soll eine Warnung im Log sein, kein Ausfall.
+        if settings.ytdlp_cookies_file.is_file():
+            opts["cookiefile"] = str(settings.ytdlp_cookies_file)
+        else:
+            log.warning(
+                "Cookie-Datei %s gibt es nicht - es wird ohne Cookies gearbeitet.",
+                settings.ytdlp_cookies_file,
+            )
     if settings.ytdlp_ratelimit:
         opts["ratelimit"] = settings.ytdlp_ratelimit
     return opts
@@ -84,7 +93,11 @@ def _extract(url: str, opts: dict[str, Any]) -> dict[str, Any]:
                 info = ydl.sanitize_info(info)
     except UnsupportedError as e:
         raise YtdlpError(f"URL wird nicht unterstuetzt: {url}") from e
-    except (DownloadError, ExtractorError) as e:
+    except YoutubeDLError as e:
+        # Bewusst die Basisklasse und nicht DownloadError/ExtractorError: Die
+        # decken nicht alles ab. Ein leerer oder falscher Cookie-Pfad etwa
+        # wirft CookieLoadError, und der kam ungefiltert als Serverfehler beim
+        # Nutzer an, statt als lesbare Meldung.
         text = str(e).lower()
         if any(w in text for w in ("private", "unavailable", "removed", "deleted", "terminated")):
             raise VideoUnavailable(str(e)) from e
@@ -311,7 +324,7 @@ def download_video(
             # "Object of type FFmpegMergerPP is not JSON serializable", und
             # zwar erst nach dem vollstaendigen Download.
             info = ydl.sanitize_info(info)
-    except (DownloadError, ExtractorError) as e:
+    except YoutubeDLError as e:
         text = str(e).lower()
         if any(w in text for w in ("private", "unavailable", "removed", "deleted")):
             raise VideoUnavailable(str(e)) from e

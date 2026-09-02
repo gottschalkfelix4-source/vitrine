@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -165,6 +165,28 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------- Extras
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _leere_werte_verwerfen(cls, daten: object) -> object:
+        """Behandelt eine leer gelassene Umgebungsvariable als "nicht gesetzt".
+
+        Unraid uebergibt jede Variable seines Templates an den Container, auch
+        die, die der Nutzer gar nicht ausgefuellt hat - dann eben als leerer
+        String. Ohne diese Bereinigung ist ein leeres Feld nicht dasselbe wie
+        ein fehlendes: ``YTA_YTDLP_COOKIES_FILE=""`` wurde zu ``Path(".")``,
+        und da ein Path immer wahr ist, hat yt-dlp anschliessend das
+        Arbeitsverzeichnis als Cookie-Datei zu lesen versucht. Ergebnis war
+        ein Serverfehler bei jedem Kanal, den man hinzufuegen wollte.
+
+        Bei Zahlenfeldern waere es noch frueher aufgefallen: ``YTA_AV1_CRF=""``
+        haette den Dienst gar nicht erst starten lassen.
+        """
+        if isinstance(daten, dict):
+            return {
+                k: v for k, v in daten.items() if not (isinstance(v, str) and not v.strip())
+            }
+        return daten
 
     @field_validator("cors_origins", "subtitle_languages", mode="before")
     @classmethod

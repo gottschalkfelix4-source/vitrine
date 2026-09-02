@@ -32,17 +32,21 @@ def _eintraege() -> list[ET.Element]:
 def _umgebung_aus_template() -> dict[str, str]:
     """Die Variablen so, wie Unraid sie in den Container gibt.
 
-    Leere Voreinstellungen werden ausgelassen - Unraid setzt eine Variable
-    ohne Wert nicht.
+    Wichtig: auch die leeren. Hier stand frueher das Gegenteil - leere
+    Voreinstellungen wurden ausgelassen, mit der Begruendung, Unraid setze
+    eine Variable ohne Wert nicht. Das stimmt nicht: Unraid uebergibt jede
+    Variable seines Templates, ein nicht ausgefuelltes Feld eben als leeren
+    String. Diese eine falsche Annahme hat den Test an genau der Stelle blind
+    gemacht, an der er haette anschlagen muessen (siehe
+    ``test_leere_variablen_bedeuten_nicht_gesetzt``).
     """
     werte = {}
     for c in _eintraege():
         if c.get("Type") != "Variable":
             continue
         ziel = c.get("Target") or ""
-        wert = (c.text or c.get("Default") or "").strip()
-        if ziel.startswith("YTA_") and wert:
-            werte[ziel] = wert
+        if ziel.startswith("YTA_"):
+            werte[ziel] = (c.text or c.get("Default") or "").strip()
     return werte
 
 
@@ -112,3 +116,33 @@ def test_listenfelder_nehmen_beide_schreibweisen(monkeypatch, wert, erwartet):
         monkeypatch.setenv("YTA_CORS_ORIGINS", wert.replace("de", "http://a").replace("en", "http://b"))
     s = Settings()
     assert s.subtitle_languages == erwartet
+
+
+def test_leere_variablen_bedeuten_nicht_gesetzt(monkeypatch: pytest.MonkeyPatch):
+    """Ein leeres Feld im Template darf nicht anders wirken als ein fehlendes.
+
+    Der Anlass: ``YTA_YTDLP_COOKIES_FILE`` hat im Template die Voreinstellung
+    "". Daraus wurde ``Path(".")``, und weil ein Path immer wahr ist, hat
+    yt-dlp anschliessend das Arbeitsverzeichnis als Cookie-Datei zu lesen
+    versucht. Jeder Versuch, einen Kanal hinzuzufuegen, endete mit einem
+    Serverfehler - aber nur im Container, denn lokal ist die Variable gar
+    nicht gesetzt.
+    """
+    for name in ("YTA_YTDLP_COOKIES_FILE", "YTA_YTDLP_FORMAT", "YTA_YTDLP_RATELIMIT"):
+        monkeypatch.setenv(name, "")
+    s = Settings()
+    assert s.ytdlp_cookies_file is None
+    assert s.ytdlp_format is None
+    assert s.ytdlp_ratelimit is None
+
+
+def test_leere_zahlenvariable_verhindert_den_start_nicht(monkeypatch: pytest.MonkeyPatch):
+    """Dieselbe Ursache, nur frueher sichtbar: Ein geleertes Zahlenfeld haette
+    den Dienst gar nicht erst hochkommen lassen."""
+    monkeypatch.setenv("YTA_AV1_CRF", "")
+    monkeypatch.setenv("YTA_ARCHIVE_MIN_HEIGHT", "")
+    monkeypatch.setenv("YTA_HOT_TTL_HOURS", "")
+    s = Settings()
+    assert s.av1_crf == 30
+    assert s.archive_min_height == 1080
+    assert s.hot_ttl_hours == 24.0
