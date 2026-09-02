@@ -83,6 +83,12 @@ class VideoKurz(BaseModel):
     aufrufe: int | None
     #: Vollstaendige Adresse, kein Dateiname - siehe :func:`_video_bild`.
     bild: str | None
+    #: Aufloesung und Bildrate der abgelegten Datei. Erst nach dem Archivieren
+    #: bekannt: Beim Auflisten eines Kanals nennt YouTube keine Aufloesung, und
+    #: was am Ende im Buendel liegt, steht ohnehin erst nach dem Download fest.
+    hoehe: int | None = None
+    breite: int | None = None
+    fps: float | None = None
     status: str
     ist_short: bool
     war_live: bool
@@ -107,6 +113,9 @@ class VideoKurz(BaseModel):
             hochgeladen=v.upload_date.isoformat() if v.upload_date else None,
             aufrufe=v.view_count,
             bild=_video_bild(v),
+            hoehe=v.height,
+            breite=v.width,
+            fps=v.fps,
             status=v.status,
             ist_short=v.is_short,
             war_live=v.was_live,

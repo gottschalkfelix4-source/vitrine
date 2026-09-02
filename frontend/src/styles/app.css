@@ -260,6 +260,28 @@
   font-size: 26px;
 }
 
+/* Qualitaetsetikett: gegenueber der Dauer, damit sich beide nie beruehren.
+   Gedeckt gehalten - es soll ablesbar sein, nicht um Aufmerksamkeit buhlen.
+   Nur 1440p und darueber bekommen Farbe, weil dort die Aussage steckt: Dafuer
+   hat sich der Platz gelohnt. */
+.guete {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.guete[data-hoch] {
+  background: rgba(56, 142, 96, 0.92);
+}
+
 .dauer {
   position: absolute;
   right: 6px;
@@ -1665,4 +1687,39 @@
 
 .karte .sp-balken {
   margin-top: 10px;
+}
+
+/* ---- Qualitaetszeile auf der Wiedergabeseite */
+.watch-guete {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -4px 0 14px;
+  color: var(--text-gedaempft);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.guete-marke {
+  background: var(--flaeche-hoch);
+  color: var(--text);
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.guete-marke[data-hoch] {
+  background: rgba(56, 142, 96, 0.92);
+  color: #fff;
+}
+
+/* Was die Quelle hoechstens angeboten hat. Gedaempft und kursiv, weil es eine
+   Einordnung ist und kein Fehler: Ein altes 720p-Video ist nicht schlechter
+   archiviert, es gab nur nie mehr. */
+.guete-hinweis {
+  font-style: italic;
+  color: var(--text-schwach);
 }

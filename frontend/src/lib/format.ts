@@ -69,6 +69,37 @@ export function bytes(n: number | null | undefined, nachkomma = 1): string {
   return `${wert.toFixed(i === 0 ? 0 : nachkomma).replace(".", ",")} ${einheiten[i]}`;
 }
 
+/**
+ * Kurzes Qualitätsetikett: "4K", "1080p", "1080p60".
+ *
+ * Gemessen wird an der **Höhe**, nicht an der kürzeren Seite. Das ist bei
+ * hochkantigen Videos ein Unterschied: Ein Short mit 608×1080 hätte nach der
+ * kurzen Seite "608p", nach der Höhe "1080p". Die Höhe ist hier richtig, weil
+ * das ganze Archiv auf dieser Achse rechnet — die Einstellung heißt
+ * `archive_min_height`, der Formatwähler fordert `height>=1080` an, und die
+ * Prüfung auf stille 360p-Rückfälle vergleicht ebenfalls die Höhe. Ein Video,
+ * das die Untergrenze von 1080p erfüllt hat, darf hier nicht als "608p"
+ * erscheinen; das würde der eigenen Einstellung widersprechen.
+ *
+ * Liefert `null`, solange nichts bekannt ist — vor dem Herunterladen nennt
+ * YouTube beim Auflisten keine Auflösung.
+ */
+export function qualitaet(
+  hoehe: number | null | undefined,
+  fps?: number | null,
+): string | null {
+  if (!hoehe || !Number.isFinite(hoehe) || hoehe <= 0) return null;
+  const stufe = hoehe >= 4320 ? "8K" : hoehe >= 2160 ? "4K" : `${Math.round(hoehe)}p`;
+  // Nur echte Hochbildraten anhängen. 29,97 ist der Normalfall und würde als
+  // "1080p30" nur Platz kosten, ohne etwas zu sagen.
+  return fps && fps >= 50 ? `${stufe}${Math.round(fps)}` : stufe;
+}
+
+/** Ist das eine Auflösung, die man als hochauflösend hervorhebt? */
+export function istHochaufloesend(hoehe: number | null | undefined): boolean {
+  return !!hoehe && hoehe >= 1440;
+}
+
 export function prozent(anteil: number | null | undefined, nachkomma = 0): string {
   if (anteil == null || !Number.isFinite(anteil)) return "–";
   return `${(anteil * 100).toFixed(nachkomma).replace(".", ",")} %`;

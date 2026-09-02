@@ -12,6 +12,10 @@ export interface VideoKurz {
   aufrufe: number | null;
   /** Fertige Adresse des Vorschaubilds, kein Dateiname - nicht durch thumbUrl schicken. */
   bild: string | null;
+  /** Aufloesung der abgelegten Datei. Erst nach dem Archivieren bekannt. */
+  hoehe: number | null;
+  breite: number | null;
+  fps: number | null;
   status: string;
   ist_short: boolean;
   war_live: boolean;

@@ -82,6 +82,15 @@ jobs:
         working-directory: frontend
         run: npx tsc --noEmit
 
+      # Die Typpruefung sagt nur, dass die Formate zueinander passen, nicht ob
+      # sie stimmen. Geprueft wird deshalb, was sich nicht aus den Typen
+      # ergibt: dass das Qualitaetsetikett an der Hoehe misst und nicht an der
+      # kuerzeren Seite, dass Bytes in 1024er-Schritten rechnen und dass
+      # fehlende Werte nichts erfinden.
+      - name: Tests
+        working-directory: frontend
+        run: npm test
+
       - name: Bauen
         working-directory: frontend
         run: npm run build

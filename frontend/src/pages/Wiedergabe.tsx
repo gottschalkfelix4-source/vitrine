@@ -5,7 +5,15 @@ import { Player } from "../components/Player";
 import { Fehler, Gitter, Skelettgitter, Videokachel, Zustand } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
-import { aufrufe, bytes, dauer, datum, prozent } from "../lib/format";
+import {
+  aufrufe,
+  bytes,
+  dauer,
+  datum,
+  istHochaufloesend,
+  prozent,
+  qualitaet,
+} from "../lib/format";
 
 export function Wiedergabeseite() {
   const { videoId = "" } = useParams();
@@ -39,6 +47,7 @@ export function Wiedergabeseite() {
   if (!detail.daten) return <Skelettgitter anzahl={4} />;
 
   const { video: v, technik, kapitel, untertitel } = detail.daten;
+  const guete = qualitaet(technik.hoehe, technik.fps);
   const ersparnis =
     technik.quelle_bytes && technik.buendel_bytes
       ? 1 - technik.buendel_bytes / technik.quelle_bytes
@@ -67,6 +76,31 @@ export function Wiedergabeseite() {
         />
 
         <h1>{v.titel}</h1>
+
+        {/*
+          Qualitaet direkt unter dem Titel und nicht erst hinter dem
+          Technik-Knopf: Bei einem Archiv ist "was habe ich da eigentlich
+          liegen" keine Nebensache, sondern der Grund, warum man 4K statt 720p
+          aufhebt. Was die Quelle hoechstens angeboten hat, steht daneben -
+          sonst liest sich ein 720p-Etikett wie ein Versaeumnis, obwohl es
+          schlicht nichts Besseres gab.
+        */}
+        {guete ? (
+          <div className="watch-guete">
+            <span className="guete-marke" data-hoch={istHochaufloesend(technik.hoehe) || undefined}>
+              {guete}
+            </span>
+            <span>
+              {technik.breite}×{technik.hoehe}
+              {technik.fps ? ` · ${Math.round(technik.fps)} Bilder/s` : ""}
+              {technik.videocodec ? ` · ${technik.videocodec.toUpperCase()}` : ""}
+              {technik.recodiert ? " · verkleinert" : ""}
+            </span>
+            {detail.daten.statusmeldung ? (
+              <span className="guete-hinweis">{detail.daten.statusmeldung}</span>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="watch-zeile">
           {v.kanal_id ? (

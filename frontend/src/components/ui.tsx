@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 import type { VideoKurz } from "../lib/api";
 import { api } from "../lib/api";
-import { aufrufe, dauer, vorZeit, zustandText } from "../lib/format";
+import { aufrufe, dauer, istHochaufloesend, qualitaet, vorZeit, zustandText } from "../lib/format";
 
 /** Zustandsmarke - im Archiv-Kontext das wichtigste Zusatzelement gegenueber
  *  YouTube: Man muss auf einen Blick sehen, was da ist und was fehlt. */
@@ -32,6 +32,9 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
   const [holFehler, setHolFehler] = useState<string | null>(null);
   const status = neuerStatus ?? video.status;
   const spielbar = status === "archived";
+  // Erst nach dem Archivieren bekannt - vorher nennt YouTube beim Auflisten
+  // keine Aufloesung.
+  const guete = qualitaet(video.hoehe, video.fps);
   const bild = video.bild;
 
   async function holen(e: React.MouseEvent) {
@@ -53,6 +56,13 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
         ) : (
           <div className="platzhalter">{video.war_live ? "◉" : "▶"}</div>
         )}
+        {/* Qualitaet oben, Dauer unten - so ueberdecken sie sich nie, auch
+            nicht bei "1440p60" neben "1:02:33". */}
+        {guete ? (
+          <span className="guete" data-hoch={istHochaufloesend(video.hoehe) || undefined}>
+            {guete}
+          </span>
+        ) : null}
         {video.dauer_s ? <span className="dauer">{dauer(video.dauer_s)}</span> : null}
         {video.fortschritt_anteil ? (
           <div className="fortschritt">

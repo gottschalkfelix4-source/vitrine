@@ -748,3 +748,31 @@ def test_sortierung_folgt_dem_rang_auch_ohne_datum(umgebung):
         "/api/videos?kanal=UCtest&nur_archiviert=false&sortierung=alt").json()
         if v["id"] in raenge]
     assert rueckwaerts == ["aeltestes00", "mittleres00", "neuestes000"]
+
+
+# ------------------------------------------------------------------ Qualitaet
+
+
+def test_videoliste_nennt_die_aufloesung(umgebung):
+    """Die Kachel zeigt ein Qualitaetsetikett - dafuer braucht sie die Werte
+    schon in der Liste und nicht erst im Detail."""
+    client, db = umgebung
+    v = db.get(Video, "v0")
+    v.width, v.height, v.fps = 3840, 2160, 29.97
+    db.commit()
+
+    (k,) = [x for x in client.get("/api/videos").json() if x["id"] == "v0"]
+    assert (k["breite"], k["hoehe"]) == (3840, 2160)
+    assert k["fps"] == pytest.approx(29.97)
+
+
+def test_ohne_archivierung_bleibt_die_aufloesung_leer(umgebung):
+    """Vor dem Herunterladen nennt YouTube beim Auflisten keine Aufloesung.
+    Ein geratener Wert waere schlimmer als keiner - die Oberflaeche zeigt dann
+    schlicht kein Etikett."""
+    client, _ = umgebung
+    (k,) = [x for x in client.get("/api/videos?nur_archiviert=false").json()
+            if x["id"] == "v1"]
+    assert k["hoehe"] is None
+    assert k["breite"] is None
+    assert k["fps"] is None
