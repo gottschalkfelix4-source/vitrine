@@ -131,14 +131,26 @@ def test_liste_nimmt_kommatext_und_liste(db: Session):
     assert settings.subtitle_languages == ["es"]
 
 
-def test_neustart_wird_gemeldet(db: Session):
-    """Die Zahl der Arbeiterstraenge wird nur beim Start gelesen. Das muss
-    dabeistehen, statt still wirkungslos zu bleiben."""
-    ergebnis = einstellungen.schreiben(db, {"download_concurrency": 3})
-    assert "Parallele Downloads" in ergebnis["neustart_noetig"]
+def test_zurzeit_braucht_nichts_einen_neustart(db: Session):
+    """Frueher stand bei "Parallele Downloads" ein Neustart-Hinweis: Die Zahl
+    wurde nur beim Hochfahren gelesen. Inzwischen zieht das Arbeiterwerk die
+    Straenge zur Laufzeit nach, und kein Feld ist mehr neustartpflichtig.
 
-    ohne = einstellungen.schreiben(db, {"av1_crf": 28})
-    assert ohne["neustart_noetig"] == []
+    Der Test haelt das fest, damit der Hinweis nicht unbemerkt wieder
+    auftaucht - er waere dann eine Zusage, die niemand einloest."""
+    assert [f.name for f in einstellungen.FELDER if f.neustart] == []
+    assert einstellungen.schreiben(db, {"download_concurrency": 3})["neustart_noetig"] == []
+    assert einstellungen.schreiben(db, {"av1_crf": 28})["neustart_noetig"] == []
+
+
+def test_neustart_wuerde_gemeldet_wenn_es_noetig_waere(db: Session, monkeypatch):
+    """Die Mechanik bleibt geprueft, auch ohne aktuellen Anwendungsfall - sonst
+    faellt erst beim naechsten neustartpflichtigen Feld auf, dass sie kaputt
+    ist."""
+    feld = einstellungen.NACH_NAME["av1_crf"]
+    monkeypatch.setattr(feld, "neustart", True)
+    ergebnis = einstellungen.schreiben(db, {"av1_crf": 27})
+    assert feld.titel in ergebnis["neustart_noetig"]
 
 
 # ----------------------------------------------------------------- Pruefung

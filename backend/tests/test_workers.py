@@ -695,3 +695,163 @@ def test_rang_kommt_nur_aus_der_uploads_liste(umgebung, monkeypatch):
     sync._sammlung_abgleichen(db, kanal, playlist_id="PLy", titel="Bunt gemischt",
                               art="playlist", url="egal", einreihen=False)
     assert [db.get(Video, i).uploads_position for i in ("a", "b", "c")] == [0, 1, 2]
+
+
+# ------------------------------------------------- Straenge zur Laufzeit
+
+
+def test_arbeiterzahl_folgt_den_einstellungen(monkeypatch):
+    """Die Zahl der parallelen Downloads soll sofort wirken, nicht erst nach
+    einem Neustart. Sie haengt an laufenden Threads, nicht nur an einem Wert -
+    deshalb muss das Arbeiterwerk sie nachziehen koennen."""
+    import threading
+
+    from app.config import settings
+    from app.workers.runner import Arbeiterwerk
+
+    werk = Arbeiterwerk()
+    # Die Schleife selbst wird nicht gebraucht: Geprueft wird die Buchfuehrung
+    # ueber die Plaetze, nicht das Abarbeiten von Auftraegen.
+    monkeypatch.setattr(Arbeiterwerk, "_schleife", lambda self, g, n: threading.Event().wait(30))
+
+    monkeypatch.setattr(settings, "download_concurrency", 1)
+    monkeypatch.setattr(settings, "encode_concurrency", 1)
+    assert werk.anpassen()["netz"] == 1
+    assert werk._belegt["netz"] == {0}
+
+    # Hochsetzen: Der fehlende Platz wird besetzt.
+    monkeypatch.setattr(settings, "download_concurrency", 3)
+    assert werk.anpassen()["netz"] == 3
+    assert werk._belegt["netz"] == {0, 1, 2}
+
+    # Erneutes Anpassen ohne Aenderung startet nichts zusaetzlich.
+    assert werk.anpassen()["netz"] == 3
+    assert werk._belegt["netz"] == {0, 1, 2}
+
+    werk._stop.set()
+
+
+def test_ueberzaehlige_straenge_beenden_sich_zwischen_auftraegen(monkeypatch):
+    """Heruntersetzen darf keinen laufenden Download abbrechen - man verloere
+    hunderte Megabyte, weil jemand eine Zahl verstellt hat. Der Strang hoert
+    deshalb erst auf, wenn er seinen Auftrag beendet hat."""
+    import threading
+
+    from app.workers.runner import Arbeiterwerk, Gruppe
+
+    werk = Arbeiterwerk()
+    werk._soll["netz"] = 2
+    beendet = threading.Event()
+    gruppe = Gruppe("netz", [], 2)
+
+    # Ein Strang mit Platznummer 1, waehrend nur noch ein Platz vorgesehen ist.
+    werk._soll["netz"] = 1
+    t = threading.Thread(target=werk._schleife, args=(gruppe, 1), daemon=True)
+    werk._belegt.setdefault("netz", set()).add(1)
+    t.start()
+    t.join(timeout=5)
+    beendet.set()
+
+    assert not t.is_alive(), "der ueberzaehlige Strang hat sich nicht beendet"
+    assert 1 not in werk._belegt["netz"], "der Platz wurde nicht freigegeben"
+
+
+def test_einstellung_zieht_die_arbeiter_nach(umgebung, monkeypatch):
+    """Der Weg, den der Nutzer geht: Zahl in der Oberflaeche aendern."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import library
+    from app.config import settings
+    from app.db import get_db
+    from app.workers.runner import werk
+
+    db, _ = umgebung
+    app = FastAPI()
+    app.include_router(library.router)
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+
+    gerufen: list[str] = []
+    monkeypatch.setattr(werk, "anpassen", lambda: gerufen.append("x") or {"netz": 4})
+
+    antwort = client.put("/api/settings", json={"download_concurrency": 4})
+    assert antwort.status_code == 200, antwort.text
+    assert gerufen, "die Arbeiter wurden nach der Aenderung nicht nachgezogen"
+    assert antwort.json()["arbeiter"] == {"netz": 4}
+    assert settings.download_concurrency == 4
+
+
+def test_parallele_downloads_brauchen_keinen_neustart():
+    """Gegenprobe zur Beschriftung: Waere das Feld weiter als
+    neustartpflichtig gefuehrt, stuende in der Oberflaeche ein Hinweis, der
+    nicht mehr stimmt."""
+    from app.services.einstellungen import NACH_NAME
+
+    assert NACH_NAME["download_concurrency"].neustart is False
+    assert NACH_NAME["encode_concurrency"].neustart is False
+
+
+def test_fortschritt_vertraegt_meldungen_aus_mehreren_threads(umgebung):
+    """Regression aus dem Betrieb, gefunden beim ersten Lauf mit drei
+    gleichzeitigen Downloads: Zwei von dreien brachen bei 16 % und 14 % ab mit
+    "ResourceClosedError: This transaction is closed".
+
+    Der Grund liegt nicht bei den drei Auftraegen, sondern innerhalb eines
+    einzelnen: yt-dlp laedt mit vier Fragment-Threads, und jeder ruft den
+    Fortschritts-Hook auf. Alle vier benutzen dieselbe SQLAlchemy-Sitzung, und
+    die ist ausdruecklich nicht threadsicher - schliesst einer die Transaktion,
+    waehrend ein anderer schreibt, ist der Auftrag hin, obwohl der Download in
+    Ordnung war.
+
+    Der Test stellt genau das nach: viele Threads, eine Sitzung, ein Auftrag.
+    """
+    import threading
+
+    from app.services import jobs
+
+    db, _ = umgebung
+    job = jobs.enqueue_archive(db, "v1")
+    fehler: list[BaseException] = []
+    los = threading.Event()
+
+    def melden(start: float) -> None:
+        los.wait()
+        try:
+            for i in range(40):
+                jobs.fortschritt(db, job, min(1.0, start + i / 100), f"Lade {i}%")
+        except BaseException as e:  # genau das soll auffallen
+            fehler.append(e)
+
+    straenge = [threading.Thread(target=melden, args=(n / 10,)) for n in range(6)]
+    for t in straenge:
+        t.start()
+    los.set()
+    for t in straenge:
+        t.join(timeout=20)
+
+    assert not fehler, f"Fortschrittsmeldung aus mehreren Threads scheiterte: {fehler[0]!r}"
+    assert 0.0 <= db.get(Job, job.id).progress <= 1.0
+
+
+def test_fortschritt_wird_gedrosselt(umgebung, monkeypatch):
+    """yt-dlp meldet mehrmals je Sekunde und Fragment. Jede Meldung einzeln zu
+    schreiben waeren Dutzende Transaktionen je Sekunde fuer eine Zahl, die
+    niemand so schnell abliest."""
+    from app.services import jobs
+
+    db, _ = umgebung
+    job = jobs.enqueue_archive(db, "v1")
+    jobs._fortschritt_vergessen(job.id)
+
+    schreibvorgaenge = []
+    echtes_commit = type(db).commit
+    monkeypatch.setattr(type(db), "commit",
+                        lambda self: (schreibvorgaenge.append(1), echtes_commit(self))[1])
+
+    for i in range(50):
+        jobs.fortschritt(db, job, i / 50, "Lade")
+
+    assert len(schreibvorgaenge) == 1, f"{len(schreibvorgaenge)} Schreibvorgaenge statt einem"
+    # Der Wert im Speicher bleibt trotzdem aktuell.
+    assert job.progress == pytest.approx(49 / 50)

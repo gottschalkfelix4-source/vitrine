@@ -2,21 +2,47 @@ import { Link } from "react-router-dom";
 
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
+import type { LaufenderAuftrag } from "../lib/api";
 import { AUFTRAG_TEXT, prozent } from "../lib/format";
 
 /**
- * Zeigt an, was gerade laeuft - immer sichtbar, auf jeder Seite.
+ * Zeigt an, was gerade läuft - immer sichtbar, auf jeder Seite.
  *
  * Ohne das passiert nach einem Klick auf "Jetzt abgleichen" sichtbar nichts:
- * Der Auftrag laeuft zwar mit Fortschritt, aber nur auf der Warteschlangenseite
- * ist er zu sehen. Wer gerade auf der Kanalseite steht, haelt das Programm fuer
+ * Der Auftrag läuft zwar mit Fortschritt, aber nur auf der Warteschlangenseite
+ * ist er zu sehen. Wer gerade auf der Kanalseite steht, hält das Programm für
  * eingefroren.
  *
+ * Jeder laufende Auftrag bekommt eine eigene Zeile. Vorher stand hier nur der
+ * erste, gefolgt von "+1 laufend" - bei zwei parallelen Downloads sah man also
+ * genau einen davon und musste raten, was der andere tut. Die Zahl der
+ * parallelen Downloads lässt sich einstellen; dann muss man auch sehen, was
+ * sie bewirkt.
+ *
  * Der abgefragte Endpunkt ist bewusst schmal, damit sich der Sekundentakt
- * lohnt; laeuft nichts, verschwindet die Leiste ganz.
+ * lohnt; läuft nichts, verschwindet die Leiste ganz.
  */
 
 const TAKT_MS = 2000;
+
+function Zeile({ auftrag }: { auftrag: LaufenderAuftrag }) {
+  // Ohne Fortschrittswert (etwa beim Auflisten eines Kanals) läuft der Balken
+  // unbestimmt weiter, statt bei 0 % zu stehen und Stillstand vorzutäuschen.
+  const unbestimmt = auftrag.fortschritt <= 0;
+  return (
+    <div className="fl-zeile">
+      <div className="fl-balken" data-unbestimmt={unbestimmt}>
+        <span style={unbestimmt ? undefined : { width: `${auftrag.fortschritt * 100}%` }} />
+      </div>
+      <div className="fl-text">
+        <strong>{AUFTRAG_TEXT[auftrag.art] ?? auftrag.art}</strong>
+        <span className="fl-titel">{auftrag.titel ?? auftrag.ziel}</span>
+        {auftrag.meldung ? <span className="fl-meldung">{auftrag.meldung}</span> : null}
+        {!unbestimmt ? <span className="fl-prozent">{prozent(auftrag.fortschritt)}</span> : null}
+      </div>
+    </div>
+  );
+}
 
 export function Fortschrittsleiste() {
   const { daten } = useApi(() => api.aktiveAuftraege(), [], TAKT_MS);
@@ -25,30 +51,24 @@ export function Fortschrittsleiste() {
   const wartend = daten?.wartend ?? 0;
   if (laufend.length === 0 && wartend === 0) return null;
 
-  const erster = laufend[0];
-  // Ohne Fortschrittswert (etwa beim Auflisten eines Kanals) läuft der Balken
-  // unbestimmt weiter, statt bei 0 % zu stehen und Stillstand vorzutäuschen.
-  const unbestimmt = !erster || erster.fortschritt <= 0;
-
   return (
     <Link className="fortschrittsleiste" to="/warteschlange" title="Zur Warteschlange">
-      <div className="fl-balken" data-unbestimmt={unbestimmt}>
-        <span style={unbestimmt ? undefined : { width: `${erster.fortschritt * 100}%` }} />
-      </div>
-      <div className="fl-text">
-        {erster ? (
-          <>
-            <strong>{AUFTRAG_TEXT[erster.art] ?? erster.art}</strong>
-            <span className="fl-titel">{erster.titel ?? erster.ziel}</span>
-            {erster.meldung ? <span className="fl-meldung">{erster.meldung}</span> : null}
-            {!unbestimmt ? <span className="fl-prozent">{prozent(erster.fortschritt)}</span> : null}
-          </>
-        ) : (
-          <strong>Warteschlange</strong>
-        )}
-        {laufend.length > 1 ? <span className="fl-rest">+{laufend.length - 1} laufend</span> : null}
-        {wartend > 0 ? <span className="fl-rest">{wartend} wartend</span> : null}
-      </div>
+      {laufend.map((a) => (
+        <Zeile key={a.id} auftrag={a} />
+      ))}
+      {laufend.length === 0 ? (
+        <div className="fl-zeile">
+          <div className="fl-text">
+            <strong>Warteschlange</strong>
+          </div>
+        </div>
+      ) : null}
+      {wartend > 0 ? (
+        <div className="fl-fuss">
+          {wartend} {wartend === 1 ? "wartet" : "warten"}
+          {laufend.length > 1 ? ` · ${laufend.length} laufen gleichzeitig` : ""}
+        </div>
+      ) : null}
     </Link>
   );
 }

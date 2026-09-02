@@ -1034,9 +1034,18 @@ def einstellungen_schreiben(
     from app.services import einstellungen
 
     try:
-        return einstellungen.schreiben(db, aenderungen)
+        ergebnis = einstellungen.schreiben(db, aenderungen)
     except einstellungen.Ungueltig as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+
+    # Die Zahl der Arbeiterstraenge steht nicht nur im Einstellungsobjekt,
+    # sondern haengt an laufenden Threads. Ohne diesen Aufruf wuerde eine
+    # Aenderung erst beim naechsten Start wirken - und genau das soll sie
+    # nicht mehr.
+    from app.workers.runner import werk
+
+    ergebnis["arbeiter"] = werk.anpassen()
+    return ergebnis
 
 
 @router.post("/settings/reset")

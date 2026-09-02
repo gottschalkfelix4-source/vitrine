@@ -97,8 +97,8 @@ FELDER: list[Feld] = [
     Feld("ytdlp_sleep_interval", "Download", "Pause zwischen Videos", "Entschärft die Drosselung.", "float", min=0, max=120, einheit="Sek."),
 
     # ----------------------------------------------------------------- Worker
-    Feld("download_concurrency", "Arbeiter", "Parallele Downloads", "YouTube drosselt pro IP-Adresse bei rund 300 Videos je Stunde, nicht pro Prozess. Hochdrehen macht nicht schneller fertig, sondern vorübergehend gesperrt.", "int", min=1, max=16, neustart=True),
-    Feld("encode_concurrency", "Arbeiter", "Parallele Recodierungen", "Ein Encode nutzt ohnehin alle Kerne. Mehr als 1 lohnt nur mit Hardware-Encoder.", "int", min=1, max=16, neustart=True),
+    Feld("download_concurrency", "Arbeiter", "Parallele Downloads", "Wirkt sofort. Hochsetzen greift beim nächsten wartenden Auftrag, Heruntersetzen, sobald die überzähligen Stränge fertig sind – ein laufender Download wird dafür nicht abgebrochen. YouTube drosselt pro IP-Adresse bei rund 300 Videos je Stunde, nicht pro Prozess: Hochdrehen macht nicht schneller fertig, sondern vorübergehend gesperrt.", "int", min=1, max=16),
+    Feld("encode_concurrency", "Arbeiter", "Parallele Recodierungen", "Wirkt sofort. Ein Encode nutzt ohnehin alle Kerne – mehr als 1 lohnt nur mit Hardware-Encoder.", "int", min=1, max=16),
     Feld("default_sync_interval_hours", "Arbeiter", "Kanalabgleich alle", "Standardrhythmus. Der Schnellcheck läuft über den RSS-Feed und kostet keinen yt-dlp-Request.", "float", min=0.5, max=720, einheit="Std."),
     Feld("reaper_interval_seconds", "Arbeiter", "Aufräumlauf alle", "", "int", min=30, max=86400, einheit="Sek."),
 ]

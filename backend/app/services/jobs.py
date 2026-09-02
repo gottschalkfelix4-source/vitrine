@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -135,14 +137,59 @@ def claim_next(db: Session, types: list[str] | None = None) -> Job | None:
     return None
 
 
+#: Serialisiert das Schreiben des Fortschritts.
+#:
+#: Noetig, weil der Fortschritt nicht aus dem Arbeiterstrang gemeldet wird,
+#: sondern aus den Fragment-Threads von yt-dlp - standardmaessig vier Stueck.
+#: Die teilen sich die SQLAlchemy-Sitzung des Auftrags, und die ist
+#: ausdruecklich nicht threadsicher: Schliesst ein Thread die Transaktion,
+#: waehrend ein anderer mitten im Schreiben steckt, endet das mit
+#: "ResourceClosedError: This transaction is closed" - und der Auftrag gilt als
+#: gescheitert, obwohl der Download in Ordnung war.
+#:
+#: Aufgefallen ist das erst, als drei Downloads gleichzeitig liefen: Zwei von
+#: dreien brachen bei 16 % und 14 % ab. Der Fehler war vorher schon da, nur
+#: seltener.
+_fortschritt_sperre = threading.Lock()
+
+#: Zeitpunkt des letzten Schreibens je Auftrag.
+_zuletzt_geschrieben: dict[int, float] = {}
+
+#: Mindestabstand zwischen zwei Schreibvorgaengen. yt-dlp meldet mehrmals je
+#: Sekunde und Fragment; jede Meldung einzeln zu schreiben waere Dutzende
+#: Transaktionen je Sekunde fuer eine Zahl, die niemand so schnell abliest.
+FORTSCHRITT_ABSTAND_S = 1.0
+
+
 def fortschritt(db: Session, job: Job, wert: float, nachricht: str | None = None) -> None:
-    job.progress = max(0.0, min(1.0, wert))
-    if nachricht is not None:
-        job.message = nachricht[:1000]
-    db.commit()
+    """Haelt den Fortschritt eines Auftrags fest.
+
+    Darf aus fremden Threads aufgerufen werden - siehe :data:`_fortschritt_sperre`.
+    """
+    with _fortschritt_sperre:
+        job.progress = max(0.0, min(1.0, wert))
+        if nachricht is not None:
+            job.message = nachricht[:1000]
+
+        # Nur der Schreibvorgang wird gedrosselt, nicht die Zuweisung: Der
+        # Wert im Speicher bleibt aktuell und wird beim naechsten Durchlauf
+        # oder spaetestens beim Abschluss des Auftrags mitgeschrieben.
+        jetzt = time.monotonic()
+        schluessel = job.id
+        if jetzt - _zuletzt_geschrieben.get(schluessel, 0.0) < FORTSCHRITT_ABSTAND_S:
+            return
+        _zuletzt_geschrieben[schluessel] = jetzt
+        db.commit()
+
+
+def _fortschritt_vergessen(job_id: int) -> None:
+    """Raeumt den Drosselungsvermerk ab, wenn ein Auftrag endet."""
+    with _fortschritt_sperre:
+        _zuletzt_geschrieben.pop(job_id, None)
 
 
 def erledigt(db: Session, job: Job, nachricht: str | None = None) -> None:
+    _fortschritt_vergessen(job.id)
     job.status = JobStatus.DONE
     job.progress = 1.0
     job.finished_at = utcnow()
@@ -165,6 +212,7 @@ def unterbrochen(db: Session, job: Job, nachricht: str) -> None:
     Der Versuchszaehler bleibt deshalb unberuehrt, und der Auftrag steht sofort
     wieder auf "wartet". Beim naechsten Start nimmt ihn der erste freie Strang.
     """
+    _fortschritt_vergessen(job.id)
     job.status = JobStatus.PENDING
     job.started_at = None
     job.progress = 0.0

@@ -1507,6 +1507,21 @@
   border-color: var(--rand);
 }
 
+/* Je laufendem Auftrag eine Zeile. Vorher stand hier nur der erste, gefolgt
+   von "+1 laufend" - bei zwei parallelen Downloads sah man genau einen davon.
+   Die Trennlinie steht zwischen den Zeilen, nicht darunter, damit die Leiste
+   bei einem einzelnen Auftrag genauso aussieht wie vorher. */
+.fl-zeile + .fl-zeile {
+  border-top: 1px solid var(--rand-zart);
+}
+
+.fl-fuss {
+  padding: 4px 12px 7px;
+  font-size: 12px;
+  color: var(--text-schwach);
+  border-top: 1px solid var(--rand-zart);
+}
+
 .fl-balken {
   height: 3px;
   background: var(--flaeche-hoch);
@@ -1572,11 +1587,6 @@
   color: var(--zu-arbeit);
 }
 
-.fl-rest {
-  margin-left: auto;
-  color: var(--text-schwach);
-  white-space: nowrap;
-}
 
 /* ============================================================ Speicherseite */
 

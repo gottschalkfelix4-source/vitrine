@@ -67,6 +67,14 @@ class Arbeiterwerk:
     def __init__(self) -> None:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._sperre = threading.Lock()
+        #: Wie viele Straenge jede Gruppe haben soll. Wird bei jeder Aenderung
+        #: der Einstellungen neu gesetzt.
+        self._soll: dict[str, int] = {}
+        #: Welche Platznummern gerade besetzt sind. Ohne diese Buchfuehrung
+        #: koennte beim Hochsetzen ein Strang doppelt entstehen, waehrend der
+        #: alte noch einen Download zu Ende bringt.
+        self._belegt: dict[str, set[int]] = {}
 
     def start(self) -> None:
         # Import mit Nebenwirkung: Dabei tragen sich die Bearbeiter ueber den
@@ -76,21 +84,53 @@ class Arbeiterwerk:
         fehlend = [t for t in JobType if t not in jobs.HANDLERS]
         if fehlend:
             log.warning("Kein Bearbeiter fuer: %s", ", ".join(fehlend))
+        self.anpassen()
 
-        for gruppe in _gruppen():
-            for nr in range(max(1, gruppe.straenge)):
-                t = threading.Thread(
-                    target=self._schleife,
-                    args=(gruppe,),
-                    name=f"{gruppe.name}-{nr + 1}",
-                    daemon=True,
-                )
-                t.start()
-                self._threads.append(t)
+    def anpassen(self) -> dict[str, int]:
+        """Gleicht die Zahl der Straenge an die Einstellungen an.
+
+        Wird beim Start und nach jeder Aenderung in der Oberflaeche aufgerufen.
+        Vorher stand bei "Parallele Downloads" ein Neustart-Hinweis - die Zahl
+        wurde nur beim Hochfahren gelesen. Wer sie aendert, will aber sehen,
+        dass es wirkt, und nicht den Container neu starten.
+
+        Hochsetzen wirkt sofort: Die fehlenden Straenge werden gestartet und
+        greifen sich den naechsten wartenden Auftrag.
+
+        Heruntersetzen wirkt, sobald die ueberzaehligen Straenge ihren
+        laufenden Auftrag beendet haben. Ein Download mitten im Lauf wird
+        dafuer NICHT abgebrochen - man verloere Hunderte Megabyte, nur weil
+        jemand eine Zahl verstellt hat. Bis dahin laufen kurzzeitig mehr
+        Straenge als eingestellt.
+        """
+        gestartet: dict[str, int] = {}
+        with self._sperre:
+            for gruppe in _gruppen():
+                soll = max(1, gruppe.straenge)
+                self._soll[gruppe.name] = soll
+                belegt = self._belegt.setdefault(gruppe.name, set())
+                for nummer in range(soll):
+                    if nummer in belegt:
+                        continue
+                    belegt.add(nummer)
+                    t = threading.Thread(
+                        target=self._schleife,
+                        args=(gruppe, nummer),
+                        name=f"{gruppe.name}-{nummer + 1}",
+                        daemon=True,
+                    )
+                    t.start()
+                    self._threads.append(t)
+                    gestartet[gruppe.name] = gestartet.get(gruppe.name, 0) + 1
+            # Beendete Straenge nicht ewig mitschleppen.
+            self._threads = [t for t in self._threads if t.is_alive()]
+
         log.info(
-            "Arbeiter gestartet: %s",
-            ", ".join(f"{g.name}x{max(1, g.straenge)}" for g in _gruppen()),
+            "Arbeiter: %s%s",
+            ", ".join(f"{name}x{anzahl}" for name, anzahl in self._soll.items()),
+            f" (neu gestartet: {gestartet})" if gestartet else "",
         )
+        return dict(self._soll)
 
     def stop(self, timeout: float = 20.0) -> None:
         """Beendet die Straenge und wartet, bis sie wirklich draussen sind.
@@ -116,8 +156,23 @@ class Arbeiterwerk:
                 "Prozess abgeraeumt", ", ".join(noch_da),
             )
 
-    def _schleife(self, gruppe: Gruppe) -> None:
+    def _schleife(self, gruppe: Gruppe, nummer: int) -> None:
+        try:
+            self._arbeiten(gruppe, nummer)
+        finally:
+            # Platz freigeben, damit ein spaeteres Hochsetzen ihn wieder
+            # besetzen kann - auch wenn dieser Strang an einer Ausnahme endet.
+            with self._sperre:
+                self._belegt.get(gruppe.name, set()).discard(nummer)
+
+    def _arbeiten(self, gruppe: Gruppe, nummer: int) -> None:
         while not self._stop.is_set():
+            # Zwischen zwei Auftraegen nachsehen, ob es diesen Platz noch gibt.
+            # Nicht waehrend eines Auftrags: Ein laufender Download wird nicht
+            # abgebrochen, nur weil jemand die Zahl heruntergesetzt hat.
+            if nummer >= self._soll.get(gruppe.name, 0):
+                log.info("[%s] Strang %d wird nicht mehr gebraucht", gruppe.name, nummer + 1)
+                return
             try:
                 with session_scope() as db:
                     job = jobs.claim_next(db, gruppe.typen)
