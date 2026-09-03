@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bytes, dauer, istHochaufloesend, qualitaet } from "./format";
+import { bytes, dauer, istHochaufloesend, qualitaet, wartedauer } from "./format";
 
 describe("qualitaet", () => {
   // 16:9-Masse zu einer Qualitaetsstufe.
@@ -91,5 +91,41 @@ describe("dauer", () => {
   it("liefert nichts bei unbrauchbaren Werten", () => {
     expect(dauer(null)).toBe("");
     expect(dauer(-5)).toBe("");
+  });
+});
+
+describe("wartedauer", () => {
+  it("rundet auf die Einheit, die man ablesen will", () => {
+    expect(wartedauer(40)).toBe("40 Sekunden");
+    expect(wartedauer(300)).toBe("5 Minuten");
+    expect(wartedauer(900)).toBe("15 Minuten");
+    expect(wartedauer(3600)).toBe("1 Stunde");
+    expect(wartedauer(3900)).toBe("1 Stunde 5 Minuten");
+  });
+
+  it("setzt Einzahl und Mehrzahl richtig", () => {
+    expect(wartedauer(60)).toBe("1 Minute");
+    expect(wartedauer(120)).toBe("2 Minuten");
+    expect(wartedauer(7200)).toBe("2 Stunden");
+  });
+
+  it("wechselt bei langen Spannen auf Tage", () => {
+    // Dieselbe Funktion beziffert eine Drosselpause von Minuten UND die
+    // Restlaufzeit einer Cookie-Datei von Wochen. Ohne die Tagesstufe stand
+    // in der Oberfläche "noch 1080 Stunden".
+    expect(wartedauer(45 * 86400)).toBe("45 Tage");
+    expect(wartedauer(86400 * 3)).toBe("3 Tage");
+    // Knapp darunter bleiben Stunden die genauere Auskunft.
+    expect(wartedauer(30 * 3600)).toBe("30 Stunden");
+    expect(wartedauer(47 * 3600)).toBe("47 Stunden");
+    expect(wartedauer(48 * 3600)).toBe("2 Tage");
+  });
+
+  it("sagt bei abgelaufener Frist nicht \"0 Sekunden\"", () => {
+    // Die Anzeige läuft im Sekundentakt und erreicht die Null zwangsläufig.
+    // "gleich" ist dort die einzige Aussage, die nicht falsch wirkt.
+    expect(wartedauer(0)).toBe("gleich");
+    expect(wartedauer(-5)).toBe("gleich");
+    expect(wartedauer(null)).toBe("gleich");
   });
 });

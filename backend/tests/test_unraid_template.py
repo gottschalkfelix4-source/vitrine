@@ -128,12 +128,23 @@ def test_leere_variablen_bedeuten_nicht_gesetzt(monkeypatch: pytest.MonkeyPatch)
     Serverfehler - aber nur im Container, denn lokal ist die Variable gar
     nicht gesetzt.
     """
-    for name in ("YTA_YTDLP_COOKIES_FILE", "YTA_YTDLP_FORMAT", "YTA_YTDLP_RATELIMIT"):
+    for name in (
+        "YTA_YTDLP_COOKIES_FILE",
+        "YTA_YTDLP_FORMAT",
+        "YTA_YTDLP_RATELIMIT",
+        # Die beiden Notausgaenge gegen die Bot-Pruefung stehen im Template
+        # ebenfalls leer - und ein leerer Zahlenwert haette den Dienst gar
+        # nicht erst starten lassen.
+        "YTA_YTDLP_SLEEP_REQUESTS",
+        "YTA_YTDLP_PLAYER_CLIENTS",
+    ):
         monkeypatch.setenv(name, "")
     s = Settings()
     assert s.ytdlp_cookies_file is None
     assert s.ytdlp_format is None
     assert s.ytdlp_ratelimit is None
+    assert s.ytdlp_sleep_requests == 0.0
+    assert s.ytdlp_player_clients == []
 
 
 def test_leere_zahlenvariable_verhindert_den_start_nicht(monkeypatch: pytest.MonkeyPatch):

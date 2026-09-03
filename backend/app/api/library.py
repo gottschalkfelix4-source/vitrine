@@ -35,7 +35,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import cache, jobs, ytdlp
+from app.services import cache, drosselung, jobs, ytdlp
 from app.services import suche as volltext
 
 log = logging.getLogger(__name__)
@@ -859,7 +859,11 @@ def laufende_auftraege(db: Session = Depends(get_db)) -> dict[str, Any]:
             "fortschritt": j.progress,
             "meldung": j.message,
         })
-    return {"laufend": eintraege, "wartend": wartend}
+    # Ohne diese Auskunft ist eine Drosselpause von einem haengenden Dienst
+    # nicht zu unterscheiden: In beiden Faellen stehen tausend Auftraege auf
+    # "wartet" und es laeuft keiner. Der Unterschied gehoert vor die Augen des
+    # Nutzers, nicht nur ins Log.
+    return {"laufend": eintraege, "wartend": wartend, "drosselung": drosselung.zustand()}
 
 
 @router.post("/jobs/{job_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
@@ -884,6 +888,42 @@ def auftrag_wiederholen(job_id: int, db: Session = Depends(get_db)) -> dict[str,
     j.finished_at = None
     db.commit()
     return {"job_id": j.id, "status": j.status}
+
+
+@router.post("/jobs/retry-failed", status_code=status.HTTP_202_ACCEPTED)
+def gescheiterte_wiederholen(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Reiht alles wieder ein, was gescheitert ist.
+
+    Der Anlass ist die Bot-Pruefung von YouTube: Wer eine Sperre abbekommen
+    hat, sitzt hinterher vor einer Liste von Dutzenden roter Eintraege, die
+    alle denselben Fehler tragen und alle in Ordnung waeren. Sie einzeln
+    anzuklicken ist keine zumutbare Bedienung.
+
+    Der Versuchszaehler der Videos wird dabei mit zurueckgesetzt: Die
+    Fehlschlaege lagen nicht am Video, und sie sollen es nicht belasten.
+    """
+    offen = list(db.scalars(select(Job).where(Job.status == JobStatus.FAILED)))
+    for j in offen:
+        j.status = JobStatus.PENDING
+        j.error = None
+        j.message = None
+        j.progress = 0.0
+        j.started_at = None
+        j.finished_at = None
+
+    # Auch das Video selbst zurueckholen - sonst steht es weiter auf
+    # "fehlgeschlagen", waehrend sein Auftrag laengst wieder wartet.
+    video_ids = [j.target_id for j in offen if j.target_id and j.type == JobType.VIDEO_ARCHIVE]
+    zurueckgeholt = 0
+    if video_ids:
+        zurueckgeholt = db.execute(
+            sa_update(Video)
+            .where(Video.id.in_(video_ids), Video.status == VideoStatus.FAILED)
+            .values(status=VideoStatus.QUEUED, status_message=None, retry_count=0)
+        ).rowcount
+    db.commit()
+    log.info("%d gescheiterte Auftraege wieder eingereiht", len(offen))
+    return {"auftraege": len(offen), "videos": zurueckgeholt}
 
 
 # ------------------------------------------------------------------ Speicher

@@ -10,6 +10,37 @@ export function dauer(sekunden: number | null | undefined): string {
   return h > 0 ? `${h}:${zz(m)}:${zz(s)}` : `${m}:${zz(s)}`;
 }
 
+/**
+ * Eine Wartezeit in Worten: "40 Sekunden", "5 Minuten", "1 Stunde 5 Minuten",
+ * "45 Tage".
+ *
+ * Bewusst nicht `dauer()`: Ein Countdown als "1:05:00" liest sich wie eine
+ * Videolänge. Wer wissen will, wann es weitergeht, will keine Uhr entziffern.
+ *
+ * Die Einheit wächst mit der Spanne, und das ist keine Kosmetik. Dieselbe
+ * Funktion beziffert zwei sehr verschiedene Dinge: eine Drosselpause von
+ * Minuten und die Restlaufzeit einer Cookie-Datei von Wochen. Ohne die
+ * Tagesstufe stand da "noch 1080 Stunden" – eine Zahl, die niemand in ein
+ * Datum umrechnet.
+ */
+export function wartedauer(sekunden: number | null | undefined): string {
+  if (sekunden == null || !Number.isFinite(sekunden) || sekunden <= 0) return "gleich";
+  const gerundet = Math.round(sekunden);
+  if (gerundet < 60) return `${gerundet} Sekunden`;
+  const minuten = Math.round(gerundet / 60);
+  if (minuten < 60) return `${minuten} ${minuten === 1 ? "Minute" : "Minuten"}`;
+  // Ab zwei Tagen sagen Stunden nichts mehr. Darunter bleiben sie die
+  // genauere Auskunft - "noch 1 Tag" wäre bei 30 Stunden irreführend rund.
+  if (minuten >= 48 * 60) {
+    const tage = Math.round(minuten / (24 * 60));
+    return `${tage} ${tage === 1 ? "Tag" : "Tage"}`;
+  }
+  const stunden = Math.floor(minuten / 60);
+  const rest = minuten % 60;
+  const std = `${stunden} ${stunden === 1 ? "Stunde" : "Stunden"}`;
+  return rest ? `${std} ${rest} ${rest === 1 ? "Minute" : "Minuten"}` : std;
+}
+
 const zahl = new Intl.NumberFormat("de-DE");
 
 /** Aufrufe kompakt: 1234 -> "1234", 12345 -> "12.345", 1200000 -> "1,2 Mio." */

@@ -143,6 +143,19 @@ class Settings(BaseSettings):
     #: Wartezeit zwischen Videos, entschaerft Rate-Limiting.
     ytdlp_sleep_interval: float = 2.0
     ytdlp_max_sleep_interval: float = 6.0
+    #: Wartezeit zwischen einzelnen HTTP-Anfragen an YouTube, nicht nur zwischen
+    #: Videos. Der wirksamere Hebel gegen "Sign in to confirm you're not a bot":
+    #: Ein einziger Download stellt ein Dutzend Anfragen, und gezaehlt werden
+    #: die, nicht die Videos. 0 = aus.
+    ytdlp_sleep_requests: float = 0.0
+    #: Welche YouTube-Clients yt-dlp anfragen soll, z.B. "tv,web_safari".
+    #: Leer = yt-dlp entscheidet selbst, und das ist der Normalfall.
+    #:
+    #: Ein Notausgang, kein Regler: Wenn YouTube einen Client dichtmacht und
+    #: yt-dlp noch nicht nachgezogen hat, laesst sich hier ohne neues Image
+    #: umschalten. Falsch gesetzt richtet er Schaden an - ein Client, den
+    #: YouTube nicht mehr bedient, liefert nur noch 360p.
+    ytdlp_player_clients: Annotated[list[str], NoDecode] = Field(default_factory=list)
     write_subtitles: bool = True
     write_auto_subtitles: bool = False
     subtitle_languages: Annotated[list[str], NoDecode] = Field(
@@ -188,7 +201,7 @@ class Settings(BaseSettings):
             }
         return daten
 
-    @field_validator("cors_origins", "subtitle_languages", mode="before")
+    @field_validator("cors_origins", "subtitle_languages", "ytdlp_player_clients", mode="before")
     @classmethod
     def _split_csv(cls, v: object) -> object:
         """Nimmt Kommalisten und JSON-Listen gleichermassen an.

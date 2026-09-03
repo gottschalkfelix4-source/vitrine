@@ -552,7 +552,50 @@ def test_aktive_auftraege_knapp_gehalten(umgebung):
 
 def test_aktive_auftraege_leer(umgebung):
     client, _ = umgebung
-    assert client.get("/api/jobs/aktiv").json() == {"laufend": [], "wartend": 0}
+    antwort = client.get("/api/jobs/aktiv").json()
+    assert antwort["laufend"] == []
+    assert antwort["wartend"] == 0
+    # Die Oberflaeche unterscheidet an diesem Feld eine Zwangspause von einem
+    # haengenden Dienst - von aussen sehen beide gleich aus.
+    assert antwort["drosselung"]["pausiert"] is False
+
+
+def test_alle_gescheiterten_auf_einmal_wiederholen(umgebung):
+    """Nach einer Sperre durch YouTube stehen Dutzende Auftraege rot in der
+    Liste, alle mit demselben Fehler. Sie einzeln anzuklicken ist keine
+    zumutbare Bedienung."""
+    client, db = umgebung
+
+    for i in (1, 2):
+        db.add(
+            Job(
+                type=JobType.VIDEO_ARCHIVE,
+                target_id=f"v{i}",
+                status=JobStatus.FAILED,
+                error="Sign in to confirm you're not a bot",
+            )
+        )
+    for i in (1, 2):
+        video = db.get(Video, f"v{i}")
+        video.status = VideoStatus.FAILED
+        video.status_message = "Sign in to confirm you're not a bot"
+        video.retry_count = 3
+    db.commit()
+
+    antwort = client.post("/api/jobs/retry-failed")
+    assert antwort.status_code == 202
+    assert antwort.json() == {"auftraege": 2, "videos": 2}
+
+    db.expire_all()
+    for auftrag in db.scalars(select(Job)):
+        assert auftrag.status == JobStatus.PENDING
+        assert auftrag.error is None
+    for i in (1, 2):
+        video = db.get(Video, f"v{i}")
+        assert video.status == VideoStatus.QUEUED
+        # Die Fehlschlaege lagen an der IP-Adresse, nicht am Video - sie
+        # duerfen es nicht belasten.
+        assert video.retry_count == 0
 
 
 # ------------------------------------------------- Verschwundene Videos

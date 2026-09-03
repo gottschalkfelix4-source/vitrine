@@ -24,7 +24,7 @@ import yt_dlp
 from yt_dlp.utils import UnsupportedError, YoutubeDLError
 
 from app.config import settings
-from app.services import abbruch
+from app.services import abbruch, cookies
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +42,56 @@ class YtdlpError(RuntimeError):
 
 class VideoUnavailable(YtdlpError):
     """Video ist geloescht, privat oder gesperrt - kein Grund zum Wiederholen."""
+
+
+class Gedrosselt(YtdlpError):
+    """YouTube weist die IP-Adresse ab - kein Fehler dieses Videos.
+
+    Die bekannteste Auspraegung ist "Sign in to confirm you're not a bot",
+    daneben HTTP 429. Beides gilt der Adresse, nicht dem Video: Das naechste
+    Video traefe auf dieselbe Wand, und jeder weitere Versuch verlaengert die
+    Sperre eher, als dass er sie loest.
+
+    Deshalb ist das ausdruecklich kein Fehlschlag. Der Auftrag geht unbewertet
+    zurueck in die Warteschlange, und alle Netzauftraege pausieren - siehe
+    :mod:`app.services.drosselung`.
+    """
+
+
+#: Textmerkmale einer Abweisung durch YouTube.
+#:
+#: Bewusst knapp und woertlich gehalten. Ein weit gefasstes Muster waere hier
+#: teuer: Jeder Fehltreffer legt die gesamte Warteschlange fuer Minuten still.
+#: "not a bot" trifft die Bot-Pruefung in jeder Formulierung und faellt
+#: insbesondere nicht auf "Sign in to confirm your age" herein - eine
+#: Altersschranke ist eine Sache des Kontos, keine Drosselung, und wuerde von
+#: einer Pause kein Stueck besser.
+_DROSSEL_MARKER = ("not a bot", "http error 429", "too many requests")
+
+#: Textmerkmale eines endgueltig verschwundenen Videos.
+_WEG_MARKER = ("private", "unavailable", "removed", "deleted", "terminated")
+
+
+def _fehlerklasse(meldung: str) -> type[YtdlpError]:
+    """Ordnet einen Fehlertext einer unserer Bedeutungen zu.
+
+    Die Reihenfolge ist nicht beliebig: Erst die Drosselung, dann das
+    verschwundene Video. Eine Abweisung wegen Drosselung enthaelt gelegentlich
+    ebenfalls das Wort "unavailable" - waere sie als :class:`VideoUnavailable`
+    eingeordnet, gaelte das Video als bei der Quelle geloescht und wuerde nie
+    wieder angefasst. Genau der Verlust, den ein Archiv nicht machen darf.
+    """
+    text = meldung.lower()
+    if any(w in text for w in _DROSSEL_MARKER):
+        return Gedrosselt
+    if any(w in text for w in _WEG_MARKER):
+        return VideoUnavailable
+    return YtdlpError
+
+
+def _einordnen(e: YoutubeDLError) -> YtdlpError:
+    """Uebersetzt eine yt-dlp-Ausnahme in unsere Bedeutungen."""
+    return _fehlerklasse(str(e))(str(e))
 
 
 @dataclass(slots=True)
@@ -68,23 +118,87 @@ def _base_opts() -> dict[str, Any]:
         "sleep_interval": settings.ytdlp_sleep_interval,
         "max_sleep_interval": settings.ytdlp_max_sleep_interval,
     }
-    if settings.ytdlp_cookies_file:
-        # Erst pruefen, dann setzen: yt-dlp bricht bei einem unlesbaren
-        # cookiefile jeden Aufruf ab, auch das blosse Auflisten eines Kanals.
-        # Ein Tippfehler im Pfad soll eine Warnung im Log sein, kein Ausfall.
-        if settings.ytdlp_cookies_file.is_file():
-            opts["cookiefile"] = str(settings.ytdlp_cookies_file)
-        else:
-            log.warning(
-                "Cookie-Datei %s gibt es nicht - es wird ohne Cookies gearbeitet.",
-                settings.ytdlp_cookies_file,
-            )
+    # Erst pruefen, dann setzen: yt-dlp bricht bei einem unlesbaren cookiefile
+    # jeden Aufruf ab, auch das blosse Auflisten eines Kanals. Ein Tippfehler im
+    # Pfad soll eine Warnung im Log sein, kein Ausfall.
+    if settings.ytdlp_cookies_file and not settings.ytdlp_cookies_file.is_file():
+        log.warning(
+            "Cookie-Datei %s gibt es nicht - es wird ohne Cookies gearbeitet.",
+            settings.ytdlp_cookies_file,
+        )
+    # Welche Datei gilt, entscheidet der Cookie-Assistent: eine ausdruecklich
+    # gesetzte Umgebungsvariable, sonst die ueber die Oberflaeche hochgeladene.
+    if (cookie_datei := cookies.aktiver_pfad()) is not None:
+        opts["cookiefile"] = str(cookie_datei)
     if settings.ytdlp_ratelimit:
         opts["ratelimit"] = settings.ytdlp_ratelimit
+    if settings.ytdlp_sleep_requests > 0:
+        # Wirkt zwischen den einzelnen HTTP-Anfragen, nicht nur zwischen
+        # Videos. Gegen die Bot-Pruefung ist das der wirksamere Hebel: Ein
+        # Download stellt ein Dutzend Anfragen, und YouTube zaehlt die, nicht
+        # die Videos.
+        opts["sleep_interval_requests"] = settings.ytdlp_sleep_requests
+    if settings.ytdlp_player_clients:
+        opts["extractor_args"] = {
+            "youtube": {"player_client": list(settings.ytdlp_player_clients)}
+        }
     return opts
 
 
+class _Mitschrift:
+    """Faengt die Meldungen von yt-dlp ab, statt sie nur zu verwerfen.
+
+    Noetig wegen ``ignoreerrors``. Beim Auflisten eines Kanals ist die Option
+    unverzichtbar - ein einziges gesperrtes Video darf einen Abgleich ueber
+    tausend Videos nicht abbrechen. Sie hat aber eine unangenehme Kehrseite:
+    yt-dlp wirft dann nicht mehr, sondern schreibt den Fehler ins Log und gibt
+    ``None`` zurueck.
+
+    Damit war eine Abweisung durch YouTube beim Auflisten nicht mehr von einem
+    kaputten Kanal zu unterscheiden - beide endeten als "keine Metadaten fuer
+    ...". Der Abgleich galt als gescheitert, die Drosselung blieb unerkannt und
+    die uebrigen Kanaele liefen munter weiter in dieselbe Wand.
+
+    Der Mitschnitt macht den Grund wieder lesbar. Er ersetzt zugleich die
+    Optionen ``quiet``/``no_warnings``: yt-dlp schreibt bei gesetztem Logger
+    nichts mehr selbst auf die Konsole.
+    """
+
+    #: Hoechstens so viele Meldungen werden aufgehoben. Beim Auflisten eines
+    #: Kanals mit tausenden Videos meldet yt-dlp jedes geloeschte einzeln -
+    #: alle mitzuschleppen ergaebe eine Fehlermeldung von der Laenge eines
+    #: Romans, in der Datenbank abgeschnitten und in der Oberflaeche unlesbar.
+    #: Die ersten paar sagen dasselbe wie alle.
+    GRENZE = 5
+
+    def __init__(self) -> None:
+        self.fehler: list[str] = []
+        self.gezaehlt = 0
+
+    def debug(self, msg: str) -> None:  # pragma: no cover - Rauschen
+        pass
+
+    def info(self, msg: str) -> None:  # pragma: no cover - Rauschen
+        pass
+
+    def warning(self, msg: str) -> None:
+        log.debug("yt-dlp: %s", msg)
+
+    def error(self, msg: str) -> None:
+        self.gezaehlt += 1
+        if len(self.fehler) < self.GRENZE:
+            self.fehler.append(str(msg))
+        log.debug("yt-dlp-Fehler: %s", msg)
+
+    def text(self) -> str:
+        text = " | ".join(self.fehler)
+        weitere = self.gezaehlt - len(self.fehler)
+        return f"{text} (und {weitere} weitere)" if weitere > 0 else text
+
+
 def _extract(url: str, opts: dict[str, Any]) -> dict[str, Any]:
+    mitschrift = _Mitschrift()
+    opts = opts | {"logger": mitschrift}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -99,11 +213,15 @@ def _extract(url: str, opts: dict[str, Any]) -> dict[str, Any]:
         # decken nicht alles ab. Ein leerer oder falscher Cookie-Pfad etwa
         # wirft CookieLoadError, und der kam ungefiltert als Serverfehler beim
         # Nutzer an, statt als lesbare Meldung.
-        text = str(e).lower()
-        if any(w in text for w in ("private", "unavailable", "removed", "deleted", "terminated")):
-            raise VideoUnavailable(str(e)) from e
-        raise YtdlpError(str(e)) from e
+        raise _einordnen(e) from e
     if info is None:
+        # Hierher fuehrt der Weg nur mit ``ignoreerrors``: yt-dlp hat den Grund
+        # ins Log geschrieben statt zu werfen. Ohne den Mitschnitt stuende hier
+        # nur "keine Metadaten" - und eine Drosselung saehe aus wie ein
+        # kaputter Kanal.
+        grund = mitschrift.text()
+        if grund:
+            raise _fehlerklasse(grund)(f"keine Metadaten fuer {url}: {grund}")
         raise YtdlpError(f"keine Metadaten fuer {url}")
     return info
 
@@ -336,10 +454,7 @@ def download_video(
         # wuerde der Auftrag als gescheitert vermerkt statt fortgesetzt.
         raise
     except YoutubeDLError as e:
-        text = str(e).lower()
-        if any(w in text for w in ("private", "unavailable", "removed", "deleted")):
-            raise VideoUnavailable(str(e)) from e
-        raise YtdlpError(str(e)) from e
+        raise _einordnen(e) from e
     if info is None:
         raise YtdlpError(f"Download von {video_id} lieferte nichts")
 
@@ -637,7 +752,13 @@ def peek_recent(channel_id: str, timeout: float = 15.0) -> list[ListedVideo]:
         with urllib.request.urlopen(rss_url(channel_id), timeout=timeout) as antwort:
             baum = ElementTree.parse(antwort)
     except (urllib.error.URLError, OSError, ElementTree.ParseError) as e:
-        raise YtdlpError(f"RSS-Feed von {channel_id} nicht lesbar: {e}") from e
+        meldung = f"RSS-Feed von {channel_id} nicht lesbar: {e}"
+        if any(w in str(e).lower() for w in _DROSSEL_MARKER):
+            # Selbst der RSS-Feed wird abgewiesen. Dann ist die Adresse
+            # gesperrt und nicht der Feed kaputt - und der Abgleich soll
+            # warten statt es im Minutentakt erneut zu versuchen.
+            raise Gedrosselt(meldung) from e
+        raise YtdlpError(meldung) from e
 
     ergebnis: list[ListedVideo] = []
     for eintrag in baum.getroot().findall("atom:entry", ns):

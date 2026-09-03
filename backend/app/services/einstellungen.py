@@ -95,6 +95,8 @@ FELDER: list[Feld] = [
     Feld("write_comments", "Download", "Kommentare mitsichern", "Kann bei großen Videos sehr lange dauern.", "bool"),
     Feld("ytdlp_ratelimit", "Download", "Bandbreitenlimit", "Zum Beispiel 5M. Leer = unbegrenzt.", "text"),
     Feld("ytdlp_sleep_interval", "Download", "Pause zwischen Videos", "Entschärft die Drosselung.", "float", min=0, max=120, einheit="Sek."),
+    Feld("ytdlp_sleep_requests", "Download", "Pause zwischen Anfragen", "Der wirksamste Hebel gegen „Sign in to confirm you’re not a bot“. Wirkt zwischen den einzelnen Anfragen, nicht nur zwischen Videos – und gezählt werden die Anfragen: Ein Download stellt ein Dutzend davon. 1 bis 3 sind ein guter Anfang, 0 ist aus.", "float", min=0, max=30, einheit="Sek."),
+    Feld("ytdlp_player_clients", "Download", "YouTube-Clients", "Leer lassen. Notausgang für den Fall, dass YouTube einen Client dichtmacht und yt-dlp noch nicht nachgezogen ist, z. B. tv,web_safari. Falsch gesetzt liefert ein nicht mehr bedienter Client nur noch 360p.", "liste"),
 
     # ----------------------------------------------------------------- Worker
     Feld("download_concurrency", "Arbeiter", "Parallele Downloads", "Wirkt sofort. Hochsetzen greift beim nächsten wartenden Auftrag, Heruntersetzen, sobald die überzähligen Stränge fertig sind – ein laufender Download wird dafür nicht abgebrochen. YouTube drosselt pro IP-Adresse bei rund 300 Videos je Stunde, nicht pro Prozess: Hochdrehen macht nicht schneller fertig, sondern vorübergehend gesperrt.", "int", min=1, max=16),

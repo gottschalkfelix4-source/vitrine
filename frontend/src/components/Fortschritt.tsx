@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
 import type { LaufenderAuftrag } from "../lib/api";
-import { AUFTRAG_TEXT, prozent } from "../lib/format";
+import { AUFTRAG_TEXT, prozent, wartedauer } from "../lib/format";
 
 /**
  * Zeigt an, was gerade läuft - immer sichtbar, auf jeder Seite.
@@ -49,6 +49,7 @@ export function Fortschrittsleiste() {
 
   const laufend = daten?.laufend ?? [];
   const wartend = daten?.wartend ?? 0;
+  const drosselung = daten?.drosselung;
   if (laufend.length === 0 && wartend === 0) return null;
 
   return (
@@ -56,7 +57,21 @@ export function Fortschrittsleiste() {
       {laufend.map((a) => (
         <Zeile key={a.id} auftrag={a} />
       ))}
-      {laufend.length === 0 ? (
+      {/*
+        Ohne diese Zeile ist eine Zwangspause von einem hängenden Dienst nicht
+        zu unterscheiden: In beiden Fällen stehen tausend Aufträge auf "wartet"
+        und es läuft keiner. Das ist genau der Moment, in dem man anfängt, den
+        Container neu zu starten - und die Sperre damit verlängert.
+      */}
+      {drosselung?.pausiert ? (
+        <div className="fl-zeile">
+          <div className="fl-text">
+            <strong>Pause</strong>
+            <span className="fl-titel">YouTube weist gerade ab</span>
+            <span className="fl-meldung">weiter in {wartedauer(drosselung.rest_s)}</span>
+          </div>
+        </div>
+      ) : laufend.length === 0 ? (
         <div className="fl-zeile">
           <div className="fl-text">
             <strong>Warteschlange</strong>
