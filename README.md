@@ -240,6 +240,28 @@ und **kein Browser spielt MKV ab**. Drei getrennte Arbeiterstraenge (Netz,
 Vorbereitung, Recodierung) sorgen dafuer, dass eine tagelange Recodierung
 weder einen Download noch eine wartende Wiedergabe blockiert.
 
+### Mehr Auftraege als Videos - kein Fehler
+
+Die Warteschlange kann mehr Eintraege enthalten, als der Kanal Videos hat. Bei
+3363 Videos standen dort 4216 Auftraege, und das sah nach einem Zaehlfehler
+aus. Es stimmte aber: Ein Video durchlaeuft nacheinander mehrere Auftraege -
+erst den Download, spaeter die Verkleinerung, womoeglich noch ein Hochstufen.
+
+Die Anzeige schluesselt deshalb nach Art auf, statt eine nackte Summe zu
+nennen. "1888 Archivierung · 1333 Qualitaet anheben · 995 Verkleinerung" ist
+nachvollziehbar, "4216 warten" nicht.
+
+Doppelte Auftraege entstehen dabei nicht: :func:`enqueue` gibt einen bereits
+offenen Auftrag zurueck, statt einen zweiten anzulegen. Und "Alle laden" reiht
+nur ein, was wirklich fehlt - archivierte, verschwundene und laufende Videos
+bleiben aussen vor, und es sagt hinterher, was womit passiert ist:
+
+    3 neu eingereiht, 1885 warteten schon, 995 bereits archiviert,
+    163 bei der Quelle geloescht, 87 durch Kanalregeln ausgeschlossen.
+
+Wer auf "wartet" steht, aber keinen Auftrag hat, haengt fest - so ein Video
+wuerde nie geladen, weil niemand mehr danach sieht. Der Knopf holt es zurueck.
+
 ### Kanalabgleich
 
 Zwei Geschwindigkeiten, weil YouTube-Requests knapp sind:

@@ -41,16 +41,36 @@ export function Warteschlangeseite() {
   const wartend = daten?.filter((a) => a.status === "pending") ?? [];
   const gescheitert = daten?.filter((a) => a.status === "failed") ?? [];
   const drosselung = aktiv?.drosselung;
+  const wartendeArten = Object.entries(aktiv?.nach_art ?? {}).sort((a, b) => b[1] - a[1]);
 
   return (
     <>
       <div className="seiten-kopf">
         <h1>Warteschlange</h1>
         <span className="beiwerk">
-          {laufend.length} laufend · {wartend.length} wartend
+          {laufend.length} laufend · {aktiv?.wartend ?? wartend.length} wartend
           {gescheitert.length ? ` · ${gescheitert.length} fehlgeschlagen` : ""}
         </span>
       </div>
+
+      {/*
+        Die Aufschlüsselung steht bewusst oben: Ein Video erzeugt im Lauf
+        seines Lebens mehrere Aufträge, deshalb kann die Warteschlange mehr
+        Einträge haben, als der Kanal Videos hat. Ohne diese Zeile sieht das
+        nach einem Fehler aus.
+      */}
+      {wartendeArten.length > 1 ? (
+        <Hinweis>
+          <strong>Es warten {aktiv?.wartend ?? 0} Aufträge.</strong>
+          <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
+            {wartendeArten.map(([art, n]) => `${n} × ${AUFTRAG_TEXT[art] ?? art}`).join(" · ")}
+          </div>
+          <div style={{ color: "var(--text-schwach)", marginTop: 4, fontSize: 12.5 }}>
+            Ein Video durchläuft nacheinander mehrere Aufträge – erst der Download, später
+            die Verkleinerung. Mehr Aufträge als Videos sind deshalb normal.
+          </div>
+        </Hinweis>
+      ) : null}
 
       {/*
         Erklärung statt roter Liste. "Sign in to confirm you're not a bot" ist

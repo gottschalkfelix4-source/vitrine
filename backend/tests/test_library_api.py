@@ -503,11 +503,18 @@ def test_alle_laden_reiht_ein(umgebung):
     assert r.status_code == 202
     # Fehlgeschlagene und uebersprungene werden wieder aufgenommen - wer hier
     # klickt, will alles haben.
-    assert r.json()["eingereiht"] == 3
+    #
+    # Vier, nicht drei: "v1" aus der Vorbereitung steht auf "wartet", hat aber
+    # keinen Auftrag. Ein solches Video haengt fest - es wuerde nie geladen,
+    # weil niemand mehr danach sieht. Der Knopf holt es mit zurueck, und genau
+    # das ist der Sinn von "nur was wirklich fehlt".
+    assert r.json()["eingereiht"] == 4
 
     eingereiht = {j.target_id for j in db.scalars(select(Job).where(Job.type == JobType.VIDEO_ARCHIVE))}
-    assert eingereiht == {"o1", "f1", "u1"}
+    assert eingereiht == {"o1", "f1", "u1", "v1"}
     assert db.get(Video, "o1").status == VideoStatus.QUEUED
+    # Das archivierte und das verschwundene bleiben aussen vor.
+    assert "v0" not in eingereiht and "v2" not in eingereiht
 
 
 def test_alle_laden_verdoppelt_nichts(umgebung):
@@ -518,7 +525,14 @@ def test_alle_laden_verdoppelt_nichts(umgebung):
     client.post("/api/channels/UCtest/download-all")
     zweiter = client.post("/api/channels/UCtest/download-all").json()
     assert zweiter["eingereiht"] == 0, "bereits eingereihte duerfen nicht doppelt kommen"
-    assert len(list(db.scalars(select(Job).where(Job.type == JobType.VIDEO_ARCHIVE)))) == 1
+
+    # Auf die Ziele geprueft statt auf eine feste Gesamtzahl: Der Test soll
+    # sagen "nichts doppelt", nicht "genau ein Auftrag" - sonst bricht er,
+    # sobald die Vorbereitung ein Video mehr anlegt, und sagt trotzdem nichts
+    # ueber Dubletten aus.
+    ziele = [j.target_id for j in db.scalars(select(Job).where(Job.type == JobType.VIDEO_ARCHIVE))]
+    assert len(ziele) == len(set(ziele)), f"Dubletten in der Warteschlange: {ziele}"
+    assert "o1" in ziele
 
 
 def test_alle_laden_bei_unbekanntem_kanal(umgebung):

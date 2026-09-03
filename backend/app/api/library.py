@@ -327,27 +327,79 @@ def kanal_alle_laden(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, 
     keine. Bereits laufende oder wartende Auftraege werden nicht verdoppelt,
     darum kuemmert sich die Warteschlange selbst.
     """
-    from app.workers.sync import _offene_einreihen
+    from app.workers.sync import _soll_archiviert_werden
 
     kanal = db.get(Channel, kanal_id)
     if kanal is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Kanal unbekannt")
 
-    # Fehlgeschlagene und uebersprungene wieder aufnehmen: Wer hier klickt,
-    # will alles haben, auch die Nachzuegler von letzter Woche.
-    db.execute(
-        sa_update(Video)
-        .where(
-            Video.channel_id == kanal_id,
-            Video.status.in_([VideoStatus.FAILED, VideoStatus.SKIPPED]),
+    # Welche Videos haben bereits einen offenen Auftrag? In EINER Abfrage, nicht
+    # je Video: Bei dreitausend Videos waeren das sonst dreitausend Abfragen.
+    schon_offen = set(
+        db.scalars(
+            select(Job.target_id).where(
+                Job.type == JobType.VIDEO_ARCHIVE,
+                Job.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+            )
         )
-        .values(status=VideoStatus.NEW, status_message=None)
     )
-    db.commit()
 
-    anzahl = _offene_einreihen(db, kanal)
-    log.info("Kanal %s: %d Videos zum Herunterladen eingereiht", kanal_id, anzahl)
-    return {"eingereiht": anzahl}
+    z = {
+        "eingereiht": 0,
+        "wartete_schon": 0,
+        "laeuft_gerade": 0,
+        "bereits_archiviert": 0,
+        "nicht_verfuegbar": 0,
+        "regeln": 0,
+    }
+    for video in db.scalars(select(Video).where(Video.channel_id == kanal_id)):
+        if video.status == VideoStatus.ARCHIVED:
+            z["bereits_archiviert"] += 1
+            continue
+        if video.status == VideoStatus.UNAVAILABLE:
+            # Bei der Quelle geloescht - erneut anzufragen kostet nur ein
+            # Anfragebudget, das YouTube ohnehin knapp bemisst.
+            z["nicht_verfuegbar"] += 1
+            continue
+        if not _soll_archiviert_werden(kanal, video):
+            # Bleibt uebersprungen, MIT seiner Begruendung.
+            #
+            # Vorher wurde hier pauschal alles Uebersprungene auf "neu"
+            # gesetzt. Bei einem Kanal ohne Shorts hiess das: Die Shorts
+            # wurden neu, fielen gleich darauf durch dieselbe Regel und blieben
+            # als "neu" liegen - ohne Auftrag, ohne Begruendung, aber mitgezaehlt.
+            # Jeder weitere Klick wiederholte das.
+            z["regeln"] += 1
+            continue
+        if video.status in (
+            VideoStatus.DOWNLOADING, VideoStatus.REMUXING,
+            VideoStatus.ENCODING, VideoStatus.BUNDLING,
+        ):
+            z["laeuft_gerade"] += 1
+            continue
+
+        if video.id in schon_offen:
+            # Auftrag steht bereits - nur den Zustand geradeziehen, damit die
+            # Kachel nicht faelschlich rot bleibt.
+            video.status = VideoStatus.QUEUED
+            video.status_message = None
+            z["wartete_schon"] += 1
+            continue
+
+        video.status = VideoStatus.QUEUED
+        video.status_message = None
+        jobs.enqueue_archive(db, video.id)
+        schon_offen.add(video.id)
+        z["eingereiht"] += 1
+
+    db.commit()
+    log.info(
+        "Kanal %s: %d neu eingereiht, %d warteten schon, %d bereits archiviert",
+        kanal_id, z["eingereiht"], z["wartete_schon"], z["bereits_archiviert"],
+    )
+    # "eingereiht" bleibt als Feld erhalten, damit aeltere Oberflaechen weiter
+    # etwas Sinnvolles anzeigen.
+    return {"eingereiht": z["eingereiht"], **z}
 
 
 @router.delete("/channels/{kanal_id}")
@@ -863,7 +915,24 @@ def laufende_auftraege(db: Session = Depends(get_db)) -> dict[str, Any]:
     # nicht zu unterscheiden: In beiden Faellen stehen tausend Auftraege auf
     # "wartet" und es laeuft keiner. Der Unterschied gehoert vor die Augen des
     # Nutzers, nicht nur ins Log.
-    return {"laufend": eintraege, "wartend": wartend, "drosselung": drosselung.zustand()}
+    # Nach Art aufgeschluesselt, und das ist keine Spielerei: Ein Video
+    # durchlaeuft im Laufe seines Lebens mehrere Auftraege - erst der Download,
+    # spaeter die Verkleinerung, womoeglich noch ein Hochstufen. Eine einzelne
+    # Zahl "4216 warten" liest sich deshalb wie "4216 Videos" und war bei einem
+    # Kanal mit 3363 Videos schlicht nicht zu glauben. Sie stimmte trotzdem.
+    nach_art = dict(
+        db.execute(
+            select(Job.type, func.count(Job.id))
+            .where(Job.status == JobStatus.PENDING)
+            .group_by(Job.type)
+        ).all()
+    )
+    return {
+        "laufend": eintraege,
+        "wartend": wartend,
+        "nach_art": nach_art,
+        "drosselung": drosselung.zustand(),
+    }
 
 
 @router.post("/jobs/{job_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
