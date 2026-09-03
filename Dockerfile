@@ -14,9 +14,24 @@ RUN npm run build
 FROM python:3.13-slim AS runtime
 
 # ffmpeg macht die Recodierung, ca-certificates braucht yt-dlp fuer TLS.
+#
+# intel-media-va-driver ist der Laufzeittreiber fuer Intel-Grafik ab Gen8, also
+# auch fuer Arc. Er fehlte, und das war ein stiller Totalausfall des gesamten
+# Hardware-Pfades: ffmpeg bringt libva und libvpl mit und listet av1_qsv und
+# av1_vaapi brav unter seinen Encodern, aber ohne die Datei iHD_drv_video.so
+# hat libva nichts zu laden. Man stellt also einen Hardware-Encoder ein, sieht
+# keinen Fehler und wundert sich, warum die CPU weiter unter Volllast steht.
+# Kostet 18 MB. Die freie Fassung aus main genuegt - "-non-free" braeuchte eine
+# zusaetzliche Paketquelle und bringt fuer AV1-Encode nichts.
+#
+# vainfo ist kein Beiwerk: Es ist das einzige Werkzeug, das im laufenden
+# Container beantwortet, ob die Karte wirklich da ist und was sie kann. Die
+# Hardware-Pruefung in den Einstellungen ruft es auf.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ffmpeg \
+      intel-media-va-driver \
+      vainfo \
       ca-certificates \
       curl \
       unzip \

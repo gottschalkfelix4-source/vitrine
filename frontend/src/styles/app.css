@@ -2048,3 +2048,10 @@
 .cookie-anleitung li strong {
   color: var(--text);
 }
+
+/* Die Probelauf-Tabelle darf auf dem Telefon seitlich rollen, statt die
+   Seite zu sprengen - die Encoder-Namen sind lang und nicht umbrechbar. */
+.hw-proben {
+  overflow-x: auto;
+  margin-bottom: 10px;
+}

@@ -6,6 +6,7 @@ import type { EinstellungsFeld } from "../lib/api";
 import { api } from "../lib/api";
 import { AppInstallieren } from "../components/AppInstallieren";
 import { CookieAssistent } from "../components/Cookies";
+import { HardwarePruefung } from "../components/Hardware";
 
 const HERKUNFT_TEXT: Record<string, string> = {
   datenbank: "hier geändert",
@@ -120,6 +121,7 @@ export function Einstellungenseite() {
       ) : null}
 
       <CookieAssistent />
+      <HardwarePruefung />
 
       {gruppen.map((g) => (
         <section key={g.name} className="einst-gruppe">

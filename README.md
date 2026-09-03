@@ -122,7 +122,8 @@ Oberflaeche. Die wichtigsten Variablen:
 | `YTA_ARCHIVE_CODEC` | av1 | `av1`, `hevc` oder `copy` (nichts umkodieren) |
 | `YTA_AV1_CRF` | 30 | Qualitaet der Recodierung, siehe Messwerte unten |
 | `YTA_AV1_PRESET` | 6 | Tempo 0-13; fuer grosse Kanaele 8-10 |
-| `YTA_HWACCEL` | none | `qsv`, `nvenc`, `vaapi` - nur mit passender GPU |
+| `YTA_HWACCEL` | none | `qsv`, `nvenc`, `vaapi` - nur mit passender GPU, siehe unten |
+| `YTA_HWACCEL_DEVICE` | /dev/dri/renderD128 | Render-Knoten, nur fuer vaapi |
 | `YTA_HOT_MAX_BYTES` | 50 GiB | Limit des Heissspeichers (Unraid-Template: 20 GB) |
 | `YTA_HOT_TTL_HOURS` | 24 | Frist einer Heisskopie ab letztem Zugriff |
 | `YTA_HOT_TTL_AFTER_PLAYBACK_MINUTES` | 30 | Kuerzere Frist nach Wiedergabeende |
@@ -422,8 +423,55 @@ nicht schneller fertig, sondern voruebergehend gesperrt.
 
 Intel 11. bis 13. Generation (UHD 730/770) kann AV1 **nur dekodieren**. Fuer
 AV1-Encode in Hardware braucht es Intel Arc, Meteor/Lunar/Arrow Lake, NVIDIA
-RTX 40/50 oder RDNA3+. Software-Encode bleibt ohnehin die bessere Wahl fuer ein
-Archiv, das einmal geschrieben und lange behalten wird.
+RTX 40/50 oder RDNA3+.
+
+### Warum der Hardware-Encoder nichts tat
+
+Der Weg zur Grafikkarte reisst an drei Stellen, und keine davon meldete sich -
+man stellte `qsv` ein, sah keinen Fehler und die CPU lief weiter unter
+Volllast:
+
+1. **Die Karte war nicht im Container.** `/dev/dri` ist im Unraid-Template eine
+   eigene Zeile und standardmaessig **leer**.
+2. **Im Image fehlte der Treiber.** ffmpeg bringt libva und libvpl mit und
+   listet `av1_qsv` und `av1_vaapi` brav unter seinen Encodern - es ist ja
+   *gebaut* mit dieser Unterstuetzung. Ohne `iHD_drv_video.so` hat libva aber
+   nichts zu laden. Das Image bringt jetzt `intel-media-va-driver` mit (18 MB).
+3. **Die Befehle waren falsch.** Und das ist der heimtueckische Teil: ffmpeg
+   **ignoriert** eine unbekannte Encoder-Option stillschweigend. Uebergeben
+   wurde durchweg `-cq`, was es nur bei NVENC gibt - bei QSV und VAAPI fiel die
+   eingestellte Qualitaet damit wortlos unter den Tisch. Dem VAAPI-Befehl
+   fehlten ausserdem Geraet und `hwupload`; er konnte nie funktioniert haben.
+
+Jede Familie hat ihre eigene Qualitaetsschraube: `-crf` (SVT-AV1/x265),
+`-global_quality` (QSV), `-qp` mit `-rc_mode CQP` (VAAPI), `-cq` (NVENC).
+
+### Nachsehen statt raten
+
+Unter *Einstellungen -> Grafikkarte* steht, ob die Karte durchgereicht ist,
+welcher Treiber sich meldet und welche Render-Knoten es gibt. Der **Probelauf**
+kodiert wirklich - drei Sekunden 720p ueber jeden moeglichen Weg - und nennt
+das Tempo als Vielfaches der Echtzeit. Das ist die einzige Auskunft, der man
+trauen kann: Karte vorhanden, Treiber vorhanden und Encoder gelistet koennen
+alle drei zutreffen, waehrend die Kodierung trotzdem scheitert.
+
+Scheitert der Hardware-Encoder im Betrieb, wird das Video auf der CPU kodiert
+statt der Auftrag rot. Ohne diesen Rueckfall waere ein Treiberwechsel auf dem
+Wirt so verheerend wie eine Sperre durch YouTube - tausende wartende
+Recodierungen liefen alle in denselben Fehler.
+
+### Hardware oder Software?
+
+Software bleibt die dichtere Wahl, aber die Entscheidung ist nicht so einseitig,
+wie sie klingt. Zwei Dinge gehoeren dazu:
+
+Die Recodierung **ersetzt das Buendel unwiderruflich**. Eine schlechtere
+Kodierung ist also dauerhaft, nicht spaeter zurueckzunehmen.
+
+Andererseits: Ein Erstbestand von 2000 Videos braucht auf sechs Kernen Monate
+an Dauerlast. Deshalb misst der Probelauf beides - Tempo und, ueber die
+entstehende Datei, die Dichte. Entscheide mit den Zahlen deiner Maschine,
+nicht mit der Faustregel.
 
 ### Suche
 

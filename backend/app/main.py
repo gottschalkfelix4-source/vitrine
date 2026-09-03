@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
-from app.api import cookies, library, stream
+from app.api import cookies, hardware, library, stream
 from app.config import settings
 from app.db import init_db, session_scope
 from app.services import abbruch, cache, einstellungen, jobs
@@ -139,6 +139,7 @@ app.add_middleware(
 
 app.include_router(stream.router)
 app.include_router(cookies.router)
+app.include_router(hardware.router)
 app.include_router(library.router)
 
 

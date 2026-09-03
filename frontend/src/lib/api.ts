@@ -158,6 +158,27 @@ export interface CookieProbe {
   meldung: string;
 }
 
+/** Ein echter Probe-Encode, kein Anzeichen. */
+export interface HardwareProbe {
+  beschleunigung: string;
+  encoder: string;
+  erfolg: boolean;
+  dauer_s: number | null;
+  /** Videolänge geteilt durch Rechenzeit. 1 = Echtzeit. */
+  tempo: number | null;
+  meldung: string;
+}
+
+export interface HardwareZustand {
+  /** Render-Knoten in /dev/dri. Leer = Karte nicht durchgereicht. */
+  geraete: string[];
+  treiber: string | null;
+  treiber_vorhanden: boolean;
+  eingestellt: string;
+  proben: HardwareProbe[];
+  meldung: string;
+}
+
 export interface UpgradeVorschau {
   ziel: number;
   videos: number;
@@ -398,6 +419,9 @@ export const api = {
   auftragWiederholen: (id: number) => hole<void>(`/api/jobs/${id}/retry`, { method: "POST" }),
   alleGescheitertenWiederholen: () =>
     hole<{ auftraege: number; videos: number }>("/api/jobs/retry-failed", { method: "POST" }),
+
+  hardware: () => hole<HardwareZustand>("/api/hardware"),
+  hardwareTesten: () => hole<HardwareZustand>("/api/hardware/test", { method: "POST" }),
 
   cookies: () => hole<CookieZustand>("/api/cookies"),
   cookiesHochladen: (datei: File) => sendeDatei<CookieZustand>("/api/cookies", datei),

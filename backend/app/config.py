@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     # ------------------------------------------------------- Kaltspeicher
     archive_codec: ArchiveCodec = ArchiveCodec.AV1
     hwaccel: HardwareAccel = HardwareAccel.NONE
+    #: Render-Knoten der Grafikkarte im Container. Nur fuer vaapi noetig; qsv
+    #: und nvenc finden ihr Geraet selbst.
+    #:
+    #: renderD128 ist der erste Knoten. Steckt neben der Arc noch eine
+    #: iGPU im Rechner, kann die Arc auch renderD129 sein - welcher der
+    #: richtige ist, sagt die Hardware-Pruefung in den Einstellungen.
+    hwaccel_device: str = "/dev/dri/renderD128"
 
     #: SVT-AV1 Preset (0=langsamst/beste Dichte .. 13=schnellst).
     #: Gemessen auf einer 6-Kern-NAS-CPU, 1080p30: Preset 4 braucht 80 Minuten
