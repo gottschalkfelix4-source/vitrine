@@ -130,7 +130,9 @@ Oberflaeche. Die wichtigsten Variablen:
 | `YTA_ENCODE_CONCURRENCY` | 1 | Ein Encode nutzt ohnehin alle Kerne |
 | `YTA_DEFAULT_SYNC_INTERVAL_HOURS` | 12 | Rhythmus des Kanalabgleichs |
 | `YTA_SUBTITLE_LANGUAGES` | de,en | Kommaliste; wird je Sprechzeile durchsuchbar |
-| `YTA_YTDLP_COOKIES_FILE` | - | Pfad im Container, nur fuer altersbeschraenkte Inhalte, nur mit Wegwerf-Konto |
+| `YTA_YTDLP_COOKIES_FILE` | - | Pfad im Container. Nur noetig, wer die Datei selbst ins Volume legt - sonst geht es bequemer ueber *Einstellungen -> YouTube-Anmeldung* |
+| `YTA_YTDLP_SLEEP_REQUESTS` | 0 | Sekunden Pause zwischen einzelnen Anfragen. Der wirksamste Hebel gegen die Bot-Pruefung |
+| `YTA_YTDLP_PLAYER_CLIENTS` | - | Notausgang, z. B. `tv,web_safari`. Leer lassen, solange nichts klemmt |
 | `YTA_YTDLP_FORMAT` | - | Eigener yt-dlp-Selektor; ueberschreibt Min/Max |
 | `YTA_TIMEZONE` | Europe/Berlin | |
 | `YTA_LOG_LEVEL` | INFO | |
@@ -314,6 +316,103 @@ die Quelle laengst geloescht ist. `check_not_degraded()` faengt das nach jedem
 Download ab; ein so entstandenes Video bleibt in der Warteschlange, bis die
 Kette wieder steht. Die CI prueft im Container ausdruecklich, ob ffmpeg, Deno
 und die EJS-Solver vorhanden sind.
+
+### "Sign in to confirm you're not a bot"
+
+Der haeufigste Fehler beim ersten grossen Kanal. YouTube laesst eine Weile
+alles durch und weist dann jede weitere Anfrage ab - typischerweise nach
+einigen Dutzend Videos in kurzer Folge. Die Meldung nennt Cookies und klingt
+nach einem Fehler der einzelnen Datei; tatsaechlich gilt sie der IP-Adresse.
+Mit dem Video ist alles in Ordnung.
+
+Entscheidend ist deshalb, was das Archiv daraufhin **nicht** tut. Frueher galt
+so ein Video als gescheitert: Auftrag rot, Versuchszaehler hoch. Bei 1800
+offenen Videos lief das naechste binnen Sekunden in dieselbe Wand, und die
+Warteschlange raeumte sich in einer halben Stunde selbst ab - jeder Versuch
+verlaengerte die Sperre.
+
+Heute ist eine Abweisung kein Fehlschlag, sondern ein Halt:
+
+- Der Auftrag geht unbewertet zurueck in die Warteschlange, der Versuchszaehler
+  bleibt unberuehrt, ein angefangener Download bleibt liegen.
+- **Alle** Netzauftraege pausieren, nicht nur der betroffene - Downloads,
+  Kanalabgleiche und Hochstufungen. Recodierungen laufen weiter, sie brauchen
+  YouTube nicht.
+- Die Pause waechst mit jeder Abweisung, die auf eine bereits abgesessene
+  folgt: 5, 15, 30, 60 Minuten. Der erste geglueckte Download setzt sie zurueck.
+- Die Fortschrittsleiste sagt, dass pausiert wird und wie lange noch. Ohne das
+  sieht eine Pause aus wie ein haengender Dienst - und die naheliegende
+  Reaktion, der Neustart, verlaengert die Sperre nur.
+
+Wenn es haeufig passiert, in dieser Reihenfolge:
+
+1. **`YTA_DOWNLOAD_CONCURRENCY` auf 1.** Parallele Downloads machen nicht
+   schneller fertig, sie ziehen die Sperre frueher.
+2. **`YTA_YTDLP_SLEEP_REQUESTS` auf 1 bis 3.** Wirkt zwischen den einzelnen
+   HTTP-Anfragen, nicht nur zwischen Videos - und gezaehlt werden die Anfragen.
+   Ein Download stellt ein Dutzend davon.
+3. **Anmelden.** Ein angemeldeter Zugriff hat ein deutlich groesseres Budget.
+   Siehe unten - dafuer gibt es einen Assistenten in der Oberflaeche.
+4. **`YTA_YTDLP_PLAYER_CLIENTS`** als letzter Ausweg, wenn YouTube einen
+   Client dichtgemacht hat und yt-dlp noch nicht nachgezogen ist. Falsch
+   gesetzt richtet die Variable Schaden an - ein nicht mehr bedienter Client
+   liefert nur noch 360p.
+
+Ein Erstbestand von tausend Videos braucht Tage. Das ist kein Mangel der
+Software, sondern die Grenze, die YouTube zieht.
+
+### Anmelden: der Cookie-Assistent
+
+Unter *Einstellungen -> YouTube-Anmeldung*. Datei hochladen, "Verbindung
+testen", fertig.
+
+Vorweg, damit niemand danach sucht: **Eine Anmeldung mit Google-Konto gibt es
+nicht**, und das ist keine Auslassung. yt-dlp lehnt beide Wege ausdruecklich
+ab - `Login with OAuth is no longer supported` und `Login with password is not
+supported for YouTube`. Uebrig bleiben Cookies, exportiert aus einem Browser.
+
+Der Assistent existiert, weil an dieser Textdatei viel haengt und sie auf drei
+Arten kaputt sein kann, ohne dass man es ihr ansieht. Alle drei zeigen sich
+sonst erst Stunden spaeter als rote Zeile in der Warteschlange:
+
+- **Falsches Format.** Viele Erweiterungen exportieren JSON. Fehlt die
+  Kopfzeile `# Netscape HTTP Cookie File`, lehnt yt-dlp die Datei ab - und dann
+  scheitert *jeder* Aufruf, auch das blosse Auflisten eines Kanals.
+- **Abgemeldet exportiert.** Formal einwandfrei, aber ohne Anmeldung. Wirkt
+  exakt wie gar keine Datei.
+- **Rotiert.** YouTube tauscht die Sitzungsschluessel aus, sobald man sich im
+  selben Browser weiterbewegt. Die Datei von gestern ist tot und sieht
+  unveraendert aus.
+
+Geprueft wird mit yt-dlps eigenem Lader, und als angemeldet gilt genau das,
+was auch der Extractor verlangt: `LOGIN_INFO` plus einer der
+SAPISID-Schluessel. Ein zu nachsichtiger Pruefer waere schlimmer als keiner -
+er naehme Dateien an, an denen der Download hinterher scheitert.
+
+Der Probelauf fragt ein einzelnes Video ab, und zwar eines aus der eigenen
+Warteschlange. Er nennt auch die angebotene Qualitaet, weil das den zweiten,
+stilleren Fehlerfall mit abfaengt: Eine Sitzung kann zustande kommen und
+trotzdem nur eine verstuemmelte Formatauswahl liefern - siehe *Der stille
+360p-Fehler*.
+
+Beim Export drei Dinge beachten:
+
+1. **Ein Wegwerf-Konto.** Die Datei ist ein Sitzungsschluessel, und Google kann
+   ein Konto fuer automatisierte Zugriffe sperren.
+2. **Netscape-Format**, nicht JSON.
+3. **Privates Fenster**: anmelden, exportieren, Fenster schliessen, *ohne* sich
+   abzumelden. Sonst rotieren die Schluessel und die Datei ist beim Hochladen
+   schon tot.
+
+Die Datei liegt als `cookies.txt` im Datenverzeichnis, mit Rechten 0600. Sie
+laesst sich ueber die API nicht wieder herunterladen - wer die Oberflaeche
+erreicht, haette sonst das Konto. Die Oberflaeche selbst hat keine Anmeldung;
+sie gehoert ins eigene Netz und nicht ins offene Internet.
+
+Und die Erwartung geradegerueckt: Cookies heben die Grenze nicht auf, sie
+vergroessern nur das Budget. Bei einem Erstbestand von tausenden Videos wird
+YouTube weiter gelegentlich abweisen - das Archiv legt dann von selbst eine
+Pause ein.
 
 ### Nebenlaeufigkeit und Hardware
 

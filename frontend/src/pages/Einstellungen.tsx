@@ -5,6 +5,7 @@ import { useApi } from "../hooks/useApi";
 import type { EinstellungsFeld } from "../lib/api";
 import { api } from "../lib/api";
 import { AppInstallieren } from "../components/AppInstallieren";
+import { CookieAssistent } from "../components/Cookies";
 
 const HERKUNFT_TEXT: Record<string, string> = {
   datenbank: "hier geändert",
@@ -117,6 +118,8 @@ export function Einstellungenseite() {
           </div>
         </Hinweis>
       ) : null}
+
+      <CookieAssistent />
 
       {gruppen.map((g) => (
         <section key={g.name} className="einst-gruppe">

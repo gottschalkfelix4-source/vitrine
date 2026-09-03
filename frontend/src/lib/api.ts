@@ -109,6 +109,55 @@ export interface LaufenderAuftrag {
   meldung: string | null;
 }
 
+/**
+ * Zwangspause, weil YouTube die IP-Adresse abweist ("not a bot", HTTP 429).
+ *
+ * Muss sichtbar sein: Eine Pause und ein hängender Dienst sehen von außen
+ * gleich aus - tausend Aufträge auf "wartet", keiner läuft.
+ */
+export interface Drosselung {
+  pausiert: boolean;
+  rest_s: number;
+  /** ISO-Zeitpunkt, an dem es weitergeht. */
+  bis: string | null;
+  stufe: number;
+  grund: string | null;
+}
+
+/**
+ * Zustand der hinterlegten Cookie-Datei.
+ *
+ * Cookies sind der einzige Weg, YouTube gegenüber angemeldet aufzutreten -
+ * yt-dlp lehnt Passwort- und OAuth-Anmeldung ausdrücklich ab. Entsprechend
+ * viel hängt an einer Textdatei, die auf drei Arten kaputt sein kann, ohne
+ * dass man es ihr ansieht.
+ */
+export interface CookieZustand {
+  /** Datei vorhanden UND als Anmeldung brauchbar. */
+  brauchbar: boolean;
+  meldung: string;
+  angemeldet: boolean;
+  laeuft_ab: string | null;
+  rest_s: number | null;
+  bald_abgelaufen: boolean;
+  /** Wie viele YouTube-Cookies drinstehen. */
+  anzahl: number;
+  /** Welche der Anmelde-Cookies gefunden wurden. */
+  gefunden: string[];
+  vorhanden: boolean;
+  /** Es gilt ein per Umgebungsvariable gesetzter Pfad, nicht der Upload. */
+  eigener_pfad: boolean;
+}
+
+export interface CookieProbe {
+  erfolg: boolean;
+  pausiert?: boolean;
+  video_id?: string;
+  titel?: string | null;
+  angebotene_guete?: number | null;
+  meldung: string;
+}
+
 export interface UpgradeVorschau {
   ziel: number;
   videos: number;
@@ -220,11 +269,7 @@ export class ApiFehler extends Error {
   }
 }
 
-async function hole<T>(pfad: string, init?: RequestInit): Promise<T> {
-  const antwort = await fetch(pfad, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-  });
+async function auswerten<T>(antwort: Response): Promise<T> {
   if (!antwort.ok) {
     let text = antwort.statusText;
     try {
@@ -237,6 +282,29 @@ async function hole<T>(pfad: string, init?: RequestInit): Promise<T> {
   }
   if (antwort.status === 204) return undefined as T;
   return (await antwort.json()) as T;
+}
+
+async function hole<T>(pfad: string, init?: RequestInit): Promise<T> {
+  return auswerten<T>(
+    await fetch(pfad, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    }),
+  );
+}
+
+/**
+ * Schickt eine Datei als multipart.
+ *
+ * Bewusst nicht über `hole`: Das setzt `Content-Type: application/json`, und
+ * bei multipart muss der Browser den Kopf selbst setzen - er trägt die
+ * Trennmarke, die er sich gerade ausgedacht hat. Von Hand gesetzt fehlt sie,
+ * und der Server findet keine Datei.
+ */
+async function sendeDatei<T>(pfad: string, datei: File): Promise<T> {
+  const koerper = new FormData();
+  koerper.append("datei", datei);
+  return auswerten<T>(await fetch(pfad, { method: "POST", body: koerper }));
 }
 
 function frage(werte: Record<string, string | number | boolean | undefined>): string {
@@ -314,7 +382,9 @@ export const api = {
 
   auftraege: (status?: string) => hole<Auftrag[]>(`/api/jobs${frage({ status })}`),
   aktiveAuftraege: () =>
-    hole<{ laufend: LaufenderAuftrag[]; wartend: number }>("/api/jobs/aktiv"),
+    hole<{ laufend: LaufenderAuftrag[]; wartend: number; drosselung: Drosselung }>(
+      "/api/jobs/aktiv",
+    ),
   upgradeVorschau: (ziel: number, kanal?: string) =>
     hole<UpgradeVorschau>(
       `/api/upgrade/vorschau?ziel=${ziel}${kanal ? `&kanal=${encodeURIComponent(kanal)}` : ""}`,
@@ -326,6 +396,13 @@ export const api = {
     ),
   auftragAbbrechen: (id: number) => hole<void>(`/api/jobs/${id}/cancel`, { method: "POST" }),
   auftragWiederholen: (id: number) => hole<void>(`/api/jobs/${id}/retry`, { method: "POST" }),
+  alleGescheitertenWiederholen: () =>
+    hole<{ auftraege: number; videos: number }>("/api/jobs/retry-failed", { method: "POST" }),
+
+  cookies: () => hole<CookieZustand>("/api/cookies"),
+  cookiesHochladen: (datei: File) => sendeDatei<CookieZustand>("/api/cookies", datei),
+  cookiesEntfernen: () => hole<CookieZustand>("/api/cookies", { method: "DELETE" }),
+  cookiesTesten: () => hole<CookieProbe>("/api/cookies/test", { method: "POST" }),
 
   speicher: () => hole<Speicher>("/api/storage"),
 

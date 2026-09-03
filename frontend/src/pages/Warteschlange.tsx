@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
 
-import { Fehler, Leer } from "../components/ui";
+import { Fehler, Hinweis, Leer } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
-import { AUFTRAG_TEXT, prozent, vorZeit } from "../lib/format";
+import { AUFTRAG_TEXT, prozent, vorZeit, wartedauer } from "../lib/format";
 
 /** Laufende Auftraege aendern sich staendig - hier lohnt haeufiges Auffrischen. */
 const INTERVALL = 3000;
@@ -18,6 +18,7 @@ const STATUS_TEXT: Record<string, string> = {
 
 export function Warteschlangeseite() {
   const { daten, laedt, fehler, neuLaden } = useApi(() => api.auftraege(), [], INTERVALL);
+  const { daten: aktiv } = useApi(() => api.aktiveAuftraege(), [], INTERVALL);
 
   async function abbrechen(id: number) {
     await api.auftragAbbrechen(id);
@@ -29,11 +30,17 @@ export function Warteschlangeseite() {
     neuLaden();
   }
 
+  async function alleWiederholen() {
+    await api.alleGescheitertenWiederholen();
+    neuLaden();
+  }
+
   if (fehler) return <Fehler text={fehler} erneut={neuLaden} />;
 
   const laufend = daten?.filter((a) => a.status === "running") ?? [];
   const wartend = daten?.filter((a) => a.status === "pending") ?? [];
   const gescheitert = daten?.filter((a) => a.status === "failed") ?? [];
+  const drosselung = aktiv?.drosselung;
 
   return (
     <>
@@ -44,6 +51,39 @@ export function Warteschlangeseite() {
           {gescheitert.length ? ` · ${gescheitert.length} fehlgeschlagen` : ""}
         </span>
       </div>
+
+      {/*
+        Erklärung statt roter Liste. "Sign in to confirm you're not a bot" ist
+        keine Auskunft über das Video, sondern über unsere IP-Adresse - und die
+        naheliegende Reaktion (alles sofort nochmal) ist genau die falsche: Sie
+        verlängert die Sperre. Deshalb steht hier, was passiert und wann es von
+        selbst weitergeht.
+      */}
+      {drosselung?.pausiert ? (
+        <Hinweis art="arbeit">
+          <strong>YouTube weist gerade ab – Downloads pausieren.</strong>
+          <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
+            Es geht in {wartedauer(drosselung.rest_s)} von selbst weiter; nichts geht verloren.
+            Die Sperre gilt der IP-Adresse, nicht den Videos. Tritt sie oft auf, helfen weniger
+            parallele Downloads, eine Pause zwischen den Anfragen oder eine Cookie-Datei aus
+            einem Wegwerf-Konto.
+          </div>
+        </Hinweis>
+      ) : null}
+
+      {gescheitert.length > 1 ? (
+        <Hinweis art="fehler">
+          <strong>
+            {gescheitert.length} Aufträge sind fehlgeschlagen.
+          </strong>
+          <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
+            Tragen sie alle denselben Fehler, lag es meist nicht an den Videos.
+          </div>
+          <button className="knopf" style={{ marginTop: 12 }} onClick={() => void alleWiederholen()}>
+            Alle {gescheitert.length} wiederholen
+          </button>
+        </Hinweis>
+      ) : null}
 
       {/*
         Die Trennung nach Art ist hier keine Kosmetik: Archivierung und

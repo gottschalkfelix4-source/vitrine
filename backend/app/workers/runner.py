@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from app.config import settings
 from app.db import session_scope
 from app.models import JobType
-from app.services import abbruch, jobs
+from app.services import abbruch, drosselung, jobs
 
 log = logging.getLogger(__name__)
 
@@ -40,11 +40,22 @@ log = logging.getLogger(__name__)
 LEERLAUF_S = 2.0
 
 
+#: Wie lange hoechstens am Stueck auf das Ende einer Drosselpause gewartet
+#: wird. Die Pause selbst dauert Minuten bis Stunden; in kurzen Haeppchen zu
+#: warten kostet nichts und haelt das Herunterfahren zuegig - sonst haenge der
+#: Container beim Update bis zu einer Stunde in einem einzigen wait().
+DROSSEL_TAKT_S = 5.0
+
+
 @dataclass(slots=True)
 class Gruppe:
     name: str
     typen: list[str]
     straenge: int
+    #: Ob die Gruppe mit YouTube spricht. Nur sie pausiert bei einer Abweisung -
+    #: Recodierung und Vorbereitung arbeiten auf bereits geladenen Dateien und
+    #: haetten von einer Zwangspause nichts als Stillstand.
+    netz: bool = False
 
 
 def _gruppen() -> list[Gruppe]:
@@ -62,6 +73,7 @@ def _gruppen() -> list[Gruppe]:
                 JobType.VIDEO_UPGRADE,
             ],
             settings.download_concurrency,
+            netz=True,
         ),
         # Immer genau einer: Mehr bringt nichts, weil ffmpeg ohnehin alle Kerne
         # nutzt, und zwei gleichzeitige Vorbereitungen machen beide langsam.
@@ -187,6 +199,9 @@ class Arbeiterwerk:
                 self._belegt.get(gruppe.name, set()).discard(nummer)
 
     def _arbeiten(self, gruppe: Gruppe, nummer: int) -> None:
+        #: Nur fuer die Protokollierung: ohne das schreibt jeder Strang alle
+        #: fuenf Sekunden dieselbe Zeile, eine Stunde lang.
+        pausiert = False
         while not self._stop.is_set():
             # Zwischen zwei Auftraegen nachsehen, ob es diesen Platz noch gibt.
             # Nicht waehrend eines Auftrags: Ein laufender Download wird nicht
@@ -194,6 +209,25 @@ class Arbeiterwerk:
             if nummer >= self._soll.get(gruppe.name, 0):
                 log.info("[%s] Strang %d wird nicht mehr gebraucht", gruppe.name, nummer + 1)
                 return
+
+            # Weist YouTube gerade ab, wird gar nicht erst ein Auftrag geholt.
+            # Ihn zu holen und scheitern zu lassen waere der teurere Weg: Bei
+            # 1800 wartenden Videos brennt eine einzige Sperre binnen Minuten
+            # die ganze Warteschlange ab, und jeder Versuch verlaengert sie.
+            if gruppe.netz:
+                rest = drosselung.wartezeit()
+                if rest > 0:
+                    if not pausiert:
+                        log.info(
+                            "[%s] Strang %d wartet %.0f Minuten - YouTube weist ab",
+                            gruppe.name, nummer + 1, rest / 60,
+                        )
+                        pausiert = True
+                    self._stop.wait(min(rest, DROSSEL_TAKT_S))
+                    continue
+                if pausiert:
+                    log.info("[%s] Strang %d nimmt die Arbeit wieder auf", gruppe.name, nummer + 1)
+                    pausiert = False
             try:
                 with session_scope() as db:
                     job = jobs.claim_next(db, gruppe.typen)

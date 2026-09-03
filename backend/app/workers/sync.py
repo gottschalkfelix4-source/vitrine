@@ -38,7 +38,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import jobs, ytdlp
+from app.services import drosselung, jobs, ytdlp
 
 log = logging.getLogger(__name__)
 
@@ -263,6 +263,9 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
                 _, war_neu = _video_anlegen(db, kanal_id, eintrag, aus_rss)
                 neu_gesehen += int(war_neu)
             db.commit()
+        except ytdlp.Gedrosselt:
+            db.rollback()
+            raise
         except ytdlp.YtdlpError as e:
             # Wichtig: zuruecksetzen, sonst haengen halb angelegte Videos in der
             # Sitzung und kollidieren gleich darauf mit dem Vollabgleich.
@@ -311,6 +314,13 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
                     url=ytdlp.channel_auto_playlist(kanal_id, schluessel),
                     einreihen=False,
                 )
+            except ytdlp.Gedrosselt:
+                # Muss vor dem naechsten Zweig stehen und durch: Eine Abweisung
+                # sieht hier sonst aus wie "der Kanal hat keine Shorts". Der
+                # Abgleich liefe durch, setzte last_synced_at und meldete
+                # "0 neue Videos" - die Shorts des Kanals waeren bis zum
+                # naechsten Vollabgleich unsichtbar, ohne jeden Hinweis.
+                raise
             except ytdlp.YtdlpError as e:
                 # Nicht jeder Kanal hat Shorts oder Streams - kein Fehler.
                 log.info("%s fuer %s nicht vorhanden: %s", titel, kanal_id, e)
@@ -334,13 +344,24 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
                     # stecken bereits in den Uploads. Sie stiften nur Ordnung.
                     einreihen=False,
                 )
+            except ytdlp.Gedrosselt:
+                raise  # keine unlesbare Playlist, sondern eine Abweisung
             except ytdlp.YtdlpError as e:
                 log.warning("Playlist %s (%s) nicht lesbar: %s", p.id, p.title, e)
 
         kanal.last_synced_at = utcnow()
         db.commit()
+        drosselung.entwarnung()
         jobs.erledigt(db, job, f"{neu} neue Videos gefunden")
 
+    except ytdlp.Gedrosselt as e:
+        # Keine Auskunft ueber diesen Kanal, sondern ueber unsere IP-Adresse.
+        # Der Abgleich wird unbewertet zurueckgelegt, und - entscheidend -
+        # last_synced_at bleibt stehen: Ein halb gelesener Kanal darf nicht
+        # als frisch abgeglichen gelten, sonst faellt er fuer Stunden aus dem
+        # Rhythmus und seine neuen Videos bleiben liegen.
+        db.rollback()
+        jobs.unterbrochen(db, job, drosselung.hinweis(drosselung.melden(str(e))))
     except Exception as e:
         # jobs.gescheitert setzt die Sitzung selbst zurueck - noetig, weil ein
         # Schreibfehler sie sonst blockiert und die Fehlermeldung verschluckt.

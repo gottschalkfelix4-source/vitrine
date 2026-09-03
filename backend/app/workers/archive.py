@@ -33,7 +33,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import abbruch, bundle, jobs, media, suche, ytdlp
+from app.services import abbruch, bundle, drosselung, jobs, media, suche, ytdlp
 
 log = logging.getLogger(__name__)
 
@@ -415,6 +415,12 @@ def archivieren(db: Session, job: Job) -> None:
             format_selector=(kanal.format_selector if kanal else None),
         )
 
+        # YouTube antwortet also wieder. Eine noch stehende Pause samt Stufe
+        # faellt damit weg - sonst schleppte eine einmalige Abweisung ihre
+        # Eskalationsstufe wochenlang mit und die naechste begaenne bei einer
+        # Stunde.
+        drosselung.entwarnung()
+
         quelle_bytes = ergebnis.path.stat().st_size
         info_medien = media.probe(ergebnis.path)
 
@@ -473,6 +479,20 @@ def archivieren(db: Session, job: Job) -> None:
         # sobald der Kanal Shorts erlaubt.
         _fehler_vermerken(db, video_id, VideoStatus.SKIPPED, str(e))
         jobs.erledigt(db, job, f"uebersprungen: {e}")
+    except ytdlp.Gedrosselt as e:
+        # Kein Fehlschlag dieses Videos, sondern eine Abweisung unserer
+        # IP-Adresse. Behandelt wie das Herunterfahren: Der Auftrag geht
+        # unbewertet zurueck in die Warteschlange, der Versuchszaehler bleibt
+        # unberuehrt, der halbe Download bleibt liegen.
+        #
+        # Wuerde er stattdessen als gescheitert gelten, waere der Schaden
+        # betraechtlich: Bei 1800 offenen Videos brennt eine einzige Sperre die
+        # ganze Warteschlange ab, weil jedes folgende Video binnen Sekunden auf
+        # dieselbe Wand laeuft und sie mit jedem Versuch verlaengert.
+        hinweis = drosselung.hinweis(drosselung.melden(str(e)))
+        _fortsetzmarke_setzen(arbeitsordner)
+        _status(db, video, VideoStatus.QUEUED, hinweis)
+        jobs.unterbrochen(db, job, hinweis)
     except ytdlp.VideoUnavailable as e:
         # Kein Grund zum Wiederholen - das Video ist bei der Quelle weg.
         _fehler_vermerken(db, video_id, VideoStatus.UNAVAILABLE, str(e))
@@ -680,6 +700,16 @@ def hochstufen(db: Session, job: Job) -> None:
         # genau dafuer gibt es ein Archiv.
         jobs.erledigt(db, job, f"bei der Quelle nicht mehr verfuegbar, Buendel bleibt: {e}")
         return
+    except ytdlp.Gedrosselt as e:
+        jobs.unterbrochen(db, job, drosselung.hinweis(drosselung.melden(str(e))))
+        return
+    except Exception as e:
+        # Muss aufgefangen werden, obwohl hier noch nichts angefasst wurde:
+        # Diese Vorpruefung liegt vor dem grossen try weiter unten, und ein
+        # Fehler entkam damit jeder Behandlung. Der Auftrag blieb dann auf
+        # "laeuft" stehen, bis der naechste Neustart ihn einsammelte.
+        jobs.gescheitert(db, job, f"{type(e).__name__}: {e}")
+        return
 
     angebot = ytdlp.angebotene_guete(angebot_info) or 0
     erreichbar = min(angebot, ziel_guete)
@@ -743,6 +773,11 @@ def hochstufen(db: Session, job: Job) -> None:
     except abbruch.Abgebrochen:
         jobs.unterbrochen(db, job, "beim Herunterfahren unterbrochen")
         raise
+    except ytdlp.Gedrosselt as e:
+        # Wie beim Archivieren: kein Fehlschlag, sondern eine Abweisung der
+        # IP-Adresse. Das Video bleibt in seiner bisherigen Qualitaet
+        # archiviert, der Auftrag wartet auf ruhigere Zeiten.
+        jobs.unterbrochen(db, job, drosselung.hinweis(drosselung.melden(str(e))))
     except Exception as e:
         # Nichts am Video anfassen: Es ist weiterhin archiviert und spielbar,
         # nur eben in der bisherigen Qualitaet.
