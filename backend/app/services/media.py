@@ -238,7 +238,13 @@ def build_archive_cmd(
     Hardware-Pruefung, die alle Wege der Reihe nach ausprobiert - beide duerfen
     dafuer nicht am globalen Einstellungsobjekt drehen.
     """
-    hw = settings.hwaccel if hwaccel is None else hwaccel
+    # Beide Werte ausdruecklich in ihren Aufzaehlungstyp zwingen. Sie kommen
+    # aus Einstellungen, die zur Laufzeit beschrieben werden, und ein
+    # durchgerutschter String verhaelt sich hier besonders heimtueckisch: Als
+    # StrEnum vergleicht er sich mit == korrekt, mit ``is`` aber nicht. Der
+    # Encoder waere dann richtig und Geraet samt Filter fielen weg.
+    hw = HardwareAccel(settings.hwaccel if hwaccel is None else hwaccel)
+    codec = ArchiveCodec(codec)
     encoder = _hwaccel_encoder(codec, hw)
 
     cmd = [settings.ffmpeg_path, "-hide_banner", "-nostdin", "-y"]
