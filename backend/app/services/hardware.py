@@ -125,7 +125,8 @@ def probe_encode(hw: HardwareAccel, codec: ArchiveCodec | None = None) -> Probe:
     gelistet, Geraet vorhanden - kann gruen sein, waehrend die Kodierung
     trotzdem scheitert oder still auf die CPU zurueckfaellt.
     """
-    codec = codec or settings.archive_codec
+    codec = ArchiveCodec(codec or settings.archive_codec)
+    hw = HardwareAccel(hw)
     if codec is ArchiveCodec.COPY:
         codec = ArchiveCodec.AV1  # "copy" kodiert nichts, taugt nicht als Probe
     encoder = media._hwaccel_encoder(codec, hw)
@@ -182,7 +183,7 @@ def zustand(*, mit_probe: bool = False) -> Zustand:
     Einstellungsseite bei jedem Aufruf holen. Der Probe-Encode kostet Sekunden
     und laeuft nur auf Knopfdruck.
     """
-    z = Zustand(eingestellt=settings.hwaccel.value)
+    z = Zustand(eingestellt=HardwareAccel(settings.hwaccel).value)
     z.geraete = geraete()
     treiber = _treiberdateien()
     z.treiber_vorhanden = bool(treiber)

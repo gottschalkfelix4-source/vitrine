@@ -36,6 +36,18 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # Ohne das bleibt eine Zuweisung zur Laufzeit ungeprueft, und genau
+        # daran ist der Hardware-Encoder gescheitert: Die Oberflaeche schreibt
+        # den rohen Text - ``settings.hwaccel = "vaapi"`` - und das Feld war
+        # danach ein schlichter str statt eines HardwareAccel.
+        #
+        # Weil HardwareAccel und ArchiveCodec StrEnum sind, faellt das fast
+        # nirgends auf: Vergleiche mit == und Nachschlagen in einem dict
+        # funktionieren weiter. Nur ``is`` nicht. Der Encoder wurde also
+        # richtig gewaehlt, waehrend Geraet und Filter stillschweigend
+        # wegfielen - ffmpeg brach mit einer Meldung ueber Filterformate ab,
+        # die auf die eigentliche Ursache in keiner Weise hindeutet.
+        validate_assignment=True,
     )
 
     # ------------------------------------------------------------------ App

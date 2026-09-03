@@ -293,3 +293,64 @@ def test_bruchstueck_des_gescheiterten_laufs_wird_weggeraeumt(auftrag, monkeypat
         db, job, tmp_path / "q.mkv", ziel, ArchiveCodec.AV1, dauer_s=10
     )
     assert ziel.read_bytes() == b"ganze Datei"
+
+
+# ------------------------------------- Werte aus der Oberflaeche sind Strings
+
+
+def test_ueber_die_oberflaeche_gesetzter_wert_bleibt_ein_aufzaehlungstyp():
+    """Die Wurzel eines Fehlers, der im Betrieb zugeschlagen hat.
+
+    Die Einstellungsseite schreibt den rohen Text: ``settings.hwaccel =
+    "vaapi"``. Ohne ``validate_assignment`` war das Feld danach ein schlichter
+    ``str``.
+    """
+    settings.hwaccel = "vaapi"
+    assert settings.hwaccel is HardwareAccel.VAAPI
+    settings.archive_codec = "hevc"
+    assert settings.archive_codec is ArchiveCodec.HEVC
+
+
+def test_string_als_beschleunigung_verliert_nicht_geraet_und_filter(monkeypatch):
+    """Der Fehler, wie er sich zeigte - und er zeigte sich denkbar schlecht.
+
+    HardwareAccel ist ein StrEnum. Ein durchgerutschter String vergleicht sich
+    mit ``==`` korrekt und wird im dict der Encoder gefunden; nur ``is``
+    scheitert. Der Encoder war also richtig gewaehlt, waehrend Geraet und
+    ``hwupload`` stillschweigend wegfielen.
+
+    ffmpeg brach daraufhin mit "Impossible to convert between the formats
+    supported by the filter 'Parsed_null_0' ..." ab - einer Meldung, die auf
+    die eigentliche Ursache in keiner Weise hindeutet.
+    """
+    c = media.build_archive_cmd(
+        Path("in.mkv"), Path("out.webm"), ArchiveCodec.AV1, hwaccel="vaapi"
+    )
+    assert "av1_vaapi" in c
+    assert "-init_hw_device" in c, "Geraet ist weggefallen"
+    assert "-vf" in c and "hwupload" in c[c.index("-vf") + 1], "hwupload ist weggefallen"
+
+
+def test_string_als_codec_kodiert_weiter_statt_nur_zu_kopieren():
+    """Dieselbe Falle beim Codec, mit stillerem Ausgang: ``codec is
+    ArchiveCodec.AV1`` waere False gewesen und der Befehl endete bei
+    ``-c:v copy`` - das Video haette unveraendert im Buendel gelegen, ohne dass
+    irgendetwas fehlgeschlagen waere."""
+    c = media.build_archive_cmd(Path("in.mkv"), Path("out.webm"), "av1")
+    assert "libsvtav1" in c
+    assert "copy" not in c
+
+
+def test_zustand_kommt_auch_mit_einem_string_zurecht():
+    """Lieferte sonst einen Serverfehler: str hat kein .value."""
+    settings.hwaccel = "vaapi"
+    assert hardware.zustand().eingestellt == "vaapi"
+
+
+@pytest.fixture(autouse=True)
+def _hwaccel_zuruecksetzen():
+    """Diese Datei dreht am globalen Einstellungsobjekt - danach aufraeumen,
+    sonst faerbt es auf andere Tests ab."""
+    vorher = (settings.hwaccel, settings.archive_codec)
+    yield
+    settings.hwaccel, settings.archive_codec = vorher
