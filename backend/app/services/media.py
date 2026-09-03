@@ -134,15 +134,14 @@ def probe(path: Path) -> MediaInfo:
 _PROGRESS_TIME = re.compile(r"out_time_us=(\d+)")
 
 
-def _hwaccel_encoder(codec: ArchiveCodec) -> str:
-    """Waehlt den Encoder passend zur eingestellten Beschleunigung.
+def _hwaccel_encoder(codec: ArchiveCodec, hw: HardwareAccel) -> str:
+    """Waehlt den Encoder passend zur Beschleunigung.
 
     Hardware-Encoder sind um ein Vielfaches schneller, liefern bei gleicher
-    Dateigroesse aber sichtbar weniger Qualitaet als die Software-Encoder. Fuer
+    Dateigroesse aber meist weniger Qualitaet als die Software-Encoder. Fuer
     ein Archiv, das einmal geschrieben und lange behalten wird, ist Software
     deshalb die Voreinstellung.
     """
-    hw = settings.hwaccel
     if codec is ArchiveCodec.AV1:
         return {
             HardwareAccel.QSV: "av1_qsv",
@@ -158,6 +157,67 @@ def _hwaccel_encoder(codec: ArchiveCodec) -> str:
     raise MediaError(f"kein Encoder fuer {codec}")
 
 
+#: Preset fuer die Hardware-Encoder.
+#:
+#: Bewusst fest und NICHT aus ``av1_preset`` abgeleitet: Das ist die
+#: SVT-AV1-Skala von 0 bis 13, waehrend QSV 1 bis 7 in umgekehrter Richtung
+#: zaehlt und VAAPI ueberhaupt kein Preset kennt. Eine stillschweigende
+#: Umrechnung zwischen zwei gegenlaeufigen Skalen waere genau die Art von
+#: Detail, die niemand nachprueft und die dann jahrelang falsch ist. Auf
+#: Hardware kostet ein langsameres Preset ohnehin kaum Zeit.
+_QSV_PRESET = "slow"
+_NVENC_PRESET = "p5"
+
+
+def _hw_geraet(hw: HardwareAccel) -> list[str]:
+    """Richtet das Hardwaregeraet ein - VOR dem Eingang, sonst greift es nicht.
+
+    Nur VAAPI braucht das ausdruecklich. QSV baut sich seine Sitzung selbst
+    auf, sobald der Treiber da ist, und NVENC arbeitet ohne Geraetekontext.
+    """
+    if hw is HardwareAccel.VAAPI:
+        return [
+            "-init_hw_device", f"vaapi=hw:{settings.hwaccel_device}",
+            "-filter_hw_device", "hw",
+        ]
+    return []
+
+
+def _hw_filter(hw: HardwareAccel) -> list[str]:
+    """Schiebt die Bilder in den Grafikspeicher.
+
+    Ohne das scheitert VAAPI grundsaetzlich: Der Encoder nimmt ausschliesslich
+    Hardware-Bilder entgegen, ffmpeg liefert aus einer Datei aber
+    Software-Bilder. Genau diese zwei Worte haben in der bisherigen Fassung
+    gefehlt, weshalb der VAAPI-Weg nie funktionieren konnte.
+    """
+    if hw is HardwareAccel.VAAPI:
+        return ["-vf", "format=nv12,hwupload"]
+    return []
+
+
+def _qualitaet_optionen(encoder: str, crf: int) -> list[str]:
+    """Die Qualitaetsschraube des jeweiligen Encoders.
+
+    Jede Familie nennt sie anders, und das ist keine Kosmetik: ffmpeg
+    **ignoriert** eine unbekannte Encoder-Option stillschweigend, statt sie
+    anzumeckern. Die bisherige Fassung uebergab durchweg ``-cq``, was es nur
+    bei NVENC gibt - bei QSV und VAAPI fiel die eingestellte Qualitaet damit
+    wortlos unter den Tisch, und kodiert wurde mit der Voreinstellung des
+    Treibers. Ein Fehler, den man an keiner Fehlermeldung erkennt, sondern nur
+    an den Dateigroessen.
+    """
+    if encoder.endswith("_qsv"):
+        return ["-preset", _QSV_PRESET, "-global_quality", str(crf)]
+    if encoder.endswith("_vaapi"):
+        # VAAPI kennt weder -preset noch -cq. CQP ist der Modus, in dem -qp
+        # ueberhaupt etwas bewirkt.
+        return ["-rc_mode", "CQP", "-qp", str(crf)]
+    if encoder.endswith("_nvenc"):
+        return ["-preset", _NVENC_PRESET, "-cq", str(crf)]
+    return []
+
+
 def archive_container(codec: ArchiveCodec) -> str:
     """Zielcontainer fuer den Kaltspeicher.
 
@@ -168,9 +228,24 @@ def archive_container(codec: ArchiveCodec) -> str:
     return ".webm" if codec is ArchiveCodec.AV1 else ".mp4"
 
 
-def build_archive_cmd(src: Path, dst: Path, codec: ArchiveCodec) -> list[str]:
-    encoder = _hwaccel_encoder(codec)
-    cmd = [settings.ffmpeg_path, "-hide_banner", "-nostdin", "-y", "-i", str(src)]
+def build_archive_cmd(
+    src: Path, dst: Path, codec: ArchiveCodec, *, hwaccel: HardwareAccel | None = None
+) -> list[str]:
+    """Baut den Encode-Befehl.
+
+    ``hwaccel`` uebersteuert die Einstellung. Das braucht der Rueckfall auf
+    Software, wenn die Grafikkarte den Dienst verweigert, und die
+    Hardware-Pruefung, die alle Wege der Reihe nach ausprobiert - beide duerfen
+    dafuer nicht am globalen Einstellungsobjekt drehen.
+    """
+    hw = settings.hwaccel if hwaccel is None else hwaccel
+    encoder = _hwaccel_encoder(codec, hw)
+
+    cmd = [settings.ffmpeg_path, "-hide_banner", "-nostdin", "-y"]
+    # Das Geraet muss VOR dem Eingang stehen - danach ist es wirkungslos.
+    cmd += _hw_geraet(hw)
+    cmd += ["-i", str(src)]
+    cmd += _hw_filter(hw)
 
     if codec is ArchiveCodec.AV1:
         cmd += ["-c:v", encoder]
@@ -190,9 +265,17 @@ def build_archive_cmd(src: Path, dst: Path, codec: ArchiveCodec) -> list[str]:
                 "-svtav1-params", "tune=0:enable-overlays=1:scd=1",
             ]
         else:
-            cmd += ["-preset", "medium", "-cq", str(settings.av1_crf)]
+            # Bewusst ohne -pix_fmt: Die Hardware-Encoder handeln das Format
+            # mit dem Treiber aus. Ein erzwungenes 10-Bit laesst je nach
+            # Generation die Sitzung gar nicht erst zustande kommen.
+            cmd += _qualitaet_optionen(encoder, settings.av1_crf)
+            cmd += ["-g", "300"]
     elif codec is ArchiveCodec.HEVC:
-        cmd += ["-c:v", encoder, "-preset", settings.hevc_preset, "-crf", str(settings.hevc_crf)]
+        cmd += ["-c:v", encoder]
+        if encoder == "libx265":
+            cmd += ["-preset", settings.hevc_preset, "-crf", str(settings.hevc_crf)]
+        else:
+            cmd += _qualitaet_optionen(encoder, settings.hevc_crf)
         cmd += ["-tag:v", "hvc1"]  # sonst spielt Apple es nicht ab
     else:
         cmd += ["-c:v", "copy"]

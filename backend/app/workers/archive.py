@@ -515,6 +515,57 @@ def archivieren(db: Session, job: Job) -> None:
             shutil.rmtree(arbeitsordner, ignore_errors=True)
 
 
+def _kodieren_mit_rueckfall(
+    db: Session,
+    job: Job,
+    quelle: Path,
+    ziel: Path,
+    codec: media.ArchiveCodec,
+    *,
+    dauer_s: float | None,
+) -> None:
+    """Kodiert und faellt auf die CPU zurueck, wenn die Grafikkarte streikt.
+
+    Ohne diesen Rueckfall waere ein eingestellter, aber nicht funktionierender
+    Hardware-Encoder genauso verheerend wie eine Sperre durch YouTube: Jede
+    einzelne der tausenden wartenden Recodierungen liefe in denselben Fehler
+    und waere rot. Und die Ursachen liegen ausserhalb dieses Programms - ein
+    Treiberwechsel auf dem Wirt, eine nicht mehr durchgereichte Karte, ein
+    Video in einem Format, das die Karte nicht annimmt.
+
+    Der Rueckfall gilt bewusst nur je Auftrag und schaltet die Einstellung
+    nicht dauerhaft um: Ein einzelnes sperriges Video soll nicht dazu fuehren,
+    dass der Rest des Archivs still auf der CPU landet.
+    """
+    hw = settings.hwaccel
+    try:
+        media.run_ffmpeg(
+            media.build_archive_cmd(quelle, ziel, codec),
+            dauer_s=dauer_s,
+            fortschritt=lambda a: jobs.fortschritt(db, job, 0.1 + a * 0.8),
+            abbruch=abbruch.laeuft_herunter,
+        )
+        return
+    except abbruch.Abgebrochen:
+        raise  # Herunterfahren ist kein Grund, es nochmal auf der CPU zu versuchen
+    except media.MediaError:
+        if hw is media.HardwareAccel.NONE:
+            raise
+        log.warning(
+            "%s: Hardware-Encoder %s hat versagt, neuer Versuch auf der CPU",
+            job.target_id, hw.value, exc_info=True,
+        )
+
+    ziel.unlink(missing_ok=True)  # Bruchstueck des gescheiterten Laufs
+    jobs.fortschritt(db, job, 0.1, f"{hw.value} hat versagt - wird auf der CPU kodiert")
+    media.run_ffmpeg(
+        media.build_archive_cmd(quelle, ziel, codec, hwaccel=media.HardwareAccel.NONE),
+        dauer_s=dauer_s,
+        fortschritt=lambda a: jobs.fortschritt(db, job, 0.1 + a * 0.8),
+        abbruch=abbruch.laeuft_herunter,
+    )
+
+
 @jobs.register(JobType.VIDEO_RECODE)
 def recodieren(db: Session, job: Job) -> None:
     """Verkleinert ein bereits archiviertes Video.
@@ -570,11 +621,8 @@ def recodieren(db: Session, job: Job) -> None:
         fertig_ordner = arbeitsordner / "fertig"
         fertig_ordner.mkdir(parents=True, exist_ok=True)
         ziel_datei = fertig_ordner / f"{video_id}{media.archive_container(codec)}"
-        media.run_ffmpeg(
-            media.build_archive_cmd(entpackt, ziel_datei, codec),
-            dauer_s=info_vorher.duration_s,
-            fortschritt=lambda a: jobs.fortschritt(db, job, 0.1 + a * 0.8),
-            abbruch=abbruch.laeuft_herunter,
+        _kodieren_mit_rueckfall(
+            db, job, entpackt, ziel_datei, codec, dauer_s=info_vorher.duration_s
         )
 
         neu = ziel_datei.stat().st_size
