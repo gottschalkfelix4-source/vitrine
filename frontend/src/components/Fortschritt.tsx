@@ -50,6 +50,8 @@ export function Fortschrittsleiste() {
   const laufend = daten?.laufend ?? [];
   const wartend = daten?.wartend ?? 0;
   const drosselung = daten?.drosselung;
+  // Absteigend, damit das Gewichtigste zuerst steht.
+  const arten = Object.entries(daten?.nach_art ?? {}).sort((a, b) => b[1] - a[1]);
   if (laufend.length === 0 && wartend === 0) return null;
 
   return (
@@ -80,7 +82,16 @@ export function Fortschrittsleiste() {
       ) : null}
       {wartend > 0 ? (
         <div className="fl-fuss">
-          {wartend} {wartend === 1 ? "wartet" : "warten"}
+          {/*
+            Aufgeschlüsselt, weil die nackte Zahl in die Irre führt: Ein Video
+            erzeugt im Lauf seines Lebens mehrere Aufträge - erst den Download,
+            später die Verkleinerung, womöglich noch ein Hochstufen. „4216
+            warten" liest sich dann wie „4216 Videos" und ist bei einem Kanal
+            mit 3363 Videos schlicht nicht zu glauben. Es stimmt trotzdem.
+          */}
+          {arten.length > 1
+            ? arten.map(([art, n]) => `${n} ${AUFTRAG_TEXT[art] ?? art}`).join(" · ")
+            : `${wartend} ${wartend === 1 ? "wartet" : "warten"}`}
           {laufend.length > 1 ? ` · ${laufend.length} laufen gleichzeitig` : ""}
         </div>
       ) : null}

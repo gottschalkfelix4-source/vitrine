@@ -3,9 +3,27 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { Fehler, Gitter, Hinweis, Leer, Skelettgitter, Videokachel } from "../components/ui";
 import { useApi, useVideostapel } from "../hooks/useApi";
-import type { Sammlung } from "../lib/api";
+import type { AlleLadenErgebnis, Sammlung } from "../lib/api";
 import { api, thumbUrl } from "../lib/api";
 import { bytes, datum } from "../lib/format";
+
+/**
+ * Was „Alle laden" wirklich getan hat, in einem Satz.
+ *
+ * Vorher stand hier nur „N Videos eingereiht." Beim zweiten Klick war das
+ * „0 Videos eingereiht." - richtig, aber es beantwortet die Frage nicht, die
+ * man dann hat: Warum kommt nichts dazu, und wo sind die anderen geblieben?
+ */
+function ladenBericht(r: AlleLadenErgebnis): string {
+  const teile: string[] = [];
+  if (r.eingereiht) teile.push(`${r.eingereiht} neu eingereiht`);
+  if (r.wartete_schon) teile.push(`${r.wartete_schon} warteten schon`);
+  if (r.laeuft_gerade) teile.push(`${r.laeuft_gerade} laufen gerade`);
+  if (r.bereits_archiviert) teile.push(`${r.bereits_archiviert} bereits archiviert`);
+  if (r.regeln) teile.push(`${r.regeln} durch Kanalregeln ausgeschlossen`);
+  if (r.nicht_verfuegbar) teile.push(`${r.nicht_verfuegbar} bei der Quelle gelöscht`);
+  return teile.length ? teile.join(", ") + "." : "Es gibt hier nichts zu laden.";
+}
 
 /** Grobe Dauerangabe fuer die Nachfrage - Sekunden helfen dort niemandem. */
 function dauerGrob(sekunden: number): string {
@@ -134,7 +152,7 @@ export function Kanalseite() {
                       setLadenLaeuft(true);
                       try {
                         const r = await api.kanalAlleLaden(kanalId);
-                        setLadenMeldung(`${r.eingereiht} Videos eingereiht.`);
+                        setLadenMeldung(ladenBericht(r));
                         setLadenNachfrage(false);
                         offene.neuLaden();
                         stapel.neuLaden();

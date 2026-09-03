@@ -179,6 +179,22 @@ export interface HardwareZustand {
   meldung: string;
 }
 
+/**
+ * Was „Alle laden" tatsächlich getan hat.
+ *
+ * Die bloße Zahl war irreführend: Wer mehrmals klickt, will wissen, warum beim
+ * zweiten Mal nichts mehr dazukommt - nicht bloß „0 eingereiht".
+ */
+export interface AlleLadenErgebnis {
+  eingereiht: number;
+  wartete_schon: number;
+  laeuft_gerade: number;
+  bereits_archiviert: number;
+  nicht_verfuegbar: number;
+  /** Durch die Kanalregeln ausgeschlossen (Shorts, Livestreams, Datum). */
+  regeln: number;
+}
+
 export interface UpgradeVorschau {
   ziel: number;
   videos: number;
@@ -370,7 +386,7 @@ export const api = {
       `/api/channels/${id}/downloadable`,
     ),
   kanalAlleLaden: (id: string) =>
-    hole<{ eingereiht: number }>(`/api/channels/${id}/download-all`, { method: "POST" }),
+    hole<AlleLadenErgebnis>(`/api/channels/${id}/download-all`, { method: "POST" }),
   kanalAbgleichen: (id: string, voll = false) =>
     hole<{ job_id: number }>(`/api/channels/${id}/sync${frage({ voll })}`, { method: "POST" }),
 
@@ -403,9 +419,13 @@ export const api = {
 
   auftraege: (status?: string) => hole<Auftrag[]>(`/api/jobs${frage({ status })}`),
   aktiveAuftraege: () =>
-    hole<{ laufend: LaufenderAuftrag[]; wartend: number; drosselung: Drosselung }>(
-      "/api/jobs/aktiv",
-    ),
+    hole<{
+      laufend: LaufenderAuftrag[];
+      wartend: number;
+      /** Wartende Aufträge je Art - ein Video erzeugt im Lauf seines Lebens mehrere. */
+      nach_art: Record<string, number>;
+      drosselung: Drosselung;
+    }>("/api/jobs/aktiv"),
   upgradeVorschau: (ziel: number, kanal?: string) =>
     hole<UpgradeVorschau>(
       `/api/upgrade/vorschau?ziel=${ziel}${kanal ? `&kanal=${encodeURIComponent(kanal)}` : ""}`,
