@@ -50,6 +50,11 @@ export function Fortschrittsleiste() {
   const laufend = daten?.laufend ?? [];
   const wartend = daten?.wartend ?? 0;
   const drosselung = daten?.drosselung;
+  const ausgaenge = daten?.ausgaenge;
+  // Wie viele Wege ins Netz gerade dicht sind. Mit einem einzigen Ausgang ist
+  // das entweder 0 oder 1 und deckt sich mit "pausiert"; mit Tunneln ist es
+  // die eigentliche Auskunft.
+  const gesperrt = ausgaenge ? ausgaenge.gesamt - ausgaenge.frei : 0;
   // Absteigend, damit das Gewichtigste zuerst steht.
   const arten = Object.entries(daten?.nach_art ?? {}).sort((a, b) => b[1] - a[1]);
   if (laufend.length === 0 && wartend === 0) return null;
@@ -69,8 +74,28 @@ export function Fortschrittsleiste() {
         <div className="fl-zeile">
           <div className="fl-text">
             <strong>Pause</strong>
-            <span className="fl-titel">YouTube weist gerade ab</span>
+            <span className="fl-titel">
+              {ausgaenge && ausgaenge.gesamt > 1
+                ? `YouTube weist alle ${ausgaenge.gesamt} Ausgänge ab`
+                : "YouTube weist gerade ab"}
+            </span>
             <span className="fl-meldung">weiter in {wartedauer(drosselung.rest_s)}</span>
+          </div>
+        </div>
+      ) : gesperrt > 0 ? (
+        /*
+          Ein gesperrter Tunnel von vieren ist keine Pause - es läuft ja
+          weiter, nur schmaler. Ohne diese Zeile wundert man sich, warum es
+          plötzlich langsamer geht, und sucht den Fehler an der falschen
+          Stelle.
+        */
+        <div className="fl-zeile">
+          <div className="fl-text">
+            <strong>Ausweichen</strong>
+            <span className="fl-titel">
+              {gesperrt} von {ausgaenge?.gesamt} Ausgängen gesperrt
+            </span>
+            <span className="fl-meldung">es wird über die übrigen geladen</span>
           </div>
         </div>
       ) : laufend.length === 0 ? (

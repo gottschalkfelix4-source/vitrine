@@ -42,8 +42,18 @@ services:
       YTA_ARCHIVE_MIN_HEIGHT: ${ARCHIVE_MIN_HEIGHT:-1080}
       YTA_ARCHIVE_MAX_HEIGHT: ${ARCHIVE_MAX_HEIGHT:-0}
       # Nebenlaeufigkeit - beim Download bewusst niedrig, YouTube drosselt pro IP.
+      # Mit VPN-Tunneln gilt das je Tunnel: Dann lohnt sich hier so viel, wie
+      # es eingerichtete Tunnel gibt.
       YTA_DOWNLOAD_CONCURRENCY: ${DOWNLOAD_CONCURRENCY:-1}
       YTA_ENCODE_CONCURRENCY: ${ENCODE_CONCURRENCY:-1}
+      # VPN: mehrere WireGuard-Tunnel als getrennte Ausgaenge. Eingerichtet
+      # werden sie in der Oberflaeche (Einstellungen -> VPN-Tunnel); dieser
+      # Schalter entscheidet nur, ob sie benutzt werden. Es braucht dafuer
+      # KEINE erweiterten Rechte - WireGuard laeuft im Benutzerraum.
+      YTA_VPN_AKTIV: ${VPN_AKTIV:-false}
+      # An lassen. Aus heisst: Fallen alle Tunnel aus, laedt das Archiv wieder
+      # stillschweigend ueber die eigene Leitung.
+      YTA_VPN_NUR_TUNNEL: ${VPN_NUR_TUNNEL:-true}
     # Encodes sollen den Rest des Systems nicht lahmlegen. Ohne Begrenzung
     # zieht SVT-AV1 zuverlaessig jeden verfuegbaren Kern.
     cpus: ${CPU_LIMIT:-0}

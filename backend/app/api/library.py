@@ -35,7 +35,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import cache, drosselung, jobs, ytdlp
+from app.services import cache, drosselung, jobs, vpn, ytdlp
 from app.services import suche as volltext
 
 log = logging.getLogger(__name__)
@@ -927,11 +927,20 @@ def laufende_auftraege(db: Session = Depends(get_db)) -> dict[str, Any]:
             .group_by(Job.type)
         ).all()
     )
+    # Mit mehreren Ausgaengen heisst "gesperrt" nicht mehr "steht". Gefragt
+    # wird deshalb nach allen Ausgaengen zusammen: Pausiert ist erst, wenn
+    # keiner mehr frei ist. Sonst behauptete die Leiste Stillstand, waehrend
+    # nebenan ueber den naechsten Tunnel weitergeladen wird.
+    ids = vpn.ausgang_ids()
     return {
         "laufend": eintraege,
         "wartend": wartend,
         "nach_art": nach_art,
-        "drosselung": drosselung.zustand(),
+        "drosselung": drosselung.zustand(ids),
+        "ausgaenge": {
+            "gesamt": len(ids),
+            "frei": len(drosselung.frei(ids)),
+        },
     }
 
 
@@ -1154,6 +1163,13 @@ def einstellungen_schreiben(
     from app.workers.runner import werk
 
     ergebnis["arbeiter"] = werk.anpassen()
+
+    # Dasselbe fuer die Tunnel: Der Schalter "Tunnel benutzen" ist wertlos,
+    # wenn danach kein Prozess startet. Beim Ausschalten werden sie beendet.
+    if "vpn_aktiv" in aenderungen or "vpn_nur_tunnel" in aenderungen:
+        from app.services import vpn
+
+        vpn.laden(db)
     return ergebnis
 
 

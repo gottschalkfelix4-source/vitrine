@@ -35,6 +35,10 @@ Elasticsearch.
   samt allem entfernen.
 - **Warteschlange und Speicher** als eigene Ansichten - was laeuft, was wartet,
   was fehlgeschlagen ist, wie viel wo liegt.
+- **Mehrere VPN-Tunnel als getrennte Ausgaenge.** YouTube zaehlt je
+  IP-Adresse; vier WireGuard-Tunnel sind vier Budgets. Laeuft einer in die
+  Sperre, wechselt das Archiv auf den naechsten, statt anzuhalten. Ohne
+  erweiterte Container-Rechte. Siehe [Mehrere Adressen statt einer](#mehrere-adressen-statt-einer).
 - **Auf dem Telefon bedienbar** und als App ablegbar: Die Seitenleiste wird zur
   Schublade, der Player laeuft randlos, Vorschaubilder bleiben gespeichert.
   Siehe [Auf dem Telefon](#auf-dem-telefon).
@@ -135,6 +139,8 @@ Oberflaeche. Die wichtigsten Variablen:
 | `YTA_YTDLP_SLEEP_REQUESTS` | 0 | Sekunden Pause zwischen einzelnen Anfragen. Der wirksamste Hebel gegen die Bot-Pruefung |
 | `YTA_YTDLP_PLAYER_CLIENTS` | - | Notausgang, z. B. `tv,web_safari`. Leer lassen, solange nichts klemmt |
 | `YTA_YTDLP_FORMAT` | - | Eigener yt-dlp-Selektor; ueberschreibt Min/Max |
+| `YTA_VPN_AKTIV` | false | WireGuard-Tunnel als Ausgaenge benutzen. Eingerichtet werden sie in der Oberflaeche |
+| `YTA_VPN_NUR_TUNNEL` | true | Bei eingeschaltetem VPN die eigene Leitung NICHT mitbenutzen |
 | `YTA_TIMEZONE` | Europe/Berlin | |
 | `YTA_LOG_LEVEL` | INFO | |
 
@@ -358,9 +364,11 @@ Heute ist eine Abweisung kein Fehlschlag, sondern ein Halt:
 
 - Der Auftrag geht unbewertet zurueck in die Warteschlange, der Versuchszaehler
   bleibt unberuehrt, ein angefangener Download bleibt liegen.
-- **Alle** Netzauftraege pausieren, nicht nur der betroffene - Downloads,
-  Kanalabgleiche und Hochstufungen. Recodierungen laufen weiter, sie brauchen
-  YouTube nicht.
+- Der benutzte **Ausgang** pausiert und mit ihm alle Netzauftraege, die ueber
+  ihn liefen - Downloads, Kanalabgleiche und Hochstufungen. Gibt es weitere
+  Ausgaenge, laeuft das Archiv ueber die naechste Adresse weiter; erst wenn
+  keiner mehr frei ist, steht es. Recodierungen laufen ohnehin weiter, sie
+  brauchen YouTube nicht.
 - Die Pause waechst mit jeder Abweisung, die auf eine bereits abgesessene
   folgt: 5, 15, 30, 60 Minuten. Der erste geglueckte Download setzt sie zurueck.
 - Die Fortschrittsleiste sagt, dass pausiert wird und wie lange noch. Ohne das
@@ -376,13 +384,71 @@ Wenn es haeufig passiert, in dieser Reihenfolge:
    Ein Download stellt ein Dutzend davon.
 3. **Anmelden.** Ein angemeldeter Zugriff hat ein deutlich groesseres Budget.
    Siehe unten - dafuer gibt es einen Assistenten in der Oberflaeche.
-4. **`YTA_YTDLP_PLAYER_CLIENTS`** als letzter Ausweg, wenn YouTube einen
+4. **Mehrere Adressen.** Das ist der einzige Hebel, der die Grenze nicht
+   entschaerft, sondern vervielfacht: Sie gilt je IP-Adresse. Siehe
+   [Mehrere Adressen statt einer](#mehrere-adressen-statt-einer).
+5. **`YTA_YTDLP_PLAYER_CLIENTS`** als letzter Ausweg, wenn YouTube einen
    Client dichtgemacht hat und yt-dlp noch nicht nachgezogen ist. Falsch
    gesetzt richtet die Variable Schaden an - ein nicht mehr bedienter Client
    liefert nur noch 360p.
 
-Ein Erstbestand von tausend Videos braucht Tage. Das ist kein Mangel der
-Software, sondern die Grenze, die YouTube zieht.
+Ein Erstbestand von tausend Videos braucht ueber eine Adresse Tage. Das ist
+kein Mangel der Software, sondern die Grenze, die YouTube zieht - sie laesst
+sich nur teilen, nicht aufheben.
+
+### Mehrere Adressen statt einer
+
+Die Sperre gilt der IP-Adresse. Das ist der Schluessel zu allem, was oben
+steht - und zugleich der Hinweis darauf, wie man sie loswird: mit mehr als
+einer Adresse. Unter *Einstellungen -> VPN-Tunnel* lassen sich mehrere
+WireGuard-Konfigurationen hinterlegen. Jede ist ein eigener **Ausgang** mit
+eigenem Budget und eigener Sperrleiter.
+
+Wichtig zur Einordnung: Es geht um Durchsatz, nicht um Verschleierung. Das
+Archiv laedt oeffentlich abrufbare Videos; es verteilt die Anfragen nur auf die
+Adressen, die man selbst mitbringt, statt alle ueber eine zu schicken.
+
+Was sich damit aendert:
+
+- Jeder Auftrag holt sich **reihum** einen freien Ausgang. Bei vier Tunneln und
+  vier parallelen Downloads laufen vier verschiedene Adressen - nicht viermal
+  dieselbe.
+- Weist YouTube ab, pausiert **nur dieser Ausgang**. Der Auftrag geht wie
+  bisher unbewertet zurueck in die Warteschlange, der naechste laeuft ueber den
+  naechsten Tunnel weiter. Erst wenn kein Ausgang mehr frei ist, steht das
+  Archiv - und sagt es in der Fortschrittsleiste.
+- Die Leiste unterscheidet beides: "Ausweichen - 1 von 4 Ausgaengen gesperrt"
+  ist kein Stillstand, "Pause" ist einer.
+
+**Einrichten**, in dieser Reihenfolge:
+
+1. Beim VPN-Anbieter je Standort eine `.conf` erzeugen und **unveraendert**
+   hochladen - mehrere auf einmal gehen. Geprueft wird sofort: fehlende
+   Angaben, halb kopierte Schluessel, Endpunkt ohne Port.
+2. **Verschiedene Standorte** waehlen. Vier Konfigurationen desselben Servers
+   ergeben viermal dieselbe Adresse. Das Archiv misst die tatsaechliche Adresse
+   jedes Tunnels und warnt, wenn zwei gleich sind.
+3. *Tunnel benutzen* einschalten und je Tunnel auf "pruefen" klicken.
+4. **Parallele Downloads** auf die Zahl der Tunnel setzen. Mehr teilen sich
+   wieder eine Adresse.
+
+**Warum keine erweiterten Rechte noetig sind.** Ein echtes WireGuard-Geraet im
+Container braeuchte `NET_ADMIN` und `/dev/net/tun` - und wuerde fuer den ganzen
+Prozess gelten, womit vier gleichzeitige Downloads ueber vier Adressen gar
+nicht zu haben waeren. Stattdessen laeuft WireGuard hier im Benutzerraum:
+`wireproxy` spricht das Protokoll selbst und bietet jeden Tunnel als lokalen
+SOCKS5-Proxy an, gebunden ausschliesslich an 127.0.0.1. yt-dlp bekommt je
+Auftrag die passende Adresse. Das Programm liegt im Image; auf Unraid ist
+nichts zusaetzlich freizugeben.
+
+**Anmeldung und Tunnel zusammen** sind mit Bedacht zu benutzen. Ein
+Google-Konto, das im selben Zeitraum aus vier Laendern zugreift, faellt eher
+auf als eines, das immer vom selben Ort kommt. Entweder Cookies oder Tunnel ist
+der ruhigere Weg.
+
+**Nur ueber Tunnel laden** steht standardmaessig an. Aus bedeutet: Fallen alle
+Tunnel aus, laedt das Archiv wieder ueber die Hausleitung - also ueber die
+Adresse, die man herausnehmen wollte, und ohne dass es auffiele.
 
 ### Anmelden: der Cookie-Assistent
 
@@ -618,6 +684,9 @@ Fehler verdeckte. Deshalb steht hier, was tatsaechlich gelaufen ist:
 | Kanal-Vollabgleich, 3363 Videos, 265 Sammlungen | 165 s; danach 3259 Videos, 100 Shorts, 4 Livestreams korrekt getrennt |
 | Format-Auswahl (Trockenlauf) | Short: 1080x1920 statt 608x1080; 4K-Quelle: 3840x2160 |
 | Container mit PUID/PGID 99/100 | Prozess und Datenbank entstehen unter 99:100 |
+| Erzeugte Tunnelkonfiguration gegen wireproxy 1.1.3 | Angenommen. Dabei fiel auf: Bei zwei `Address`-Zeilen liest wireproxy nur die erste - eine bewusst unsinnige zweite nimmt es an. Anbieter liefern IPv4 UND IPv6, also steht beides in einer Zeile mit Komma |
+| SOCKS5-Kette mit echtem Proxy | yt-dlp benutzt ihn wirklich; der Proxy sieht den Domainnamen, also geht auch DNS durch den Tunnel. Der direkte Weg geht nachweislich NICHT durch |
+| Tunnel mit totem Endpunkt im Container | Meldet sich als "laeuft" (der Port ist offen), wird aber nicht "bereit" und bekommt keine Auftraege. Ohne diese Trennung haette er die Warteschlange verbrannt |
 
 ## Bekannte Grenzen
 
@@ -633,6 +702,10 @@ Fehler verdeckte. Deshalb steht hier, was tatsaechlich gelaufen ist:
 - **Installieren braucht HTTPS.** Ueber `http://<ip>:8000` bleibt es eine
   normale Webseite - siehe [Auf dem Telefon](#auf-dem-telefon). Das ist eine
   Regel der Browser, keine Entscheidung dieses Projekts.
+- **VPN-Tunnel brauchen einen eigenen Anbieter.** Das Archiv startet und
+  ueberwacht sie, aber die Konfigurationen bringt der Nutzer mit. Ein Tunnel,
+  dessen Anbieter selbst gedrosselt oder von YouTube gesperrt wird, hilft
+  nicht - dagegen hilft nur ein anderer Standort.
 - **Nichts geht offline ausser der Huelle.** Vorschaubilder und die Oberflaeche
   liegen im Geraetespeicher, die Videos nicht. Ein Archiv, das sich aufs Telefon
   spiegelt, waere ein anderes Projekt.
@@ -651,6 +724,9 @@ backend/app/
     ranges.py            HTTP-Bereichsanforderungen
     media.py             ffmpeg/ffprobe, Behaelterwahl, Recodierung
     ytdlp.py             yt-dlp-Anbindung, RSS, Qualitaetspruefung
+    ausgang.py           Welcher Weg ins Netz gerade gilt (je Arbeiterstrang)
+    drosselung.py        Sperrleiter je Ausgang
+    vpn.py               WireGuard-Tunnel starten, pruefen, reihum waehlen
     suche.py             FTS5-Volltextsuche, VTT-Zerlegung
     reindex.py           Neuaufbau des Suchindex
     jobs.py              Auftragswarteschlange
@@ -662,6 +738,7 @@ backend/app/
   api/
     stream.py            Auslieferung und Wiedergabe-Lease
     library.py           Kanaele, Playlists, Videos, Suche, Warteschlange, Speicher
+    vpn.py               Tunnel hochladen, schalten, ausprobieren
 frontend/src/
   lib/capabilities.ts    Codec-Erkennung im Browser
   lib/api.ts             API-Client

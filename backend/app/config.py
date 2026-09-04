@@ -183,6 +183,26 @@ class Settings(BaseSettings):
     write_comments: bool = False
     sponsorblock: bool = True
 
+    # ----------------------------------------------------------------- VPN
+    #: Hauptschalter fuer die WireGuard-Tunnel. Aus heisst: genau ein Ausgang,
+    #: naemlich die eigene Leitung - der Zustand vor dieser Funktion.
+    #:
+    #: Der Sinn ist Bandbreite, nicht Verschleierung: YouTube zaehlt je
+    #: IP-Adresse und laesst als Gast rund 300 Videos in der Stunde durch. Vier
+    #: Tunnel sind vier Adressen. Faellt einer in die Sperre, wird gewechselt
+    #: statt angehalten.
+    vpn_aktiv: bool = False
+    #: Bei eingeschaltetem VPN die eigene Leitung NICHT mitbenutzen.
+    #:
+    #: Standard an, und das ist die vorsichtige Vorgabe: Sonst faellt das
+    #: Archiv beim Ausfall aller Tunnel stillschweigend auf die Hausanschluss-
+    #: adresse zurueck - also genau auf die, die man aus dem Spiel nehmen
+    #: wollte, und ohne dass es jemandem auffiele.
+    vpn_nur_tunnel: bool = True
+    #: Programm, das WireGuard im Benutzerraum spricht und als SOCKS5-Proxy
+    #: anbietet. Im mitgelieferten Container liegt es unter /usr/local/bin.
+    wireproxy_path: str = "wireproxy"
+
     # ------------------------------------------------------------- Worker
     #: Parallele Downloads. Bewusst niedrig: YouTube drosselt pro IP-Adresse,
     #: nicht pro Prozess - als Gast liegt die Grenze bei rund 300 Videos je

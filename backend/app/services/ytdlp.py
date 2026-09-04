@@ -24,7 +24,7 @@ import yt_dlp
 from yt_dlp.utils import UnsupportedError, YoutubeDLError
 
 from app.config import settings
-from app.services import abbruch, cookies
+from app.services import abbruch, ausgang, cookies
 
 log = logging.getLogger(__name__)
 
@@ -53,8 +53,10 @@ class Gedrosselt(YtdlpError):
     Sperre eher, als dass er sie loest.
 
     Deshalb ist das ausdruecklich kein Fehlschlag. Der Auftrag geht unbewertet
-    zurueck in die Warteschlange, und alle Netzauftraege pausieren - siehe
-    :mod:`app.services.drosselung`.
+    zurueck in die Warteschlange, und der benutzte Ausgang pausiert - siehe
+    :mod:`app.services.drosselung`. Gibt es weitere Ausgaenge (WireGuard-
+    Tunnel), laeuft das Archiv ueber die naechste Adresse weiter; erst wenn
+    keiner mehr frei ist, steht es.
     """
 
 
@@ -142,6 +144,14 @@ def _base_opts() -> dict[str, Any]:
         opts["extractor_args"] = {
             "youtube": {"player_client": list(settings.ytdlp_player_clients)}
         }
+    # Der Ausgang dieses Strangs: ohne VPN die eigene Leitung (kein Eintrag),
+    # sonst der SOCKS5-Port eines WireGuard-Tunnels. Er wird hier gelesen und
+    # nicht durchgereicht - so bekommt JEDER yt-dlp-Aufruf den richtigen Weg,
+    # auch die, die spaeter dazukommen. Wuerde man ihn als Parameter fuehren,
+    # liefe der erste vergessene Aufruf an der Rotation vorbei ueber die
+    # Hausleitung, und niemand saehe es.
+    if (weg := ausgang.aktiv().proxy) is not None:
+        opts["proxy"] = weg
     return opts
 
 
@@ -727,6 +737,36 @@ def rss_url(channel_id: str) -> str:
     return f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
 
+def _oeffnen(url: str, timeout: float):
+    """Holt eine schlichte Seite - durch den Ausgang dieses Strangs.
+
+    Ohne Tunnel bleibt es bei ``urllib``, wie bisher: Ein RSS-Abruf braucht
+    keinen Extraktor, und der billigste Weg ist der richtige.
+
+    Mit Tunnel geht es nicht mehr ohne Hilfe - urllib spricht kein SOCKS. Statt
+    dafuer eine weitere Bibliothek in den Container zu holen, wird yt-dlps
+    eigener Netzwerkunterbau benutzt; er bringt SOCKS mit und ist ohnehin da.
+
+    Die Ausnahmen werden dabei auf ``OSError`` gebracht. Das ist kein
+    Schoenheitsfehler, sondern noetig: yt-dlps Netzwerkfehler erben von
+    ``YoutubeDLError`` und nicht von ``OSError``, und der Aufrufer faengt seit
+    jeher letzteres. Ohne die Umsetzung schluepfte eine Stoerung im Tunnel an
+    jeder Behandlung vorbei und liesse den Kanalabgleich als Serverfehler enden.
+    """
+    weg = ausgang.aktiv().proxy
+    if weg is None:
+        import urllib.request
+
+        return urllib.request.urlopen(url, timeout=timeout)
+
+    opts = {"quiet": True, "no_warnings": True, "socket_timeout": timeout, "proxy": weg}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.urlopen(url)
+    except YoutubeDLError as e:
+        raise OSError(str(e)) from e
+
+
 def peek_recent(channel_id: str, timeout: float = 15.0) -> list[ListedVideo]:
     """Holt die juengsten Videos eines Kanals ueber den RSS-Feed.
 
@@ -738,6 +778,12 @@ def peek_recent(channel_id: str, timeout: float = 15.0) -> list[ListedVideo]:
 
     Der Feed liefert allerdings nur etwa 15 Eintraege und keine Dauer. Er
     ersetzt den Vollabgleich also nicht, er verschiebt ihn nur nach hinten.
+
+    Auch dieser Abruf geht durch den Ausgang des Strangs. Er kostet zwar kein
+    Budget, aber er verraet dieselbe Adresse - ein RSS-Abruf im Stundentakt von
+    der Hausleitung waehrend die Downloads durch Tunnel laufen, waere ein
+    seltsames Muster und ein unnoetiger Widerspruch zur Einstellung "nur ueber
+    Tunnel".
     """
     import urllib.error
     import urllib.request
@@ -749,8 +795,7 @@ def peek_recent(channel_id: str, timeout: float = 15.0) -> list[ListedVideo]:
         "media": "http://search.yahoo.com/mrss/",
     }
     try:
-        with urllib.request.urlopen(rss_url(channel_id), timeout=timeout) as antwort:
-            baum = ElementTree.parse(antwort)
+        baum = ElementTree.parse(_oeffnen(rss_url(channel_id), timeout))
     except (urllib.error.URLError, OSError, ElementTree.ParseError) as e:
         meldung = f"RSS-Feed von {channel_id} nicht lesbar: {e}"
         if any(w in str(e).lower() for w in _DROSSEL_MARKER):

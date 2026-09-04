@@ -116,12 +116,15 @@ export interface LaufenderAuftrag {
  * gleich aus - tausend Aufträge auf "wartet", keiner läuft.
  */
 export interface Drosselung {
+  /** Wahr erst, wenn KEIN Ausgang mehr frei ist - siehe `ausgaenge`. */
   pausiert: boolean;
   rest_s: number;
   /** ISO-Zeitpunkt, an dem es weitergeht. */
   bis: string | null;
   stufe: number;
   grund: string | null;
+  /** Welcher Ausgang als nächster wieder darf. */
+  ausgang?: string | null;
 }
 
 /**
@@ -155,6 +158,64 @@ export interface CookieProbe {
   video_id?: string;
   titel?: string | null;
   angebotene_guete?: number | null;
+  meldung: string;
+}
+
+/**
+ * Sperrzustand eines einzelnen Ausgangs.
+ *
+ * Die Leiter ist je Ausgang eigen: Ein oft gesperrter Tunnel darf einen
+ * frischen nicht mitbelasten.
+ */
+export interface AusgangSperre {
+  gesperrt: boolean;
+  rest_s: number;
+  bis: string | null;
+  stufe: number;
+  grund: string | null;
+}
+
+/** Ein eingerichteter WireGuard-Tunnel samt gemessener Wirkung. */
+export interface VpnTunnel {
+  id: number;
+  name: string;
+  endpunkt: string | null;
+  /** Aus heißt: bleibt im Bestand, ist aber aus der Rotation genommen. */
+  aktiv: boolean;
+  /** Prozess läuft und der Proxy nimmt Verbindungen an. */
+  laeuft: boolean;
+  /**
+   * Es ist nachweislich etwas durchgekommen - nur das zählt für die Rotation.
+   *
+   * Ein offener Port ist kein Beweis: wireproxy bindet ihn, sobald es die
+   * Datei gelesen hat, ganz gleich ob das Gegenüber je antwortet.
+   */
+  bereit: boolean;
+  port: number | null;
+  /** Die gemessene öffentliche Adresse - die einzige Auskunft, die zählt. */
+  exit_ip: string | null;
+  /** Wie viele Aufträge ihn gerade benutzen. */
+  belegt: number;
+  fehler: string | null;
+  sperre: AusgangSperre | null;
+}
+
+export interface VpnZustand {
+  aktiv: boolean;
+  nur_tunnel: boolean;
+  /** Pfad des wireproxy-Programms, null = nicht installiert. */
+  wireproxy: string | null;
+  tunnel: VpnTunnel[];
+  bereit: number;
+  /** Tunnel, die unter derselben Adresse herauskommen - kein Zugewinn. */
+  doppelte_adressen: string[];
+  direkt: { benutzt: boolean; sperre: AusgangSperre | null };
+}
+
+export interface VpnProbe {
+  erfolg: boolean;
+  ip?: string;
+  dauer_s?: number;
   meldung: string;
 }
 
@@ -338,9 +399,14 @@ async function hole<T>(pfad: string, init?: RequestInit): Promise<T> {
  * Trennmarke, die er sich gerade ausgedacht hat. Von Hand gesetzt fehlt sie,
  * und der Server findet keine Datei.
  */
-async function sendeDatei<T>(pfad: string, datei: File): Promise<T> {
+async function sendeDatei<T>(
+  pfad: string,
+  datei: File,
+  felder?: Record<string, string>,
+): Promise<T> {
   const koerper = new FormData();
   koerper.append("datei", datei);
+  for (const [k, v] of Object.entries(felder ?? {})) koerper.append(k, v);
   return auswerten<T>(await fetch(pfad, { method: "POST", body: koerper }));
 }
 
@@ -425,6 +491,8 @@ export const api = {
       /** Wartende Aufträge je Art - ein Video erzeugt im Lauf seines Lebens mehrere. */
       nach_art: Record<string, number>;
       drosselung: Drosselung;
+      /** Wie viele Wege ins Netz es gibt und wie viele davon gerade frei sind. */
+      ausgaenge: { gesamt: number; frei: number };
     }>("/api/jobs/aktiv"),
   upgradeVorschau: (ziel: number, kanal?: string) =>
     hole<UpgradeVorschau>(
@@ -442,6 +510,15 @@ export const api = {
 
   hardware: () => hole<HardwareZustand>("/api/hardware"),
   hardwareTesten: () => hole<HardwareZustand>("/api/hardware/test", { method: "POST" }),
+
+  vpn: () => hole<VpnZustand>("/api/vpn"),
+  vpnHochladen: (datei: File, name?: string) =>
+    sendeDatei<VpnZustand & { id: number }>("/api/vpn", datei, name ? { name } : undefined),
+  vpnAendern: (id: number, aenderungen: { name?: string; aktiv?: boolean }) =>
+    hole<VpnZustand>(`/api/vpn/${id}`, { method: "PUT", body: JSON.stringify(aenderungen) }),
+  vpnEntfernen: (id: number) => hole<VpnZustand>(`/api/vpn/${id}`, { method: "DELETE" }),
+  vpnTesten: (id: number) => hole<VpnProbe>(`/api/vpn/${id}/test`, { method: "POST" }),
+  vpnTestenDirekt: () => hole<VpnProbe>("/api/vpn/test-direkt", { method: "POST" }),
 
   cookies: () => hole<CookieZustand>("/api/cookies"),
   cookiesHochladen: (datei: File) => sendeDatei<CookieZustand>("/api/cookies", datei),

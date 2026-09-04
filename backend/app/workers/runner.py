@@ -6,7 +6,10 @@ Arbeit voellig unterschiedliche Eigenschaften haben:
 *Netz* - Downloads und Kanalabgleiche. Muss schmal bleiben, weil YouTube pro
 IP-Adresse drosselt und nicht pro Prozess; als Gast liegt die Grenze bei rund
 300 Videos je Stunde. Mehr Straenge machen nicht schneller fertig, sondern
-voruebergehend gesperrt.
+voruebergehend gesperrt. Die einzige Ausnahme sind mehrere Adressen: Jeder
+Strang holt sich vor dem Auftrag einen freien Ausgang - die eigene Leitung
+oder einen WireGuard-Tunnel -, und mit vier Tunneln sind vier parallele
+Downloads tatsaechlich vier getrennte Budgets statt eines geteilten.
 
 *Vorbereitung* - Jemand sitzt davor und wartet auf sein Video. Braucht einen
 eigenen Strang, sonst steht die Wiedergabe hinter einer stundenlangen
@@ -25,12 +28,14 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from app.config import settings
 from app.db import session_scope
 from app.models import JobType
-from app.services import abbruch, drosselung, jobs
+from app.services import abbruch, jobs, vpn
+from app.services.ausgang import Ausgang
 
 log = logging.getLogger(__name__)
 
@@ -52,9 +57,9 @@ class Gruppe:
     name: str
     typen: list[str]
     straenge: int
-    #: Ob die Gruppe mit YouTube spricht. Nur sie pausiert bei einer Abweisung -
-    #: Recodierung und Vorbereitung arbeiten auf bereits geladenen Dateien und
-    #: haetten von einer Zwangspause nichts als Stillstand.
+    #: Ob die Gruppe mit YouTube spricht. Nur sie waehlt einen Ausgang und
+    #: pausiert bei einer Abweisung - Recodierung und Vorbereitung arbeiten auf
+    #: bereits geladenen Dateien und haetten davon nichts als Stillstand.
     netz: bool = False
 
 
@@ -198,6 +203,21 @@ class Arbeiterwerk:
             with self._sperre:
                 self._belegt.get(gruppe.name, set()).discard(nummer)
 
+    @staticmethod
+    @contextmanager
+    def _ausgang(gewaehlt: Ausgang | None):
+        """Belegt den gewaehlten Ausgang - oder tut nichts.
+
+        Der Zweig fuer ``None`` ist nicht Bequemlichkeit: Recodierung und
+        Vorbereitung reden gar nicht mit YouTube. Sie sollen weder einen
+        Tunnelplatz belegen noch bei einer Sperre stillstehen.
+        """
+        if gewaehlt is None:
+            yield None
+            return
+        with vpn.benutzen(gewaehlt):
+            yield gewaehlt
+
     def _arbeiten(self, gruppe: Gruppe, nummer: int) -> None:
         #: Nur fuer die Protokollierung: ohne das schreibt jeder Strang alle
         #: fuenf Sekunden dieselbe Zeile, eine Stunde lang.
@@ -214,19 +234,44 @@ class Arbeiterwerk:
             # Ihn zu holen und scheitern zu lassen waere der teurere Weg: Bei
             # 1800 wartenden Videos brennt eine einzige Sperre binnen Minuten
             # die ganze Warteschlange ab, und jeder Versuch verlaengert sie.
+            #
+            # Gefragt wird nach einem freien AUSGANG, nicht nach einer Pause:
+            # Mit mehreren WireGuard-Tunneln heisst "einer ist gesperrt" nicht
+            # mehr "es geht nichts". Der Strang bekommt dann den naechsten
+            # freien und arbeitet weiter; erst wenn keiner mehr frei ist, wird
+            # gewartet.
+            ausgang = None
             if gruppe.netz:
-                rest = drosselung.wartezeit()
-                if rest > 0:
+                ausgang = vpn.waehlen()
+                if ausgang is None:
+                    # Zwei verschiedene Lagen, die nicht zu verwechseln sind:
+                    # Entweder sind alle Ausgaenge gesperrt - dann gibt es eine
+                    # Restzeit -, oder es gibt gar keinen brauchbaren, weil
+                    # kein Tunnel etwas durchlaesst. Das zweite waere mit einer
+                    # Zeitangabe versehen schlicht falsch ("wartet 0 Minuten")
+                    # und verschwiege den eigentlichen Grund.
+                    rest = vpn.wartezeit()
                     if not pausiert:
-                        log.info(
-                            "[%s] Strang %d wartet %.0f Minuten - YouTube weist ab",
-                            gruppe.name, nummer + 1, rest / 60,
-                        )
+                        if rest > 0:
+                            log.info(
+                                "[%s] Strang %d wartet %.0f Minuten - alle Ausgaenge gesperrt",
+                                gruppe.name, nummer + 1, rest / 60,
+                            )
+                        else:
+                            log.info(
+                                "[%s] Strang %d wartet - kein Ausgang bereit. Bei "
+                                "eingeschaltetem VPN heisst das: kein Tunnel laesst etwas "
+                                "durch (siehe Einstellungen -> VPN-Tunnel).",
+                                gruppe.name, nummer + 1,
+                            )
                         pausiert = True
-                    self._stop.wait(min(rest, DROSSEL_TAKT_S))
+                    self._stop.wait(min(rest, DROSSEL_TAKT_S) if rest > 0 else DROSSEL_TAKT_S)
                     continue
                 if pausiert:
-                    log.info("[%s] Strang %d nimmt die Arbeit wieder auf", gruppe.name, nummer + 1)
+                    log.info(
+                        "[%s] Strang %d nimmt die Arbeit wieder auf, ueber %s",
+                        gruppe.name, nummer + 1, ausgang.name,
+                    )
                     pausiert = False
             try:
                 with session_scope() as db:
@@ -240,9 +285,26 @@ class Arbeiterwerk:
                         jobs.gescheitert(db, job, f"kein Bearbeiter fuer {job.type}")
                         continue
 
-                    log.info("[%s] %s %s beginnt", gruppe.name, job.type, job.target_id or "")
+                    log.info(
+                        "[%s] %s %s beginnt%s",
+                        gruppe.name, job.type, job.target_id or "",
+                        f" ueber {ausgang.name}" if ausgang and ausgang.ist_tunnel else "",
+                    )
+                    # Der Ausgang wird erst JETZT belegt, nicht schon beim
+                    # Nachsehen. Sonst gilt ein Tunnel als beschaeftigt,
+                    # waehrend der Strang nur alle zwei Sekunden in eine leere
+                    # Warteschlange schaut - in der Oberflaeche stuende dann
+                    # dauerhaft "laedt", und die Auswahl mied einen Tunnel, der
+                    # in Wahrheit nichts tut.
+                    #
+                    # Er gilt dafuer fuer den GANZEN Auftrag. Mittendrin zu
+                    # wechseln waere sinnlos und schaedlich: Einen halb
+                    # geladenen Download ueber eine andere Adresse
+                    # fortzusetzen ist genau das Muster, an dem YouTube eine
+                    # Automatik erkennt.
                     try:
-                        bearbeiter(db, job)
+                        with self._ausgang(ausgang):
+                            bearbeiter(db, job)
                     except abbruch.Abgebrochen:
                         # Der Bearbeiter hat den Auftrag bereits zurueck in die
                         # Warteschlange gelegt. Hier wird nur noch der Strang

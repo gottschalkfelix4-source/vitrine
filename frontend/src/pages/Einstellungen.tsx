@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import { AppInstallieren } from "../components/AppInstallieren";
 import { CookieAssistent } from "../components/Cookies";
 import { HardwarePruefung } from "../components/Hardware";
+import { VpnTunnelListe } from "../components/Vpn";
 
 const HERKUNFT_TEXT: Record<string, string> = {
   datenbank: "hier geändert",
@@ -121,6 +122,7 @@ export function Einstellungenseite() {
       ) : null}
 
       <CookieAssistent />
+      <VpnTunnelListe />
       <HardwarePruefung />
 
       {gruppen.map((g) => (

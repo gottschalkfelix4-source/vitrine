@@ -371,3 +371,32 @@ class Setting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class VpnTunnel(Base):
+    """Ein eingerichteter WireGuard-Tunnel.
+
+    Hier stehen nur Name, Endpunkt und Zustand. Die eigentliche Konfiguration
+    mit dem privaten Schluessel liegt bewusst NICHT in der Datenbank, sondern
+    als Datei unter ``/data/vpn/<id>.conf`` mit Rechten 0600 - genau wie die
+    Cookie-Datei. Zwei Gruende: Eine SQLite-Datei wandert schnell einmal in ein
+    Backup oder ueber die Oberflaeche, und ein Schluessel, der nur in einer
+    Datei mit engen Rechten steht, ist leichter zu ueberblicken.
+
+    Was der Tunnel gerade tut - laeuft er, welche oeffentliche Adresse hat er,
+    ist er gesperrt - steht ueberhaupt nicht in der Datenbank, sondern im
+    Speicher (:mod:`app.services.vpn`). Es muss einen Neustart nicht
+    ueberleben: Danach ist ohnehin alles neu zu messen.
+    """
+
+    __tablename__ = "vpn_tunnel"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128))
+    #: host:port des Gegenuebers - nur zur Anzeige, gelesen aus der .conf.
+    endpunkt: Mapped[str | None] = mapped_column(String(256))
+    aktiv: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Bestimmt die Portnummer des lokalen Proxys und die Reihenfolge in der
+    #: Oberflaeche.
+    reihenfolge: Mapped[int] = mapped_column(Integer, default=0)
+    angelegt_am: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

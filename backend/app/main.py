@@ -17,10 +17,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
-from app.api import cookies, hardware, library, stream
+from app.api import cookies, hardware, library, stream, vpn
 from app.config import settings
 from app.db import init_db, session_scope
 from app.services import abbruch, cache, einstellungen, jobs
+from app.services import vpn as vpn_dienst
 from app.workers.runner import werk
 
 logging.basicConfig(
@@ -58,6 +59,28 @@ def _scheduler_loop() -> None:
                 log.info("%d faellige Kanalabgleiche eingereiht", anzahl)
         except Exception:
             log.exception("Zeitplaner fehlgeschlagen")
+
+
+def _vpn_wache_loop() -> None:
+    """Sieht regelmaessig nach, ob die Tunnel noch etwas durchlassen.
+
+    Nicht verzichtbar. Ein wireproxy-Prozess bindet seinen Port, sobald er die
+    Datei gelesen hat - ob das Gegenueber je antwortet, weiss er da noch nicht.
+    Ein Tunnel, dessen Standort der Anbieter abschaltet, meldete sich also
+    weiter als bereit, bekaeme reihum Auftraege und liesse jeden davon
+    scheitern. Und weil das kein "not a bot" ist, waeren es echte Fehlschlaege
+    mit hochgezaehltem Versuchszaehler - bei 1800 wartenden Videos genau der
+    Schaden, gegen den es die Drosselpause gibt.
+    """
+    from app.services import vpn as dienst
+
+    while not _stop.wait(dienst.WACHE_TAKT_S):
+        if not settings.vpn_aktiv:
+            continue
+        try:
+            dienst.nachsehen()
+        except Exception:
+            log.exception("VPN-Wache fehlgeschlagen")
 
 
 def _werkzeuge_pruefen() -> None:
@@ -102,8 +125,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     with session_scope() as db:
         jobs.reset_stale(db)
         cache.reap(db)
+        # Die Tunnel VOR den Arbeitern: Sonst greift sich der erste Strang
+        # einen Auftrag, waehrend noch kein Ausgang bereit ist, und laedt bei
+        # eingeschaltetem "nur ueber Tunnel" ueberhaupt nicht los. Ein Start
+        # dauert je Tunnel wenige Sekunden.
+        vpn_dienst.laden(db)
 
-    for ziel, name in ((_reaper_loop, "reaper"), (_scheduler_loop, "zeitplaner")):
+    for ziel, name in (
+        (_reaper_loop, "reaper"),
+        (_scheduler_loop, "zeitplaner"),
+        (_vpn_wache_loop, "vpn-wache"),
+    ):
         threading.Thread(target=ziel, name=name, daemon=True).start()
     werk.start()
 
@@ -117,6 +149,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     abbruch.anfordern()
     _stop.set()
     werk.stop()
+    # Erst nach den Arbeitern: Ein Strang, der gerade noch einen Download
+    # sauber abschliesst, braucht seinen Tunnel bis zuletzt.
+    vpn_dienst.alles_beenden()
 
 
 app = FastAPI(
@@ -139,6 +174,7 @@ app.add_middleware(
 
 app.include_router(stream.router)
 app.include_router(cookies.router)
+app.include_router(vpn.router)
 app.include_router(hardware.router)
 app.include_router(library.router)
 

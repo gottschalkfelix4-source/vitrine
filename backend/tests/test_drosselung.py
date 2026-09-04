@@ -153,7 +153,12 @@ def test_zustand_nennt_einen_zeitpunkt():
 
 def test_ohne_abweisung_ist_nichts_pausiert():
     z = drosselung.zustand()
-    assert z == {"pausiert": False, "rest_s": 0, "bis": None, "stufe": 0, "grund": None}
+    assert z == {
+        "pausiert": False, "rest_s": 0, "bis": None, "stufe": 0, "grund": None,
+        # Welcher Ausgang betroffen ist - ohne Sperre keiner. Mit mehreren
+        # Tunneln nennt das Feld den, der als naechster wieder darf.
+        "ausgang": None,
+    }
 
 
 # ------------------------------------------------- Wirkung auf die Auftraege
@@ -261,3 +266,84 @@ def test_nur_die_netzgruppe_pausiert():
     assert nach_name["netz"].netz is True
     assert nach_name["recodierung"].netz is False
     assert nach_name["vorbereitung"].netz is False
+
+
+# ----------------------------------------------- Mehrere Ausgaenge (WireGuard)
+#
+# Der Punkt der ganzen Umstellung: Eine Sperre gilt einer Adresse. Solange es
+# nur eine gab, war "Adresse gesperrt" dasselbe wie "Archiv steht". Mit
+# mehreren Tunneln ist es das nicht mehr - und das darf die Buchfuehrung nicht
+# verwechseln, sonst wirft sie genau die Bandbreite weg, fuer die die Tunnel
+# eingerichtet wurden.
+
+
+def test_sperre_gilt_nur_dem_gemeldeten_ausgang():
+    drosselung.melden("abgewiesen", ausgang="tunnel-1")
+    assert drosselung.wartezeit("tunnel-1") > 0
+    assert drosselung.wartezeit("tunnel-2") == 0
+    assert drosselung.wartezeit(drosselung.DIREKT) == 0
+
+
+def test_jeder_ausgang_hat_seine_eigene_leiter(monkeypatch):
+    """Ein oft gesperrter Tunnel darf einen frischen nicht mitbelasten."""
+    uhr = [1000.0]
+    monkeypatch.setattr(drosselung.time, "monotonic", lambda: uhr[0])
+
+    assert drosselung.melden("erste", ausgang="tunnel-1") == drosselung.STUFEN_S[0]
+    uhr[0] += drosselung.STUFEN_S[0] + 1
+    assert drosselung.melden("zweite", ausgang="tunnel-1") == drosselung.STUFEN_S[1]
+
+    # Der zweite Tunnel war nie auffaellig - er beginnt unten.
+    assert drosselung.melden("erste dort", ausgang="tunnel-2") == drosselung.STUFEN_S[0]
+
+
+def test_freie_ausgaenge_werden_genannt():
+    drosselung.melden("abgewiesen", ausgang="tunnel-2")
+    assert drosselung.frei(["tunnel-1", "tunnel-2", "tunnel-3"]) == ["tunnel-1", "tunnel-3"]
+
+
+def test_solange_ein_ausgang_frei_ist_pausiert_nichts():
+    """Der Kern. Frueher hiess eine einzige Abweisung: alles steht."""
+    drosselung.melden("abgewiesen", ausgang="tunnel-1")
+    z = drosselung.zustand(["tunnel-1", "tunnel-2"])
+    assert z["pausiert"] is False
+    assert z["rest_s"] == 0
+    assert drosselung.kuerzeste_wartezeit(["tunnel-1", "tunnel-2"]) == 0
+
+
+def test_erst_wenn_alle_gesperrt_sind_wird_pausiert(monkeypatch):
+    uhr = [1000.0]
+    monkeypatch.setattr(drosselung.time, "monotonic", lambda: uhr[0])
+
+    drosselung.melden("abgewiesen", ausgang="tunnel-1")
+    uhr[0] += 100.0  # tunnel-1 hat schon ein Stueck abgesessen
+    drosselung.melden("abgewiesen", ausgang="tunnel-2")
+
+    z = drosselung.zustand(["tunnel-1", "tunnel-2"])
+    assert z["pausiert"] is True
+    # Genannt wird der, der als naechster wieder darf - nicht der zuletzt
+    # gesperrte. Wer wartet, will die kuerzeste Frist wissen.
+    assert z["ausgang"] == "tunnel-1"
+    assert z["rest_s"] == round(drosselung.STUFEN_S[0] - 100.0)
+
+
+def test_entwarnung_gilt_nur_dem_eigenen_ausgang():
+    drosselung.melden("abgewiesen", ausgang="tunnel-1")
+    drosselung.melden("abgewiesen", ausgang="tunnel-2")
+    drosselung.entwarnung("tunnel-1")
+    assert drosselung.wartezeit("tunnel-1") == 0
+    assert drosselung.wartezeit("tunnel-2") > 0
+
+
+def test_ohne_angabe_gilt_der_ausgang_des_strangs():
+    """So melden die Bearbeiter: Sie wissen nicht, ueber welchen Tunnel sie
+    gerade arbeiten - der Arbeiterstrang hat das vorher festgelegt."""
+    from app.services import ausgang
+
+    tunnel = ausgang.Ausgang(id="tunnel-7", name="Berlin", proxy="socks5h://127.0.0.1:51807")
+    with ausgang.benutzen(tunnel):
+        drosselung.melden("abgewiesen")
+        assert drosselung.wartezeit() > 0
+    # Ausserhalb des Blocks gilt wieder die Direktverbindung - und die ist frei.
+    assert drosselung.wartezeit() == 0
+    assert drosselung.wartezeit("tunnel-7") > 0

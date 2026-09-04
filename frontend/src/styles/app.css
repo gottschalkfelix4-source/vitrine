@@ -2055,3 +2055,89 @@
   overflow-x: auto;
   margin-bottom: 10px;
 }
+
+/* ------------------------------------------------------------- VPN-Tunnel */
+
+/* Eine Zeile je Tunnel. Der farbige Rand traegt dieselbe Aussage wie beim
+   Cookie-Assistenten: gruen heisst, ueber diesen Weg laedt es gerade. */
+.vpn-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.vpn-zeile {
+  border-radius: var(--radius);
+  background: var(--flaeche);
+  border-left: 3px solid var(--zu-fehlt);
+  padding: 10px 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.vpn-zeile[data-lage="bereit"] {
+  border-left-color: var(--zu-archiviert);
+}
+.vpn-zeile[data-lage="gesperrt"] {
+  border-left-color: var(--zu-arbeit);
+}
+.vpn-zeile[data-lage="fehler"] {
+  border-left-color: var(--zu-fehler);
+}
+
+.vpn-kopf {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vpn-marke {
+  font-size: 12.5px;
+  color: var(--text-schwach);
+  white-space: nowrap;
+}
+
+.vpn-marke[data-lage="bereit"] {
+  color: var(--zu-archiviert);
+}
+.vpn-marke[data-lage="gesperrt"] {
+  color: var(--zu-arbeit);
+}
+.vpn-marke[data-lage="fehler"] {
+  color: var(--zu-fehler);
+}
+
+/* Endpunkt und gemessene Adresse. Auf dem Telefon untereinander, sonst waere
+   die Zeile breiter als der Bildschirm - die Adressen sind nicht umbrechbar. */
+.vpn-daten {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--text-gedaempft);
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+
+.vpn-meldung {
+  margin: 6px 0 0;
+  color: var(--text-gedaempft);
+  font-size: 12.5px;
+}
+
+.vpn-meldung[data-gut="true"] {
+  color: var(--zu-archiviert);
+}
+
+.vpn-knoepfe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.vpn-knoepfe .knopf {
+  font-size: 12.5px;
+  padding: 4px 10px;
+}

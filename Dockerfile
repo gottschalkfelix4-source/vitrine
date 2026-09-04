@@ -56,6 +56,38 @@ RUN curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSIO
  && rm /tmp/deno.zip \
  && deno --version
 
+# ---------------------------------------------------------------------------
+# wireproxy - WireGuard im Benutzerraum.
+#
+# Damit laufen mehrere VPN-Tunnel gleichzeitig, jeder als SOCKS5-Proxy auf
+# einem eigenen lokalen Port. Der Sinn ist Bandbreite: YouTube zaehlt je
+# IP-Adresse und laesst als Gast rund 300 Videos in der Stunde durch - vier
+# Tunnel sind vier Budgets.
+#
+# Der entscheidende Punkt ist, was hier NICHT noetig ist. Ein echtes
+# WireGuard-Geraet braeuchte NET_ADMIN und /dev/net/tun, also erweiterte
+# Rechte am Wirtssystem, und wuerde ausserdem fuer den ganzen Prozess gelten -
+# vier Downloads ueber vier verschiedene Adressen waeren damit nicht zu haben.
+# wireproxy spricht das Protokoll selbst und braucht nichts davon.
+#
+# Die Binary ist statisch gelinkt (CGO_ENABLED=0) und laeuft in diesem
+# slim-Image ohne Zusatzpakete. Ohne sie fehlt nur die VPN-Funktion; alles
+# andere arbeitet weiter.
+#
+# Hinweis zur Adresse: Das Projekt hiess frueher pufferffish/wireproxy und ist
+# heute windtf/wireproxy. Die alten Adressen leiten weiter - hier steht
+# trotzdem die aktuelle, weil eine weitere Umbenennung die Weiterleitung
+# brechen kann.
+# ---------------------------------------------------------------------------
+ARG WIREPROXY_VERSION=v1.1.3
+ARG WIREPROXY_SHA256=e88c1d090740373fc606c1bafd81d9a5eadc642cce5667616e20e9d7a444f51c
+RUN curl -fsSL "https://github.com/windtf/wireproxy/releases/download/${WIREPROXY_VERSION}/wireproxy_linux_amd64.tar.gz" -o /tmp/wireproxy.tar.gz \
+ && echo "${WIREPROXY_SHA256}  /tmp/wireproxy.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/wireproxy.tar.gz -C /usr/local/bin wireproxy \
+ && chmod +x /usr/local/bin/wireproxy \
+ && rm /tmp/wireproxy.tar.gz \
+ && wireproxy --version
+
 WORKDIR /app
 
 COPY backend/requirements.txt ./
