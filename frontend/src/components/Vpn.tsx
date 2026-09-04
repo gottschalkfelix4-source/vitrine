@@ -75,13 +75,41 @@ export function VpnTunnelListe() {
         </strong>
         <p>
           {!daten?.aktiv
-            ? "Alles läuft über die eigene Leitung. Einschalten unter Einstellungen → VPN → „Tunnel benutzen“."
+            ? tunnel.length > 0
+              ? "Solange der Schalter aus ist, wird kein Tunnel gestartet – die Zeilen unten sagen deshalb „nicht gestartet“ und nicht, dass etwas kaputt wäre."
+              : "Alles läuft über die eigene Leitung."
             : daten.nur_tunnel
               ? bereit > 0
                 ? "Jeder Download nimmt reihum einen freien Tunnel. Läuft einer in die Sperre, übernimmt der nächste."
                 : "Es wird nichts geladen: „Nur über Tunnel laden“ ist an, und kein Tunnel ist bereit."
               : "Die eigene Leitung wird mitbenutzt."}
         </p>
+
+        {/*
+          Der Schalter steht hier und nicht nur weiter unten in der Liste der
+          Einstellungen. Wer gerade drei Konfigurationen hochgeladen hat, ist
+          fertig in seinem Kopf - dass es dann noch einen Hauptschalter
+          irgendwo anders gibt, liest niemand. Er bleibt zusätzlich unten
+          stehen, wo alle anderen Einstellungen sind.
+        */}
+        <button
+          className="knopf"
+          data-art={daten?.aktiv ? undefined : "stark"}
+          style={{ marginTop: 10 }}
+          disabled={laeuft !== null || tunnel.length === 0}
+          onClick={() =>
+            fuehren("hauptschalter", async () => {
+              await api.einstellungenSpeichern({ vpn_aktiv: !daten?.aktiv });
+              neuLaden();
+            })
+          }
+        >
+          {laeuft === "hauptschalter"
+            ? "…"
+            : daten?.aktiv
+              ? "Tunnel nicht mehr benutzen"
+              : "Tunnel jetzt benutzen"}
+        </button>
       </div>
 
       {fehltProgramm ? (
@@ -119,6 +147,7 @@ export function VpnTunnelListe() {
             <Zeile
               key={t.id}
               tunnel={t}
+              vpnAn={daten?.aktiv ?? false}
               probe={proben[t.id]}
               beschaeftigt={laeuft !== null}
               aufTesten={() =>
@@ -216,6 +245,7 @@ export function VpnTunnelListe() {
 
 function Zeile({
   tunnel,
+  vpnAn,
   probe,
   beschaeftigt,
   aufTesten,
@@ -223,6 +253,8 @@ function Zeile({
   aufEntfernen,
 }: {
   tunnel: VpnTunnel;
+  /** Hauptschalter. Ist er aus, läuft KEIN Tunnel - dann sagt die Zeile das. */
+  vpnAn: boolean;
   probe: VpnProbe | undefined;
   beschaeftigt: boolean;
   aufTesten: () => void;
@@ -230,19 +262,27 @@ function Zeile({
   aufEntfernen: () => void;
 }) {
   const gesperrt = tunnel.sperre?.gesperrt ?? false;
-  // „läuft" und „bereit" sind nicht dasselbe, und der Unterschied ist der
-  // wichtigste dieser Ansicht: Der Port ist offen, sobald wireproxy die Datei
-  // gelesen hat - ob das Gegenüber antwortet, weiß es da noch nicht. Erst die
-  // gemessene Adresse beweist, dass etwas durchkommt.
+  // Die Reihenfolge ist der ganze Witz dieser Zeile, und der erste Zweig war
+  // vorher nicht da: Bei ausgeschaltetem Hauptschalter wird gar kein Tunnel
+  // gestartet. Er meldete dann „läuft nicht" und „nichts durchgekommen" - was
+  // beides stimmt und trotzdem zusammen die falsche Geschichte erzählt. Drei
+  // rote Zeilen „kommt nichts durch" sehen nach drei kaputten Konfigurationen
+  // aus, während in Wahrheit nur ein Schalter fehlt.
+  //
+  // Danach gilt: „läuft" und „bereit" sind nicht dasselbe. Der Port ist offen,
+  // sobald wireproxy die Datei gelesen hat - ob das Gegenüber antwortet, weiß
+  // es da noch nicht. Erst die gemessene Adresse beweist, dass etwas durchkommt.
   const lage = !tunnel.aktiv
     ? "aus"
-    : gesperrt
-      ? "gesperrt"
-      : tunnel.bereit
-        ? "bereit"
-        : tunnel.laeuft && !tunnel.fehler
-          ? "misst"
-          : "fehler";
+    : !vpnAn
+      ? "wartet"
+      : gesperrt
+        ? "gesperrt"
+        : tunnel.bereit
+          ? "bereit"
+          : tunnel.laeuft && !tunnel.fehler
+            ? "misst"
+            : "fehler";
 
   return (
     <div className="vpn-zeile" data-lage={lage}>
@@ -251,15 +291,17 @@ function Zeile({
         <span className="vpn-marke" data-lage={lage}>
           {lage === "aus"
             ? "abgeschaltet"
-            : lage === "gesperrt"
-              ? `gesperrt, noch ${wartedauer(tunnel.sperre?.rest_s ?? 0)}`
-              : lage === "misst"
-                ? "wird gemessen…"
-                : lage === "bereit"
-                  ? tunnel.belegt > 0
-                    ? `lädt (${tunnel.belegt})`
-                    : "bereit"
-                  : "kommt nichts durch"}
+            : lage === "wartet"
+              ? "nicht gestartet"
+              : lage === "gesperrt"
+                ? `gesperrt, noch ${wartedauer(tunnel.sperre?.rest_s ?? 0)}`
+                : lage === "misst"
+                  ? "wird gemessen…"
+                  : lage === "bereit"
+                    ? tunnel.belegt > 0
+                      ? `lädt (${tunnel.belegt})`
+                      : "bereit"
+                    : "kommt nichts durch"}
         </span>
       </div>
 
