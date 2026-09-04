@@ -19,8 +19,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from sqlalchemy import delete, select, update
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobStatus, JobType, utcnow
@@ -269,6 +269,92 @@ def payload_of(job: Job) -> dict[str, Any]:
         return json.loads(job.payload)
     except json.JSONDecodeError:
         return {}
+
+
+def gegenstandslose_entfernen(db: Session) -> dict[str, int]:
+    """Nimmt Archivierungsauftraege aus der Warteschlange, die nichts mehr tun.
+
+    Zwei Sorten, und beide entstanden real bei einem Kanal mit 3363 Videos:
+    Dort standen 3788 wartende Archivierungsauftraege, obwohl nur 1736 Videos
+    ueberhaupt noch etwas brauchten.
+
+    **Erledigte Ziele.** Auftraege fuer Videos, die laengst im Archiv liegen.
+    Sie stammen aus der Zeit, bevor "Alle laden" nur noch einreihte, was
+    wirklich fehlt. Der Fix von damals verhindert neue; die vorhandenen blieben
+    liegen, denn ein Fehler im Einreihen raeumt nichts weg, was er frueher
+    angerichtet hat.
+
+    **Doppelte.** Zwei wartende Auftraege fuer dasselbe Video. ``enqueue``
+    verhindert das eigentlich, aber die Pruefung ist ein SELECT vor einem
+    INSERT ohne Datenbankschluessel darauf - laufen zwei Einreihungen
+    gleichzeitig, schluepfen beide durch. Der aelteste bleibt stehen, weil er
+    seinen Platz in der Reihenfolge schon hat.
+
+    Angefasst werden ausschliesslich **wartende** Auftraege. Ein laufender wird
+    nicht angeruehrt: Er haelt gerade einen halben Download in der Hand.
+
+    Ebenso wenig angefasst werden Auftraege fuer uebersprungene oder bei der
+    Quelle verschwundene Videos. Die sehen zwar auch gegenstandslos aus, sind
+    es aber nicht zwingend - ein geloeschtes Video kann wiederkommen, und wer
+    die Kanalregeln aendert, will die uebersprungenen wiederhaben. Sie kosten
+    einen Fehlversuch, keinen vollstaendigen Download.
+
+    Liefert die Zahlen, damit der Start sie protokollieren kann.
+    """
+    from app.models import Video, VideoStatus
+
+    offen = list(
+        db.scalars(
+            select(Job)
+            .where(Job.type == JobType.VIDEO_ARCHIVE, Job.status == JobStatus.PENDING)
+            .order_by(Job.created_at, Job.id)
+        )
+    )
+    if not offen:
+        return {"erledigt": 0, "doppelt": 0, "geblieben": 0}
+
+    # Alle betroffenen Videos in einem Rutsch holen. Einzeln nachzuschlagen
+    # waeren bei tausenden Auftraegen tausende Abfragen.
+    ziele = {j.target_id for j in offen if j.target_id}
+    fertig = {
+        v.id
+        for v in db.scalars(select(Video).where(Video.id.in_(ziele)))
+        if v.status == VideoStatus.ARCHIVED and v.bundle_file
+    }
+
+    gesehen: set[str] = set()
+    weg_erledigt: list[int] = []
+    weg_doppelt: list[int] = []
+    for j in offen:
+        if not j.target_id:
+            continue
+        if j.target_id in fertig:
+            weg_erledigt.append(j.id)
+        elif j.target_id in gesehen:
+            weg_doppelt.append(j.id)
+        else:
+            gesehen.add(j.target_id)
+
+    for gruppe in (weg_erledigt, weg_doppelt):
+        # In Haeppchen: SQLite nimmt nicht beliebig viele Werte in ein IN().
+        for anfang in range(0, len(gruppe), 500):
+            db.execute(
+                delete(Job).where(Job.id.in_(gruppe[anfang : anfang + 500]))
+            )
+    db.commit()
+
+    ergebnis = {
+        "erledigt": len(weg_erledigt),
+        "doppelt": len(weg_doppelt),
+        "geblieben": len(gesehen),
+    }
+    if weg_erledigt or weg_doppelt:
+        log.info(
+            "Warteschlange bereinigt: %d Auftraege fuer bereits archivierte Videos, "
+            "%d doppelte - %d bleiben stehen",
+            ergebnis["erledigt"], ergebnis["doppelt"], ergebnis["geblieben"],
+        )
+    return ergebnis
 
 
 def reset_stale(db: Session) -> int:

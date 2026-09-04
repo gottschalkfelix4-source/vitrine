@@ -124,6 +124,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _werkzeuge_pruefen()
     with session_scope() as db:
         jobs.reset_stale(db)
+        # Aufraeumen vor dem Start der Arbeiter, nicht danach: Sonst greift
+        # sich der erste Strang genau den Auftrag, der gleich geloescht wird.
+        jobs.gegenstandslose_entfernen(db)
         cache.reap(db)
         # Die Tunnel VOR den Arbeitern: Sonst greift sich der erste Strang
         # einen Auftrag, waehrend noch kein Ausgang bereit ist, und laedt bei

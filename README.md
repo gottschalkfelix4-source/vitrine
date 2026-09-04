@@ -257,16 +257,56 @@ Die Anzeige schluesselt deshalb nach Art auf, statt eine nackte Summe zu
 nennen. "1888 Archivierung · 1333 Qualitaet anheben · 995 Verkleinerung" ist
 nachvollziehbar, "4216 warten" nicht.
 
-Doppelte Auftraege entstehen dabei nicht: :func:`enqueue` gibt einen bereits
-offenen Auftrag zurueck, statt einen zweiten anzulegen. Und "Alle laden" reiht
-nur ein, was wirklich fehlt - archivierte, verschwundene und laufende Videos
-bleiben aussen vor, und es sagt hinterher, was womit passiert ist:
+"Alle laden" reiht nur ein, was wirklich fehlt - archivierte, verschwundene
+und laufende Videos bleiben aussen vor -, und es sagt hinterher, was womit
+passiert ist:
 
     3 neu eingereiht, 1885 warteten schon, 995 bereits archiviert,
     163 bei der Quelle geloescht, 87 durch Kanalregeln ausgeschlossen.
 
 Wer auf "wartet" steht, aber keinen Auftrag hat, haengt fest - so ein Video
 wuerde nie geladen, weil niemand mehr danach sieht. Der Knopf holt es zurueck.
+
+### Auftraege, die nichts mehr zu tun haben
+
+Hier stand einmal, doppelte Auftraege koennten nicht entstehen. Das war zu
+optimistisch, und der Betrieb hat es widerlegt: Bei demselben Kanal standen
+spaeter 3788 wartende Archivierungsauftraege, obwohl nur 1736 Videos ueberhaupt
+noch etwas brauchten. Von 25 gepruefeten Auftraegen zeigten alle 25 auf Videos,
+die laengst im Archiv lagen.
+
+Zwei Gruende, und der erste ist der unangenehmere:
+
+**Ein Fix raeumt nicht weg, was er frueher angerichtet hat.** Die Auftraege
+stammten aus der Zeit, bevor "Alle laden" nur noch einreihte, was fehlt. Danach
+entstanden keine neuen mehr - die alten aber blieben in der Datenbank liegen.
+
+**Der Schutz vor Doppelten hat eine Luecke.** ``enqueue`` gibt einen bereits
+offenen Auftrag zurueck, statt einen zweiten anzulegen. Diese Pruefung ist
+allerdings ein SELECT vor einem INSERT ohne Datenbankschluessel darauf; laufen
+zwei Einreihungen gleichzeitig, schluepfen beide durch.
+
+Der Schaden war nicht der falsche Zaehler. Der Archivierer sah beim Start nicht
+nach, was schon da ist - jeder dieser Auftraege haette ein fertiges Video noch
+einmal vollstaendig geholt. Das kostet nicht nur Zeit: YouTube teilt sein
+Budget je IP-Adresse zu, und verbraucht wird genau die Bandbreite, fuer die man
+sich sonst Tunnel einrichtet.
+
+Dagegen stehen jetzt zwei Vorkehrungen:
+
+- **Ein Wachposten im Archivierer.** Liegt das Buendel auf der Platte, gilt der
+  Auftrag als erledigt, ohne einen Byte zu laden. Geprueft wird die Datei und
+  nicht der Zustand allein: Wer den Kaltspeicher von Hand aufraeumt, soll seine
+  Videos wiederbekommen koennen.
+- **Aufraeumen beim Start.** Wartende Archivierungsauftraege fuer bereits
+  archivierte Videos werden entfernt, ebenso Doppelte - der aelteste bleibt
+  stehen, weil er seinen Platz in der Reihenfolge schon hat. Laufende Auftraege
+  bleiben unberuehrt; sie halten einen halben Download in der Hand.
+
+Uebersprungene und bei der Quelle geloeschte Videos behalten ihre Auftraege.
+Sie sehen gegenstandslos aus, sind es aber nicht zwingend: Ein geloeschtes
+Video kann wiederkommen, und wer die Kanalregeln aendert, will die
+uebersprungenen wiederhaben. Sie kosten einen Fehlversuch, keinen Download.
 
 ### Kanalabgleich
 
@@ -687,6 +727,7 @@ Fehler verdeckte. Deshalb steht hier, was tatsaechlich gelaufen ist:
 | Erzeugte Tunnelkonfiguration gegen wireproxy 1.1.3 | Angenommen. Dabei fiel auf: Bei zwei `Address`-Zeilen liest wireproxy nur die erste - eine bewusst unsinnige zweite nimmt es an. Anbieter liefern IPv4 UND IPv6, also steht beides in einer Zeile mit Komma |
 | SOCKS5-Kette mit echtem Proxy | yt-dlp benutzt ihn wirklich; der Proxy sieht den Domainnamen, also geht auch DNS durch den Tunnel. Der direkte Weg geht nachweislich NICHT durch |
 | Tunnel mit totem Endpunkt im Container | Meldet sich als "laeuft" (der Port ist offen), wird aber nicht "bereit" und bekommt keine Auftraege. Ohne diese Trennung haette er die Warteschlange verbrannt |
+| Warteschlange im Betrieb, Kanal mit 3363 Videos | 3788 wartende Archivierungsauftraege bei 1736 Videos, die noch etwas brauchten. 25 von 25 gepruefeten Auftraegen zeigten auf bereits archivierte Videos - Altlasten, die jedes Video erneut geladen haetten |
 
 ## Bekannte Grenzen
 

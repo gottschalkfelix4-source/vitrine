@@ -397,6 +397,35 @@ def archivieren(db: Session, job: Job) -> None:
     if video is None:
         raise ValueError(f"Video {video_id} nicht in der Datenbank")
 
+    # Der Wachposten. Er kostet einen Blick auf die Platte und verhindert den
+    # teuersten Unsinn, den dieses Programm anstellen kann: ein Video erneut
+    # herunterzuladen, das vollstaendig im Archiv liegt.
+    #
+    # Der Anlass ist gemessen, nicht gedacht. Bei einem Kanal mit 3363 Videos
+    # standen 3788 Archivierungsauftraege in der Warteschlange, obwohl nur 1736
+    # Videos ueberhaupt noch etwas brauchten. Von 25 gepruefeten wartenden
+    # Auftraegen zeigten alle 25 auf bereits archivierte Videos - Altlasten aus
+    # der Zeit, bevor "Alle laden" nur noch einreihte, was wirklich fehlt. Jeder
+    # davon haette ein fertiges Video noch einmal geholt und dafuer das
+    # IP-Budget verbrannt, das anderswo fehlt.
+    #
+    # Bewusst hier und nicht nur beim Einreihen: Ein Auftrag kann Tage in der
+    # Warteschlange stehen, und in dieser Zeit kann dasselbe Video laengst
+    # ueber einen anderen Auftrag hereingekommen sein. Beim Einreihen war er
+    # also richtig und ist es jetzt nicht mehr.
+    #
+    # Geprueft wird die Datei, nicht der Zustand allein: Wer die Buendel von
+    # Hand aus dem Kaltspeicher entfernt, soll sie wiederbekommen koennen.
+    if video.status == VideoStatus.ARCHIVED and video.bundle_file:
+        if Path(video.bundle_file).is_file():
+            log.info("%s liegt bereits im Archiv - Auftrag ohne Download erledigt", video_id)
+            jobs.erledigt(db, job, "lag bereits im Archiv, nichts zu tun")
+            return
+        log.warning(
+            "%s gilt als archiviert, aber %s fehlt - wird neu geholt",
+            video_id, video.bundle_file,
+        )
+
     arbeitsordner = settings.tmp_dir / video_id
     fortsetzbar = _fortsetzmarke_einloesen(arbeitsordner)
     if arbeitsordner.exists() and not fortsetzbar:
