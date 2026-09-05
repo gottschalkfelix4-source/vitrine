@@ -55,7 +55,7 @@ Elasticsearch.
 docker compose up -d --build
 ```
 
-Die Daten liegen unter `./data`. Beim ersten Oeffnen der HTTPS-Adresse erscheint
+Die Daten liegen unter `./data`. Beim ersten Oeffnen der HTTP- oder HTTPS-Adresse erscheint
 der Dialog **Administrator einrichten**. Den Einrichtungscode aus dem
 Container-Protokoll kopieren und im Dialog Benutzername und Passwort festlegen:
 
@@ -63,7 +63,9 @@ Container-Protokoll kopieren und im Dialog Benutzername und Passwort festlegen:
 docker compose logs vitrine
 ```
 
-Danach mit dem selbst gewaehlten Passwort anmelden. Fuer einen
+Die Einrichtung funktioniert auch direkt ueber `http://localhost:8000`, ohne
+die Cookie-Einstellung zu aendern. Danach ueber die HTTPS-Adresse mit dem selbst
+gewaehlten Passwort anmelden. Fuer einen
 ausdruecklich lokalen HTTP-Test kann `AUTH_COOKIE_SECURE=false` in der
 Compose-`.env` gesetzt werden; den Container danach neu erstellen. Dann ist
 `http://localhost:8000` nutzbar. Vor oeffentlicher Freigabe wieder `true`
@@ -114,6 +116,11 @@ Sonderzeichen verwenden. Nach dem Speichern
 erscheint die normale Anmeldung. Ein geschlossenes Einrichtungsfenster laesst
 sich ueber **Administrator einrichten** erneut oeffnen.
 
+Die Ersteinrichtung funktioniert auch ohne HTTPS ueber die direkte
+HTTP-Adresse des Containers, etwa den WebUI-Knopf in Unraid. Dafuer ist keine
+Aenderung an `YTA_AUTH_COOKIE_SECURE` erforderlich. Die Einrichtung legt den
+Zugang an und meldet dich noch nicht an.
+
 In Unraid findest du den Code im Docker-Tab beim Vitrine-Container unter
 **Protokoll / Logs**. Die Zeile beginnt mit `Vitrine-Einrichtungscode:`.
 Nur den Code dahinter kopieren. Er wird bei jedem Containerstart ohne
@@ -155,7 +162,8 @@ Am Proxy ein Upload-Limit von 2 MiB setzen und Zwischenspeicherung fuer
 `/api/` abschalten. Die Anwendung prueft Upload-Groessen zusaetzlich selbst.
 
 Die HTTP-Adresse hinter Unraids WebUI-Knopf ist die direkte Container-Adresse.
-Bei aktivem HTTPS-Cookie stattdessen die HTTPS-Adresse des Proxys oeffnen.
+Dort ist die Ersteinrichtung auch bei aktivem HTTPS-Cookie moeglich. Fuer die
+anschliessende Anmeldung dann die HTTPS-Adresse des Proxys oeffnen.
 `YTA_AUTH_COOKIE_SECURE=false` ist nur fuer bewusste Tests ueber HTTP im
 privaten Netz vorgesehen; bei HTTP werden Anmeldedaten unverschluesselt
 uebertragen.

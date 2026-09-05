@@ -115,7 +115,8 @@ oeffnet die normale Anmeldung, ohne bereits eine Sitzung auszustellen.
 Der Code wird nicht ueber die API ausgegeben und nicht im Browser gespeichert.
 Container-Protokolle muessen bis zum Abschluss der Einrichtung privat bleiben.
 Der lokale Konsolenbefehl bleibt der Wiederherstellungsweg fuer vergessene
-Passwoerter. Die oben beschriebene HTTPS-Voraussetzung gilt weiterhin.
+Passwoerter. Die oben beschriebene HTTPS-Voraussetzung gilt standardmaessig
+fuer die Anmeldung; die Ersteinrichtung ist davon ausgenommen (siehe unten).
 
 Nach dieser Ergaenzung bestanden lokal 686 Backendtests (ein bekannter
 Windows-Dateisymlink-Test uebersprungen), 85 Frontendtests, Ruff und der
@@ -132,3 +133,16 @@ Leerzeichen allein gelten nicht als Sonderzeichen. Bestehende Passwoerter
 bleiben beim Anmelden gueltig. Die Containerpruefung richtet das Konto mit
 einem genau acht Zeichen langen Testpasswort ein und prueft die Anmeldung
 erneut nach einem Neustart.
+
+Die Ersteinrichtung akzeptiert nun auch einen HTTP-Browser-Origin, unabhaengig
+von `YTA_AUTH_COOKIE_SECURE`. Diese Ausnahme gilt ausschliesslich fuer
+`POST /api/auth/setup`, nach derselben Pfadnormalisierung wie der Router.
+Host und Port, Einmalcode, JSON, eigener Request-Header und Groessenlimit
+werden weiterhin geprueft. Der Aufruf erzeugt keine Sitzung und kein Cookie;
+bestehende Konten lassen sich damit weiterhin nicht ueberschreiben. Fuer die
+spaetere Anmeldung bleibt der HTTPS-Standard erhalten. Der explizite lokale
+HTTP-Betrieb mit `YTA_AUTH_COOKIE_SECURE=false` funktioniert weiterhin.
+Die HTTP-Einrichtung ist fuer das eigene Netz gedacht: Einrichtungscode und
+Passwort werden dabei unverschluesselt uebertragen. Die Containerpruefung
+sendet jetzt auch den HTTP-Origin eines Browsers, damit dieser Unterschied
+zu einem originlosen Konsolenaufruf bei Updates abgedeckt bleibt.

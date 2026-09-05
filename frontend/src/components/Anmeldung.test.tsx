@@ -43,12 +43,14 @@ it("übernimmt nach der Einrichtung den eingegebenen Benutzernamen in den Login"
   expect(html).not.toContain("<dialog");
 });
 
-it("unterscheidet einen falschen Einrichtungscode von blockierter Herkunft oder HTTP", () => {
+it("unterscheidet einen falschen Einrichtungscode von blockierter Herkunft ohne HTTPS zu verlangen", () => {
   const code = einrichtungsFehler(new ApiFehler(403, "Der Einrichtungscode ist falsch oder abgelaufen."));
   expect(code).toContain("aktuellen Code aus dem Containerprotokoll");
   const herkunft = einrichtungsFehler(new ApiFehler(403, "Anfragen von einer fremden Herkunft sind nicht erlaubt."));
-  expect(herkunft).toContain("konfigurierte HTTPS-Adresse");
+  expect(herkunft).toContain("dieselbe Adresse wie Vitrine");
   expect(herkunft).toContain("Reverse Proxy");
+  expect(herkunft).toContain("ursprüngliche Browseradresse");
+  expect(herkunft).not.toContain("HTTPS");
   expect(herkunft).not.toContain("Einrichtungscode ist falsch");
 });
 

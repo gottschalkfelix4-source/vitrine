@@ -31,7 +31,7 @@ _CSP = (
 log = logging.getLogger(__name__)
 
 
-def same_origin(headers: Headers) -> bool:
+def same_origin(headers: Headers, *, allow_http: bool = False) -> bool:
     if headers.get("sec-fetch-site", "").lower() == "cross-site":
         return False
     origin = headers.get("origin")
@@ -42,7 +42,7 @@ def same_origin(headers: Headers) -> bool:
     try:
         parsed = urlsplit(origin)
         expected = urlsplit("//" + headers.get("host", ""))
-        allowed_schemes = {"https"} if settings.auth_cookie_secure else {"http", "https"}
+        allowed_schemes = {"http", "https"} if allow_http or not settings.auth_cookie_secure else {"https"}
         return (
             parsed.scheme in allowed_schemes and not parsed.username and not parsed.password
             and parsed.path in ("", "/") and not parsed.query and not parsed.fragment
@@ -87,7 +87,11 @@ class SecurityMiddleware:
         headers = Headers(scope=scope)
         if api:
             credential_request = method == "POST" and path in _CREDENTIAL_PATHS
-            if method not in _SAFE and not same_origin(headers):
+            # Die Ersteinrichtung setzt nur mit dem lokalen Einmalcode ein
+            # Passwort und stellt keine Sitzung aus. Sie darf auch direkt an
+            # Unraids HTTP-Adresse erfolgen, unabhaengig vom HTTPS-Login-Cookie.
+            setup_request = method == "POST" and path == "/api/auth/setup"
+            if method not in _SAFE and not same_origin(headers, allow_http=setup_request):
                 await reject(403, "Anfragen von einer fremden Herkunft sind nicht erlaubt.")
                 return
             if credential_request and (headers.get("x-vitrine-request") != "1"

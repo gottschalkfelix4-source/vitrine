@@ -13,12 +13,14 @@ CONTAINER = "pruefling"
 PASSWORD = "Ci!test8"  # Genau acht Zeichen; nur fuer diesen kurzlebigen Testcontainer.
 
 
-def request(path, payload=None, cookie=None):
+def request(path, payload=None, cookie=None, *, origin=None):
     headers = {}
     if payload is not None:
         headers = {"Content-Type": "application/json", "X-Vitrine-Request": "1"}
     if cookie:
         headers["Cookie"] = cookie
+    if origin is not None:
+        headers["Origin"] = origin
     req = Request(BASE + path, data=None if payload is None else json.dumps(payload).encode(), headers=headers)
     try:
         response = urlopen(req, timeout=5)
@@ -54,11 +56,16 @@ def main():
     assert status == 200 and json.loads(body)["eingerichtet"] is False
     assert initial[0].encode() not in body, "Sitzungsstatus darf den Einrichtungscode nicht enthalten"
     payload = {"einrichtungscode": "falsch", "benutzer": "container-admin", "passwort": PASSWORD}
-    assert request("/api/auth/setup", payload)[0] == 403
+    assert request("/api/auth/setup", payload, origin=BASE)[0] == 403
     payload["einrichtungscode"] = initial[0]
-    assert request("/api/auth/setup", payload)[0] == 204
-    assert request("/api/auth/setup", payload)[0] == 409
+    assert request("/api/auth/setup", payload, origin="http://fremd.example")[0] == 403
+    # Echte Browser senden einen Origin-Header. Trotz Secure-Cookie-Vorgabe
+    # muss die Ersteinrichtung ueber die direkte HTTP-Adresse funktionieren.
+    status, headers, body = request("/api/auth/setup", payload, origin=BASE)
+    assert status == 204 and not body and "Set-Cookie" not in headers
+    assert request("/api/auth/setup", payload, origin=BASE)[0] == 409
     assert request("/api/channels")[0] == 401  # Einrichtung ist keine Anmeldung.
+    assert request("/api/auth/login", {"benutzer": "container-admin", "passwort": PASSWORD}, origin=BASE)[0] == 403
     sign_in()
 
     subprocess.run(["docker", "restart", CONTAINER], capture_output=True, check=True, timeout=60)
@@ -73,9 +80,9 @@ def main():
         raise AssertionError("Container nach Neustart nicht bereit")
     assert codes() == initial, "Vorhandener Administrator darf keinen neuen Einrichtungscode erhalten"
     assert json.loads(request("/api/auth/session")[2])["eingerichtet"] is True
-    assert request("/api/auth/setup", payload)[0] == 409
+    assert request("/api/auth/setup", payload, origin=BASE)[0] == 409
     sign_in()
-    print("Ersteinrichtung, Einmaligkeit, Anmeldung und Neustart mit bestehendem Konto erfolgreich.")
+    print("HTTP-Ersteinrichtung, Herkunftsschutz, Einmaligkeit, Anmeldung und Neustart erfolgreich.")
 
 
 if __name__ == "__main__":

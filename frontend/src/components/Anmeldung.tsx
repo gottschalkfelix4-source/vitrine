@@ -98,7 +98,7 @@ export function Anmeldung({ zustand }: { zustand: Anmeldezustand }) {
 export function einrichtungsFehler(e: unknown): string {
   if (!(e instanceof ApiFehler)) return "Die Einrichtung konnte nicht bestätigt werden. Bitte prüfe die Verbindung und versuche es erneut.";
   if (e.status === 403 && e.message.includes("fremden Herkunft")) {
-    return "Öffne Vitrine über die konfigurierte HTTPS-Adresse. Falls der Fehler dort bleibt, prüfe die Weiterleitung am Reverse Proxy.";
+    return "Öffne die Einrichtung über dieselbe Adresse wie Vitrine. Falls du einen Reverse Proxy nutzt, prüfe, ob er die ursprüngliche Browseradresse weitergibt.";
   }
   if (e.status === 403 && e.message.includes("Einrichtungscode")) {
     return "Der Einrichtungscode ist falsch oder nicht mehr gültig. Verwende den aktuellen Code aus dem Containerprotokoll.";

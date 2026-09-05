@@ -452,6 +452,100 @@ def test_setup_consumes_local_code_without_disclosure_or_autologin(environment, 
     assert sign_in(client).status_code == 200
 
 
+@pytest.mark.parametrize(("base_url", "root_path"), [
+    ("http://192.168.1.8:8000", ""),
+    ("http://vitrine.local", ""),
+    ("http://[fd00::2]:8000", "/vitrine"),
+    ("https://archiv.example", ""),
+    ("https://archiv.example:8443", "/vitrine"),
+])
+def test_setup_accepts_browser_http_and_https_with_secure_cookie_default(environment, caplog, base_url, root_path):
+    secure_client, factory, _ = environment
+    code = bootstrap_code(caplog)
+    payload = {"einrichtungscode": code, "benutzer": "admin", "passwort": "A!abcdef"}
+    headers = {"X-Vitrine-Request": "1", "Origin": base_url, "Host": base_url.split("://", 1)[1]}
+    # Starlettes httpx-Testtransport kann keine IPv6-URL parsen. Die echten
+    # IPv6-Browserheader trotzdem unveraendert durch die ASGI-Grenze pruefen.
+    transport_url = "http://testserver:8000" if "[" in base_url else base_url
+    client = TestClient(main.app, base_url=transport_url, root_path=root_path)
+    try:
+        response = client.post(root_path + "/api/auth/setup", json=payload, headers=headers)
+        assert response.status_code == 204 and response.content == b""
+        assert "set-cookie" not in response.headers
+        assert response.headers["cache-control"] == "no-store"
+        assert settings.auth_cookie_secure is True
+        assert client.get(root_path + "/api/auth/session").json() == {
+            "eingerichtet": True, "angemeldet": False, "benutzer": None, "csrf_token": None,
+        }
+        assert client.get(root_path + "/api/channels").status_code == 401
+        assert client.post(root_path + "/api/auth/setup", json=payload, headers=headers).status_code == 409
+        with factory() as db:
+            assert db.get(AdminBootstrap, 1) is None
+            assert db.scalar(select(AdminSession)) is None
+        # Die Ausnahme zur Einrichtung aendert keine bestehenden Login-Regeln.
+        if base_url.startswith("http:"):
+            assert client.post(root_path + "/api/auth/login", json={"benutzer": "admin", "passwort": "A!abcdef"},
+                               headers=headers).status_code == 403
+        login = sign_in(secure_client, "A!abcdef")
+        assert login.status_code == 200 and "Secure" in login.headers["set-cookie"]
+        if base_url.startswith("http:"):
+            # Auch ein absichtlich mitgesendetes Cookie samt CSRF-Token erlaubt
+            # keine HTTP-Schreibzugriffe auf die bestehende HTTPS-Sitzung.
+            guarded = {**headers, "X-CSRF-Token": login.json()["csrf_token"],
+                       "Cookie": f"{auth.COOKIE_NAME}={secure_client.cookies.get(auth.COOKIE_NAME)}"}
+            assert client.post(root_path + "/api/auth/logout", headers=guarded).status_code == 403
+            assert secure_client.get("/api/auth/session").json()["angemeldet"] is True
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize("origin_headers", [
+    {"Origin": "http://fremd.example:8000"},
+    {"Origin": "http://vitrine.local"},  # Gleicher Host, anderer Port.
+    {"Origin": "http://vitrine.local:8001"},
+    {"Origin": "null"},
+    {"Origin": "ftp://vitrine.local:8000"},
+    {"Origin": "http://user@vitrine.local:8000"},
+    {"Origin": "http://vitrine.local:8000", "Sec-Fetch-Site": "cross-site"},
+    {"Origin": "http://fremd.example:8000", "X-Forwarded-Host": "fremd.example:8000",
+     "X-Forwarded-Proto": "http"},
+])
+def test_http_setup_still_rejects_foreign_origins(environment, caplog, origin_headers):
+    code = bootstrap_code(caplog)
+    payload = {"einrichtungscode": code, "benutzer": "admin", "passwort": PASSWORD}
+    client = TestClient(main.app, base_url="http://vitrine.local:8000")
+    try:
+        headers = {"X-Vitrine-Request": "1", **origin_headers}
+        assert client.post("/api/auth/setup", json=payload, headers=headers).status_code == 403
+        assert not auth.configured()
+        # Abgewiesene Browseranfragen verbrauchen auch den richtigen Code nicht.
+        headers["Origin"] = "http://vitrine.local:8000"
+        headers.pop("Sec-Fetch-Site", None)
+        assert client.post("/api/auth/setup", json=payload, headers=headers).status_code == 204
+    finally:
+        client.close()
+
+
+def test_http_setup_and_login_with_explicit_http_cookie_mode(environment, caplog, monkeypatch):
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    code = bootstrap_code(caplog)
+    client = TestClient(main.app, base_url="http://vitrine.local:8000")
+    headers = {"X-Vitrine-Request": "1", "Origin": "http://vitrine.local:8000"}
+    try:
+        payload = {"einrichtungscode": code, "benutzer": "admin", "passwort": "A!abcdef"}
+        assert client.post("/api/auth/setup", json=payload, headers=headers).status_code == 204
+        login = client.post("/api/auth/login", json={"benutzer": "admin", "passwort": "A!abcdef"}, headers=headers)
+        assert login.status_code == 200
+        assert "Secure" not in login.headers["set-cookie"]
+        assert "HttpOnly" in login.headers["set-cookie"] and "SameSite=strict" in login.headers["set-cookie"]
+        assert client.get("/api/channels").status_code == 200
+        assert client.post("/api/auth/logout", headers=headers).status_code == 403
+        assert client.post("/api/auth/logout", headers={**headers, "X-CSRF-Token": login.json()["csrf_token"]}).status_code == 204
+        assert client.get("/api/channels").status_code == 401
+    finally:
+        client.close()
+
+
 def test_wrong_setup_code_is_cheap_and_cannot_lock_owner_out(environment, caplog, monkeypatch):
     client, factory, _ = environment
     code = bootstrap_code(caplog)
