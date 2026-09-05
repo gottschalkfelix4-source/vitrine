@@ -94,3 +94,33 @@ Momentaufnahme und keine Pruefung aller Betriebssystempakete des Containers.
 Die Pruefung ist eine begrenzte Quellcode- und Funktionspruefung. Die konkrete
 oeffentliche Domain, TLS-Konfiguration und laufende Unraid-Installation wurden
 nicht eingerichtet oder aus dem Internet getestet.
+
+## Ergaenzung: Ersteinrichtung im Browser
+
+Die erste Admin-Einrichtung ist inzwischen auch ueber einen automatisch
+geoeffneten Dialog moeglich. Dafuer erzeugt die Anwendung beim Start ohne Konto
+einen zufaelligen Code mit 256 Bit Entropie und zeigt ihn ausschliesslich im
+privaten Container-Protokoll. In der Datenbank liegt nur dessen SHA-256-Hash.
+Ein weiterer Start ohne Konto ersetzt den Code. Eine bestehende Einrichtung
+wird durch einen Neustart oder diesen Dialog niemals zurueckgesetzt.
+
+Der Einrichtungsaufruf verlangt den Code, JSON und einen eigenen Request-Header,
+prueft die Browser-Herkunft und begrenzt den Anfragekoerper auf 16 KiB. Falsche
+Codes werden vor dem aufwendigen Passwort-Hashen abgewiesen. Das Konto wird
+atomar nur angelegt, wenn es weiterhin fehlt und der Code weiterhin gilt;
+gleichzeitige Versuche, Codewechsel oder eine Einrichtung per Konsole koennen
+keine vorhandenen Zugangsdaten ueberschreiben. Erfolg verbraucht den Code und
+oeffnet die normale Anmeldung, ohne bereits eine Sitzung auszustellen.
+
+Der Code wird nicht ueber die API ausgegeben und nicht im Browser gespeichert.
+Container-Protokolle muessen bis zum Abschluss der Einrichtung privat bleiben.
+Der lokale Konsolenbefehl bleibt der Wiederherstellungsweg fuer vergessene
+Passwoerter. Die oben beschriebene HTTPS-Voraussetzung gilt weiterhin.
+
+Nach dieser Ergaenzung bestanden lokal 686 Backendtests (ein bekannter
+Windows-Dateisymlink-Test uebersprungen), 85 Frontendtests, Ruff und der
+Produktionsbuild. Der isolierte Browsertest pruefte automatische Anzeige,
+Fokuswechsel beim Codekopieren, Tastaturbedienung, falschen Code, Passwort-
+Wiederholung, Herkunfts- und Netzwerkfehler, die Einrichtung bis zur ersten
+Anmeldung sowie den erneuten Aufruf bei vorhandenem Konto. Desktop und
+Mobilansichten bis 320 Pixel Breite wurden visuell kontrolliert.

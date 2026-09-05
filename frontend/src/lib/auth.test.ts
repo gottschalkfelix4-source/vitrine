@@ -191,3 +191,87 @@ describe("Sitzungsende und überholte Antworten", () => {
     entfernen();
   });
 });
+
+describe("Einmalige Administratoreinrichtung", () => {
+  const leer = { eingerichtet: false, angemeldet: false, benutzer: null, csrf_token: null };
+  const bereit = { ...leer, eingerichtet: true };
+  async function unkonfiguriert() {
+    netz.mockResolvedValueOnce(Response.json(leer));
+    await auth.pruefen();
+    netz.mockClear();
+  }
+
+  it("sendet den Code als geschützten JSON-Aufruf und fordert danach einen normalen Login", async () => {
+    await unkonfiguriert();
+    netz.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    netz.mockResolvedValueOnce(Response.json(bereit));
+    await auth.einrichten("einmaliger-test-code", "test-admin", "langes-test-passwort");
+    const [pfad, init] = netz.mock.calls[0];
+    expect(pfad).toBe("/api/auth/setup");
+    expect(init).toMatchObject({ method: "POST", credentials: "same-origin", cache: "no-store" });
+    expect(new Headers(init?.headers).get("X-Vitrine-Request")).toBe("1");
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+    expect(new Headers(init?.headers).has("X-CSRF-Token")).toBe(false);
+    expect(JSON.parse(init?.body as string)).toEqual({ einrichtungscode: "einmaliger-test-code", benutzer: "test-admin", passwort: "langes-test-passwort" });
+    expect(netz.mock.calls.map((r) => r[0])).toEqual(["/api/auth/setup", "/api/auth/session"]);
+    expect(auth.zustand()).toMatchObject({ benutzerVorschlag: "test-admin", sitzung: bereit });
+    expect(auth.zustand().meldung).toContain("Administrator eingerichtet");
+    expect(speichern).not.toHaveBeenCalled();
+    await expect(api.kanaele()).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("bestätigt weder falsche Codes noch fehlgeschlagene Verbindungen als Einrichtung", async () => {
+    await unkonfiguriert();
+    netz.mockResolvedValueOnce(Response.json({ detail: "Code ungültig" }, { status: 403 }));
+    await expect(auth.einrichten("falsch", "admin", "langes-test-passwort")).rejects.toMatchObject({ status: 403 });
+    expect(auth.zustand().sitzung).toEqual(leer);
+    netz.mockRejectedValueOnce(new TypeError("offline"));
+    await expect(auth.einrichten("code", "admin", "langes-test-passwort")).rejects.toThrow("offline");
+    expect(auth.zustand().sitzung).toEqual(leer);
+    expect(auth.zustand().meldung).toBeNull();
+  });
+
+  it("lädt nach konkurrierender Einrichtung den Status neu, ohne ein Konto zurückzusetzen", async () => {
+    await unkonfiguriert();
+    netz.mockResolvedValueOnce(new Response(null, { status: 409 }));
+    netz.mockResolvedValueOnce(Response.json(bereit));
+    await auth.einrichten("code", "admin", "langes-test-passwort");
+    expect(auth.zustand().sitzung).toEqual(bereit);
+    expect(auth.zustand().meldung).toContain("bereits eingerichtet");
+    expect(netz.mock.calls.map((r) => r[0])).toEqual(["/api/auth/setup", "/api/auth/session"]);
+  });
+
+  it("behält beim Fokuswechsel eine unveränderte Einrichtung und deren Formulardaten", async () => {
+    await unkonfiguriert();
+    const wechsel = auth.zustand().wechsel;
+    netz.mockResolvedValueOnce(Response.json(leer));
+    await auth.pruefen();
+    expect(auth.zustand().wechsel).toBe(wechsel);
+  });
+
+  it("lässt eine vor der Einrichtung gestartete Statusantwort die Einrichtung nicht zurücknehmen", async () => {
+    await unkonfiguriert();
+    let antwort!: (r: Response) => void;
+    netz.mockReturnValueOnce(new Promise((resolve) => { antwort = resolve; }));
+    const alt = auth.pruefen();
+    netz.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    netz.mockResolvedValueOnce(Response.json(bereit));
+    await auth.einrichten("code", "test-admin", "langes-test-passwort");
+    antwort(Response.json(leer));
+    await alt;
+    expect(auth.zustand()).toMatchObject({ benutzerVorschlag: "test-admin", sitzung: bereit });
+  });
+
+  it("startet während einer laufenden Einrichtung keine konkurrierende Fokusprüfung", async () => {
+    await unkonfiguriert();
+    let antwort!: (r: Response) => void;
+    netz.mockReturnValueOnce(new Promise((resolve) => { antwort = resolve; }));
+    const setup = auth.einrichten("code", "test-admin", "langes-test-passwort");
+    await auth.pruefen();
+    expect(netz).toHaveBeenCalledTimes(1);
+    netz.mockResolvedValueOnce(Response.json(bereit));
+    antwort(new Response(null, { status: 204 }));
+    await setup;
+    expect(auth.zustand().sitzung).toEqual(bereit);
+  });
+});

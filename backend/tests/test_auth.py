@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
@@ -18,12 +20,13 @@ from sqlalchemy.orm import sessionmaker
 from app import admin, main
 from app import db as database
 from app.config import settings
-from app.models import AdminAccount, AdminLoginLimit, AdminSession, Base
+from app.models import AdminAccount, AdminBootstrap, AdminLoginLimit, AdminSession, Base
 from app.security import BODY_LIMIT, LOGIN_BODY_LIMIT, SecurityMiddleware, same_origin
 from app.services import auth
 
 PASSWORD = "Ein sehr gutes Passwort 2026!"
 NEW_PASSWORD = "Ein anderes gutes Passwort 2026!"
+SETUP_HEADERS = {"X-Vitrine-Request": "1", "Origin": "https://testserver"}
 
 
 @pytest.fixture
@@ -403,3 +406,281 @@ def test_documented_cli_module_persists_and_resets_account(tmp_path):
                     db.commit()
         finally:
             engine.dispose()
+
+
+def bootstrap_code(caplog):
+    caplog.set_level(logging.WARNING, logger="app.services.auth")
+    start = len(caplog.records)
+    auth.prepare_bootstrap()
+    messages = [record.getMessage() for record in caplog.records[start:]
+                if record.name == "app.services.auth"]
+    assert len(messages) == 1
+    prefix = "Vitrine-Einrichtungscode: "
+    assert messages[0].startswith(prefix)
+    code = messages[0][len(prefix):]
+    assert auth._TOKEN.fullmatch(code)
+    return code
+
+
+def submit_setup(client, code, password=PASSWORD, username="admin", path="/api/auth/setup"):
+    return client.post(path, json={"einrichtungscode": code, "benutzer": username, "passwort": password},
+                       headers=SETUP_HEADERS)
+
+
+def test_setup_consumes_local_code_without_disclosure_or_autologin(environment, caplog):
+    client, factory, _ = environment
+    code = bootstrap_code(caplog)
+    with factory() as db:
+        record = db.get(AdminBootstrap, 1)
+        assert record.code_hash == hashlib.sha256(code.encode()).hexdigest()
+        assert record.code_hash != code
+    for path in ["/api/auth/session", "/api/health", "/api/auth/setup", "/api/auth/setup/code"]:
+        response = client.get(path)
+        assert code not in response.text
+    response = submit_setup(client, code)
+    assert response.status_code == 204 and response.content == b""
+    assert "set-cookie" not in response.headers
+    assert response.headers["cache-control"] == "no-store"
+    assert client.get("/api/auth/session").json() == {
+        "eingerichtet": True, "angemeldet": False, "benutzer": None, "csrf_token": None,
+    }
+    with factory() as db:
+        assert db.get(AdminBootstrap, 1) is None
+        assert db.scalar(select(AdminSession)) is None
+    assert submit_setup(client, code, NEW_PASSWORD).status_code == 409
+    assert submit_setup(client, "wrong", NEW_PASSWORD).status_code == 409
+    assert sign_in(client).status_code == 200
+
+
+def test_wrong_setup_code_is_cheap_and_cannot_lock_owner_out(environment, caplog, monkeypatch):
+    client, factory, _ = environment
+    code = bootstrap_code(caplog)
+    original = auth.hash_password
+
+    def no_hash(_password):
+        raise AssertionError("Falscher Einrichtungscode darf kein Passwort-Hashen ausloesen")
+
+    monkeypatch.setattr(auth, "hash_password", no_hash)
+    auth._HASH_SLOTS.acquire()
+    auth._HASH_SLOTS.acquire()
+    try:
+        for wrong in ["wrong", "x" * 43, code[:-1], "\u00fc" * 43] * 4:
+            assert submit_setup(client, wrong).status_code == 403
+    finally:
+        auth._HASH_SLOTS.release()
+        auth._HASH_SLOTS.release()
+    with factory() as db:
+        assert db.get(AdminLoginLimit, 1) is None
+        assert db.get(AdminAccount, 1) is None
+    monkeypatch.setattr(auth, "hash_password", original)
+    assert submit_setup(client, code).status_code == 204
+
+
+def test_missing_code_and_setup_validation_never_reflect_secrets(environment, caplog):
+    client, _, _ = environment
+    code = bootstrap_code(caplog)
+    for payload in [
+        {"benutzer": "admin", "passwort": PASSWORD},
+        {"einrichtungscode": code, "benutzer": "admin", "passwort": "private-short"},
+        {"einrichtungscode": code * 7, "benutzer": "admin", "passwort": PASSWORD},
+    ]:
+        response = client.post("/api/auth/setup", json=payload, headers=SETUP_HEADERS)
+        assert response.status_code == 422
+        assert code not in response.text and PASSWORD not in response.text
+        assert "private-short" not in response.text and '"input"' not in response.text
+
+
+@pytest.mark.parametrize("headers", [
+    {}, {"X-Vitrine-Request": "1", "Origin": "https://evil.test"},
+    {"X-Vitrine-Request": "1", "Origin": "null"},
+    {"X-Vitrine-Request": "1", "Sec-Fetch-Site": "cross-site"},
+])
+def test_setup_requires_same_origin_and_custom_header(environment, caplog, headers):
+    client, _, _ = environment
+    code = bootstrap_code(caplog)
+    result = client.post("/api/auth/setup", json={"einrichtungscode": code, "benutzer": "admin", "passwort": PASSWORD},
+                         headers=headers)
+    assert result.status_code == 403
+    result = client.post("/api/auth/setup", content=b"not JSON", headers={"X-Vitrine-Request": "1"})
+    assert result.status_code == 403
+    assert not auth.configured()
+
+
+def test_setup_limit_and_root_path(environment, caplog):
+    code = bootstrap_code(caplog)
+    client = TestClient(main.app, base_url="https://testserver", root_path="/vitrine")
+    try:
+        response = client.post("/vitrine/api/auth/setup", content=b"x" * (LOGIN_BODY_LIMIT + 1),
+                               headers={**SETUP_HEADERS, "Content-Type": "application/json"})
+        assert response.status_code == 413
+        assert client.get("/vitrine/api/channels").status_code == 401
+        invalid = submit_setup(client, code, "short", path="/vitrine/api/auth/setup")
+        assert invalid.status_code == 422 and code not in invalid.text
+        assert submit_setup(client, code, path="/vitrine/api/auth/setup").status_code == 204
+    finally:
+        client.close()
+    status, calls = raw_request([(b"content-type", b"application/json"), (b"x-vitrine-request", b"1")],
+                               [{"type": "http.request", "body": b"x" * (LOGIN_BODY_LIMIT + 1), "more_body": True}],
+                               path="/api/auth/setup")
+    assert status == 413 and calls["downstream"] == 0
+
+
+def test_restart_rotates_code_and_cli_setup_invalidates_it(environment, caplog):
+    client, factory, _ = environment
+    first = bootstrap_code(caplog)
+    second = bootstrap_code(caplog)
+    assert first != second
+    assert submit_setup(client, first).status_code == 403
+    auth.set_account("admin", PASSWORD)
+    with factory() as db:
+        assert db.get(AdminBootstrap, 1) is None
+    assert submit_setup(client, second, NEW_PASSWORD).status_code == 409
+    assert sign_in(client).status_code == 200
+
+
+def test_parallel_setup_creates_exactly_one_account(environment, caplog, monkeypatch):
+    _, factory, _ = environment
+    code = bootstrap_code(caplog)
+    original_hash = auth.hash_password
+    rendezvous = threading.Barrier(2)
+
+    def simultaneous_hash(password):
+        result = original_hash(password)
+        rendezvous.wait(timeout=15)
+        return result
+
+    monkeypatch.setattr(auth, "hash_password", simultaneous_hash)
+
+    def attempt(number):
+        client = TestClient(main.app, base_url="https://testserver")
+        try:
+            return submit_setup(client, code, username=f"admin{number}").status_code
+        finally:
+            client.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, range(2)))
+    assert sorted(results) == [204, 409]
+    with factory() as db:
+        assert len(list(db.scalars(select(AdminAccount)))) == 1
+        assert db.get(AdminBootstrap, 1) is None
+
+
+@pytest.mark.parametrize("interference", ["cli", "restart"])
+def test_setup_rechecks_state_after_hashing(environment, caplog, monkeypatch, interference):
+    client, _, _ = environment
+    code = bootstrap_code(caplog)
+    original_hash = auth.hash_password
+
+    def interfere(password):
+        result = original_hash(password)
+        if interference == "cli":
+            # Nur den Test-Hook fuer den echten lokalen Reset aussetzen.
+            monkeypatch.setattr(auth, "hash_password", original_hash)
+            auth.set_account("owner", NEW_PASSWORD)
+        else:
+            auth.prepare_bootstrap()
+        return result
+
+    monkeypatch.setattr(auth, "hash_password", interfere)
+    response = submit_setup(client, code)
+    assert response.status_code == (409 if interference == "cli" else 403)
+    if interference == "cli":
+        with environment[1]() as db:
+            account = db.get(AdminAccount, 1)
+            assert account.username == "owner" and auth._verify(NEW_PASSWORD, account.password_hash)
+    else:
+        assert not auth.configured()
+
+
+def test_configured_startup_deletes_bootstrap_without_generating_or_logging_code(environment, caplog, monkeypatch):
+    _, factory, _ = environment
+    auth.set_account("admin", PASSWORD)
+    with factory() as db:
+        db.add(AdminBootstrap(id=1, code_hash="a" * 64))
+        db.commit()
+    caplog.clear()
+
+    def forbidden_generation(_size):
+        raise AssertionError("Ein eingerichtetes Konto bekommt keinen Einrichtungscode")
+
+    monkeypatch.setattr(auth.secrets, "token_urlsafe", forbidden_generation)
+    auth.prepare_bootstrap()
+    assert "Vitrine-Einrichtungscode:" not in caplog.text
+    with factory() as db:
+        assert db.get(AdminBootstrap, 1) is None
+
+
+def test_real_app_startup_calls_bootstrap_once_without_starting_test_workers(environment, caplog, monkeypatch):
+    monkeypatch.setattr(main, "init_db", lambda: None)
+    monkeypatch.setattr(main, "_werkzeuge_pruefen", lambda: None)
+    monkeypatch.setattr(main, "_reaper_loop", lambda: None)
+    monkeypatch.setattr(main, "_scheduler_loop", lambda: None)
+    monkeypatch.setattr(main, "_vpn_wache_loop", lambda: None)
+    monkeypatch.setattr(main, "_stop", threading.Event())
+    monkeypatch.setattr(main.werk, "start", lambda: None)
+    monkeypatch.setattr(main.werk, "stop", lambda: None)
+    monkeypatch.setattr(main.vpn_dienst, "laden", lambda _db: None)
+    monkeypatch.setattr(main.vpn_dienst, "alles_beenden", lambda: None)
+    caplog.clear()
+    with TestClient(main.app, base_url="https://testserver") as client:
+        messages = [r.getMessage() for r in caplog.records if "Vitrine-Einrichtungscode:" in r.getMessage()]
+        assert len(messages) == 1
+        code = messages[0].split(": ", 1)[1]
+        assert submit_setup(client, code).status_code == 204
+    caplog.clear()
+    with TestClient(main.app, base_url="https://testserver") as client:
+        assert client.get("/api/auth/session").json()["eingerichtet"] is True
+        assert "Vitrine-Einrichtungscode:" not in caplog.text
+
+
+@pytest.mark.parametrize("level", [logging.ERROR, logging.CRITICAL])
+def test_bootstrap_code_remains_local_and_visible_with_high_log_level(environment, caplog, capsys, level):
+    client, factory, _ = environment
+    caplog.set_level(level, logger="app.services.auth")
+    caplog.clear()
+    auth.prepare_bootstrap()
+    output = capsys.readouterr()
+    assert output.out == ""
+    lines = output.err.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("Vitrine-Einrichtungscode: ")
+    code = lines[0].split(": ", 1)[1]
+    assert auth._TOKEN.fullmatch(code)
+    assert "Vitrine-Einrichtungscode:" not in caplog.text
+    with factory() as db:
+        assert db.get(AdminBootstrap, 1).code_hash == hashlib.sha256(code.encode()).hexdigest()
+    assert submit_setup(client, code).status_code == 204
+    auth.prepare_bootstrap()
+    assert capsys.readouterr().err == ""
+
+
+def test_concurrent_startups_publish_codes_in_database_order(environment, caplog, monkeypatch):
+    client, factory, _ = environment
+    logged = []
+    first_logged = threading.Event()
+    second_started = threading.Event()
+
+    def record_warning(_message, code):
+        if not logged:
+            first_logged.set()
+            assert second_started.wait(timeout=10)
+        logged.append(code)
+
+    monkeypatch.setattr(auth.log, "warning", record_warning)
+    caplog.set_level(logging.WARNING, logger="app.services.auth")
+
+    def second_start():
+        assert first_logged.wait(timeout=10)
+        second_started.set()
+        auth.prepare_bootstrap()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(auth.prepare_bootstrap)
+        second = pool.submit(second_start)
+        first.result(timeout=15)
+        second.result(timeout=15)
+    assert len(logged) == 2 and logged[0] != logged[1]
+    with factory() as db:
+        assert db.get(AdminBootstrap, 1).code_hash == hashlib.sha256(logged[-1].encode()).hexdigest()
+    assert submit_setup(client, logged[0]).status_code == 403
+    assert submit_setup(client, logged[1]).status_code == 204

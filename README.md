@@ -12,8 +12,9 @@ Elasticsearch.
 ## Was es kann
 
 - **Admin-Login** fuer das gesamte Archiv, einschliesslich API, Videos,
-  Untertiteln und Vorschaubildern. Zugangsdaten werden direkt am Server
-  eingerichtet; es gibt kein Standardpasswort und keine oeffentliche Registrierung.
+  Untertiteln und Vorschaubildern. Die erste Einrichtung erscheint als Dialog
+  im Browser, abgesichert mit einem einmaligen Code aus dem Container-Protokoll.
+  Es gibt kein Standardpasswort und keine oeffentliche Registrierung.
 - **Ganze Kanaele** aufnehmen - Videos, Shorts, Livestreams und die vom Kanal
   angelegten Playlists, in der Gliederung des Kanals. Ein Video, das in drei
   Playlists steht, liegt trotzdem genau einmal auf der Platte.
@@ -54,13 +55,15 @@ Elasticsearch.
 docker compose up -d --build
 ```
 
-Die Daten liegen unter `./data`. Zuerst den Administrator einrichten:
+Die Daten liegen unter `./data`. Beim ersten Oeffnen der HTTPS-Adresse erscheint
+der Dialog **Administrator einrichten**. Den Einrichtungscode aus dem
+Container-Protokoll kopieren und im Dialog Benutzername und Passwort festlegen:
 
 ```bash
-docker compose exec --user archiv vitrine python -m app.admin
+docker compose logs vitrine
 ```
 
-Danach ueber die HTTPS-Adresse des Reverse Proxys anmelden. Fuer einen
+Danach mit dem selbst gewaehlten Passwort anmelden. Fuer einen
 ausdruecklich lokalen HTTP-Test kann `AUTH_COOKIE_SECURE=false` in der
 Compose-`.env` gesetzt werden; den Container danach neu erstellen. Dann ist
 `http://localhost:8000` nutzbar. Vor oeffentlicher Freigabe wieder `true`
@@ -103,7 +106,28 @@ Auch nach einem Update eines bestehenden Archivs bleibt der Zugriff zunaechst
 gesperrt, bis der Administrator eingerichtet ist. Videos, Einstellungen und
 Warteschlange bleiben erhalten; Hintergrundauftraege laufen weiter.
 
-In Unraid die Konsole des Vitrine-Containers oeffnen und eingeben:
+Nach dem Update die Seite oeffnen: Solange noch kein Administrator existiert,
+erscheint automatisch der Dialog **Administrator einrichten**. Dort den
+Einrichtungscode, Benutzername (Vorschlag `admin`) und das neue Passwort mit
+Wiederholung eingeben. Mindestens 14 Zeichen verwenden. Nach dem Speichern
+erscheint die normale Anmeldung. Ein geschlossenes Einrichtungsfenster laesst
+sich ueber **Administrator einrichten** erneut oeffnen.
+
+In Unraid findest du den Code im Docker-Tab beim Vitrine-Container unter
+**Protokoll / Logs**. Die Zeile beginnt mit `Vitrine-Einrichtungscode:`.
+Nur den Code dahinter kopieren. Er wird bei jedem Containerstart ohne
+eingerichteten Administrator neu erzeugt; nach einem Neustart gilt deshalb
+nur die neueste Codezeile. Der Code steht absichtlich nicht in der Webseite
+oder einer API, damit ein fremder Besucher den Zugang nicht vor dir anlegen
+kann. Das Container-Protokoll bis zur Einrichtung privat halten.
+
+Die Einrichtung verbraucht den Code. Bei einem vorhandenen Administrator
+bleibt dessen Passwort erhalten; weder Update noch Einrichtungsdialog setzen
+es zurueck. Die Datenbank speichert nur den Hash des Einrichtungscodes und
+einen gesalzenen Passwort-Hash. Ein Neustart loescht den fertigen Zugang nicht.
+
+**Vergessenes Passwort wiederherstellen:** In Unraid die Konsole des
+Vitrine-Containers oeffnen und eingeben:
 
 ```sh
 gosu archiv python -m app.admin
@@ -115,12 +139,10 @@ Alternativ vom Server-Terminal:
 docker exec -it vitrine gosu archiv python -m app.admin
 ```
 
-Der Dialog fragt nach Benutzername (Vorschlag `admin`) und zweimal nach dem
-Passwort. Mindestens 14 Zeichen verwenden. Das Passwort wird verdeckt
-eingegeben und nur als gesalzener Passwort-Hash gespeichert. Derselbe Befehl
-setzt einen vergessenen Zugang zurueck und meldet alle bestehenden Sitzungen
-ab. Zugangsdaten gehoeren weder ins Repository noch in einen Chat oder in
-Startargumente. Ein Neustart loescht den Zugang nicht.
+Dieser Konsolenbefehl bleibt auch als Alternative fuer die erste Einrichtung
+verfuegbar. Er fragt das Passwort verdeckt ab und meldet bei einem Reset alle
+bestehenden Sitzungen ab. Zugangsdaten gehoeren weder ins Repository noch in
+einen Chat oder in Startargumente.
 
 Fuer den Internetzugriff eine eigene **HTTPS-Adresse** am Reverse Proxy
 einrichten. Die Anmeldung erwartet standardmaessig ein sicheres Cookie
@@ -155,6 +177,8 @@ bereits am Proxy zu begrenzen.
 
 Ohne Anmeldung sind nur die Login-Oberflaeche, ihre statischen Dateien,
 der Sitzungsstatus und der knappe Zustandscheck `/api/health` erreichbar.
+Der Einrichtungsaufruf ist ausschliesslich mit dem einmaligen Code und ohne
+bereits eingerichteten Administrator nutzbar.
 Es gibt einen Administrator und keine oeffentlichen Zuschauer-Konten.
 
 Die [Sicherheitspruefung vom 5. September 2026](docs/security-review-2026-09-05.md)

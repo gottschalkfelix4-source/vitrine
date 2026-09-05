@@ -134,7 +134,8 @@ jobs:
 
       - name: Container startet und antwortet
         run: |
-          docker run -d --name pruefling -p 8000:8000 vitrine:ci
+          docker run -d --name pruefling -p 127.0.0.1:8000:8000 vitrine:ci
+          trap 'docker rm -f pruefling >/dev/null 2>&1 || true' EXIT
           for i in $(seq 1 40); do
             curl -sf http://127.0.0.1:8000/api/health >/dev/null && break
             sleep 2
@@ -153,8 +154,8 @@ jobs:
             test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000/api/$path")" = "401"
           done
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/api/jobs/resume)" = "401"
-          docker logs pruefling
-          docker rm -f pruefling
+          python .github/scripts/check_container_setup.py
+          docker logs pruefling 2>&1 | sed -E 's/(Vitrine-Einrichtungscode: )[A-Za-z0-9_-]+/\1[ausgeblendet]/g'
 
       # Veroeffentlichen nur nach einem Push auf main, nie fuer Pull Requests.
       # Das Image landet auf GitHub Container Registry - von dort zieht es das

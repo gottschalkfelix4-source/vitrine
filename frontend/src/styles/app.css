@@ -9,6 +9,8 @@
 .zugang-formular .feld input:focus { outline: 2px solid var(--text-schwach); outline-offset: 2px; }
 .zugang-formular p { color: var(--text-gedaempft); margin: 8px 0 16px; }
 .zugang-formular .knopf { margin-top: 8px; }
+.einrichtung-dialog.zugang-formular { max-width: none; }
+.einrichtung-dialog .dialog-fuss { flex-wrap: wrap; }
 .auth-fehler, .zugang-formular .auth-fehler { color: var(--zu-fehler); }
 .abmelden-aktion { position: relative; }
 .abmelden-fehler { position: absolute; right: 0; top: 44px; width: min(320px, calc(100vw - 32px)); padding: 12px; margin: 0; background: var(--flaeche); border: 1px solid var(--rand); border-radius: 8px; }

@@ -10,6 +10,7 @@ export interface Anmeldezustand {
   sitzung: Sitzung | null;
   meldung: string | null;
   wechsel: number;
+  benutzerVorschlag?: string;
 }
 
 export class ApiFehler extends Error {
@@ -18,6 +19,7 @@ export class ApiFehler extends Error {
 
 let zustand: Anmeldezustand = { art: "pruefen", sitzung: null, meldung: null, wechsel: 0 };
 let generation = 0;
+let einrichtungLaeuft = false;
 const horcher = new Set<() => void>();
 const ABMELDE_EREIGNIS = "vitrine-abmeldung";
 
@@ -77,10 +79,12 @@ export async function auswerten<T>(antwort: Response): Promise<T> {
 function uebernehmen(sitzung: Sitzung) {
   if (sitzung.angemeldet && !sitzung.csrf_token) throw new Error("Die Anmeldung konnte nicht bestätigt werden.");
   if (!sitzung.angemeldet) {
-    generation++;
+    const wechsel = zustand.sitzung === null || zustand.sitzung.angemeldet
+      || zustand.sitzung.eingerichtet !== sitzung.eingerichtet;
+    if (wechsel) generation++;
     setzen({ art: "bereit", sitzung: { ...sitzung, benutzer: null, csrf_token: null },
       meldung: zustand.sitzung?.angemeldet ? "Deine Sitzung ist abgelaufen. Bitte melde dich erneut an." : zustand.meldung,
-      wechsel: zustand.wechsel + 1 });
+      wechsel: zustand.wechsel + (wechsel ? 1 : 0), benutzerVorschlag: zustand.benutzerVorschlag });
   } else {
     setzen({ art: "bereit", sitzung, meldung: null, wechsel: zustand.wechsel });
   }
@@ -88,6 +92,9 @@ function uebernehmen(sitzung: Sitzung) {
 
 let pruefung: { generation: number; versprechen: Promise<void> } | null = null;
 async function pruefen(): Promise<void> {
+  // Beim Kopieren des Codes aus dem Containerprotokoll kommt der Fokus
+  // zurück. Eine parallele Prüfung darf die Einrichtung nicht überholen.
+  if (einrichtungLaeuft) return;
   if (pruefung?.generation === generation) return pruefung.versprechen;
   const lauf = generation;
   const versprechen = (async () => {
@@ -126,6 +133,33 @@ export const auth = {
       generation++;
       uebernehmen(sitzung);
     }
+  },
+  async einrichten(einrichtungscode: string, benutzer: string, passwort: string) {
+    if (einrichtungLaeuft) throw new ApiFehler(429, "Die Einrichtung läuft bereits. Bitte warte kurz.");
+    const lauf = ++generation;
+    einrichtungLaeuft = true;
+    try {
+      await auswerten<void>(await authFetch("/api/auth/setup", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Vitrine-Request": "1" },
+        body: JSON.stringify({ einrichtungscode, benutzer, passwort }),
+      }, true));
+      if (lauf !== generation) return;
+      generation++;
+      setzen({ art: "bereit", sitzung: { eingerichtet: true, angemeldet: false, benutzer: null, csrf_token: null },
+        meldung: "Administrator eingerichtet. Bitte melde dich mit deinen Zugangsdaten an.",
+        benutzerVorschlag: benutzer, wechsel: zustand.wechsel + 1 });
+    } catch (e) {
+      if (e instanceof ApiFehler && e.status === 409 && lauf === generation) {
+        generation++;
+        setzen({ ...zustand, meldung: "Der Administrator wurde bereits eingerichtet. Bitte melde dich an." });
+      } else {
+        throw e;
+      }
+    } finally {
+      einrichtungLaeuft = false;
+      if (zustand.art === "pruefen") void pruefen();
+    }
+    await pruefen();
   },
   async abmelden() {
     await auswerten<void>(await authFetch("/api/auth/logout", { method: "POST" }));

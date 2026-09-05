@@ -62,6 +62,14 @@ class AdminLoginLimit(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class AdminBootstrap(Base):
+    """Nur der Hash des lokalen Einmalcodes, niemals der Einrichtungscode."""
+
+    __tablename__ = "admin_bootstrap"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code_hash: Mapped[str] = mapped_column(String(64))
+
+
 # --------------------------------------------------------------------- Enums
 
 

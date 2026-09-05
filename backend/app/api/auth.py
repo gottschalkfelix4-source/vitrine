@@ -1,4 +1,4 @@
-"""Anmeldung fuer das ausschliesslich lokal eingerichtete Administratorkonto."""
+"""Administratoranmeldung und Ersteinrichtung mit lokalem Eigentumsnachweis."""
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +19,13 @@ class PasswordChange(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     aktuelles_passwort: str = Field(min_length=1, max_length=auth.MAX_PASSWORD)
     neues_passwort: str = Field(min_length=auth.MIN_PASSWORD, max_length=auth.MAX_PASSWORD)
+
+
+class Setup(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    einrichtungscode: str = Field(min_length=1, max_length=256)
+    benutzer: str = Field(min_length=1, max_length=64)
+    passwort: str = Field(min_length=auth.MIN_PASSWORD, max_length=auth.MAX_PASSWORD)
 
 
 def clear_cookie(response: Response) -> None:
@@ -50,6 +57,14 @@ def login(daten: Login, response: Response) -> dict[str, object]:
         httponly=True, samesite="strict",
     )
     return auth.status(identity)
+
+
+@router.post("/setup", status_code=204)
+def setup(daten: Setup) -> None:
+    try:
+        auth.complete_setup(daten.einrichtungscode, daten.benutzer, daten.passwort)
+    except auth.AuthError as error:
+        raise HTTPException(error.status, str(error)) from error
 
 
 @router.post("/logout", status_code=204)

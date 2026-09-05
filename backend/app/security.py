@@ -19,7 +19,9 @@ from app.services import auth
 BODY_LIMIT = 2 * 1024 * 1024
 LOGIN_BODY_LIMIT = 16 * 1024
 _SAFE = {"GET", "HEAD", "OPTIONS"}
-_PUBLIC = {("GET", "/api/health"), ("GET", "/api/auth/session"), ("POST", "/api/auth/login")}
+_PUBLIC = {("GET", "/api/health"), ("GET", "/api/auth/session"),
+           ("POST", "/api/auth/login"), ("POST", "/api/auth/setup")}
+_CREDENTIAL_PATHS = {"/api/auth/login", "/api/auth/setup"}
 _CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
@@ -84,11 +86,11 @@ class SecurityMiddleware:
 
         headers = Headers(scope=scope)
         if api:
-            login = (method, path) == ("POST", "/api/auth/login")
+            credential_request = method == "POST" and path in _CREDENTIAL_PATHS
             if method not in _SAFE and not same_origin(headers):
                 await reject(403, "Anfragen von einer fremden Herkunft sind nicht erlaubt.")
                 return
-            if login and (headers.get("x-vitrine-request") != "1"
+            if credential_request and (headers.get("x-vitrine-request") != "1"
                           or headers.get("content-type", "").split(";", 1)[0].strip().lower()
                           != "application/json"):
                 await reject(403, "Die Anmeldung muss aus der Anwendung erfolgen.")
@@ -106,7 +108,7 @@ class SecurityMiddleware:
                         await reject(403, "Die Sicherheitskennung fehlt oder ist ungueltig.")
                         return
 
-        limit = LOGIN_BODY_LIMIT if path == "/api/auth/login" else BODY_LIMIT
+        limit = LOGIN_BODY_LIMIT if path in _CREDENTIAL_PATHS else BODY_LIMIT
         length = headers.get("content-length")
         if length is not None:
             try:

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../lib/api";
 import { Icon } from "../components/Icons";
+import { Dialog } from "../components/Dialog";
 
 export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => void }) {
   const navigate = useNavigate();
@@ -12,12 +13,6 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
   const [live, setLive] = useState(false);
   const [laeuft, setLaeuft] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const el = dialog.current;
-    el?.showModal();
-    return () => el?.close();
-  }, []);
 
   async function absenden(e: React.FormEvent) {
     e.preventDefault();
@@ -41,15 +36,7 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
   }
 
   return (
-    <dialog
-      ref={dialog}
-      className="kanal-dialog"
-      aria-labelledby="kanal-dialog-titel"
-      onCancel={(e) => { if (laeuft) e.preventDefault(); else aufSchliessen(); }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !laeuft) aufSchliessen();
-      }}
-    >
+    <Dialog titelId="kanal-dialog-titel" schliessenGesperrt={laeuft} aufSchliessen={aufSchliessen}>
       <form className="dialog" onSubmit={absenden}>
         <div className="dialog-kopf"><h2 id="kanal-dialog-titel">Kanal aufnehmen</h2>
           <button type="button" className="symbol-knopf" aria-label="Dialog schließen" disabled={laeuft} onClick={aufSchliessen}><Icon name="close" /></button>
@@ -68,7 +55,7 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="@handle, youtube.com/@handle oder UC…"
-            autoFocus
+            data-dialog-fokus
           />
         </div>
 
@@ -114,6 +101,6 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
           </button>
         </div>
       </form>
-    </dialog>
+    </Dialog>
   );
 }

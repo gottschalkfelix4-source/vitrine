@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import re
 import secrets
+import sys
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select, text
+from sqlalchemy.orm import Session
 
 from app import db as database
 from app.config import settings
-from app.models import AdminAccount, AdminLoginLimit, AdminSession
+from app.models import AdminAccount, AdminBootstrap, AdminLoginLimit, AdminSession
 
 COOKIE_NAME = "vitrine_session"
 MIN_PASSWORD = 14
@@ -25,6 +28,7 @@ _HASH_SLOTS = threading.BoundedSemaphore(2)
 _TOKEN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _USERNAME = re.compile(r"^[A-Za-z0-9_.@-]{1,64}$")
 _SCRYPT_N = 2**15
+log = logging.getLogger(__name__)
 
 
 class AuthError(ValueError):
@@ -95,6 +99,70 @@ def configured() -> bool:
         return db.get(AdminAccount, 1) is not None
 
 
+def prepare_bootstrap() -> None:
+    """Rotiert beim Appstart den nur lokal ausgegebenen Eigentumsnachweis."""
+    with database.SessionLocal() as db:
+        db.execute(text("BEGIN IMMEDIATE"))
+        db.execute(delete(AdminBootstrap))
+        if db.get(AdminAccount, 1) is not None:
+            db.commit()
+            return
+        code = secrets.token_urlsafe(32)
+        db.add(AdminBootstrap(id=1, code_hash=hashlib.sha256(code.encode("ascii")).hexdigest()))
+        db.flush()
+        # Ausgabe noch innerhalb der Schreibtransaktion: Bei gleichzeitigen
+        # Starts gehoert die zuletzt ausgegebene Zeile auch zur letzten Rotation.
+        # Ein anschliessender CLI-Reset macht den Code nur ungueltig, nie umgekehrt.
+        if log.isEnabledFor(logging.WARNING):
+            log.warning("Vitrine-Einrichtungscode: %s", code)
+        else:
+            # Dieser einmalige Eigentumsnachweis muss auch bei LOG_LEVEL=ERROR
+            # im lokalen Container-Log auffindbar bleiben, ohne doppelte Ausgabe.
+            print(f"Vitrine-Einrichtungscode: {code}", file=sys.stderr, flush=True)
+        db.commit()
+
+
+def _check_bootstrap(db: Session, digest: str | None) -> None:
+    if db.get(AdminAccount, 1) is not None:
+        raise AuthError("Der Administrator ist bereits eingerichtet. Bitte anmelden.", 409)
+    bootstrap = db.get(AdminBootstrap, 1)
+    if (digest is None or bootstrap is None
+            or not hmac.compare_digest(bootstrap.code_hash, digest)):
+        raise AuthError("Der Einrichtungscode ist falsch oder abgelaufen. "
+                        "Bitte den aktuellen Code aus dem Container-Log verwenden.", 403)
+
+
+def validate_username(username: str) -> None:
+    if not _USERNAME.fullmatch(username):
+        raise AuthError("Benutzername: 1 bis 64 Zeichen, nur Buchstaben, Zahlen und . _ @ -.", 400)
+
+
+def complete_setup(code: str, username: str, password: str) -> None:
+    digest = hashlib.sha256(code.encode("ascii")).hexdigest() if _TOKEN.fullmatch(code) else None
+    # Falsche Codes werden ohne scrypt und ohne globale, fremd ausloesbare
+    # Einrichtungssperre abgewiesen. Der Code besitzt 256 Bit Zufallsentropie.
+    with database.SessionLocal() as db:
+        _check_bootstrap(db, digest)
+    validate_username(username)
+    validate_password(password)
+    if not _HASH_SLOTS.acquire(blocking=False):
+        raise AuthError("Die Einrichtung ist gerade ausgelastet. Bitte erneut versuchen.", 429)
+    try:
+        encoded = hash_password(password)
+        with database.SessionLocal() as db:
+            db.execute(text("BEGIN IMMEDIATE"))
+            # Nach dem Hashen nochmals pruefen: Ein paralleler Submit, CLI-Reset
+            # oder Appstart darf weder ueberschrieben noch rueckgaengig werden.
+            _check_bootstrap(db, digest)
+            db.add(AdminAccount(id=1, username=username, password_hash=encoded, revision=1))
+            db.execute(delete(AdminBootstrap))
+            db.execute(delete(AdminSession))
+            db.execute(delete(AdminLoginLimit))
+            db.commit()
+    finally:
+        _HASH_SLOTS.release()
+
+
 def session_for(token: str | None) -> SessionIdentity | None:
     if token is None or not _TOKEN.fullmatch(token):
         return None
@@ -124,7 +192,7 @@ def _reserve_attempt() -> tuple[str, str, int]:
         db.execute(text("BEGIN IMMEDIATE"))
         account = db.get(AdminAccount, 1)
         if account is None:
-            raise AuthError("Der Administrator muss zuerst lokal eingerichtet werden.", 503)
+            raise AuthError("Der Administrator muss zuerst eingerichtet werden.", 503)
         clock = now()
         limit = db.get(AdminLoginLimit, 1)
         if limit is None:
@@ -183,8 +251,7 @@ def logout(identity: SessionIdentity) -> None:
 
 
 def set_account(username: str, password: str, *, expected_revision: int | None = None) -> None:
-    if not _USERNAME.fullmatch(username):
-        raise AuthError("Benutzername: 1 bis 64 Zeichen, nur Buchstaben, Zahlen und . _ @ -.", 400)
+    validate_username(username)
     encoded = hash_password(password)
     with database.SessionLocal() as db:
         db.execute(text("BEGIN IMMEDIATE"))
@@ -198,6 +265,7 @@ def set_account(username: str, password: str, *, expected_revision: int | None =
             account.revision += 1
         db.execute(delete(AdminSession))
         db.execute(delete(AdminLoginLimit))
+        db.execute(delete(AdminBootstrap))
         db.commit()
 
 
