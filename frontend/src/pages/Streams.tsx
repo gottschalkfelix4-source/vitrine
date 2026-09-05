@@ -3,7 +3,7 @@ import { Fehler } from "../components/ui";
 import { StreamKarte } from "../components/StreamKarte";
 import { useApi } from "../hooks/useApi";
 import { dauer } from "../lib/format";
-import { standortText, streamsLaden, type StreamStatus, type StreamUebersicht } from "../lib/wiedergabe";
+import { standortText, streamsLaden, type AktiverStream, type StreamStatus, type StreamUebersicht } from "../lib/wiedergabe";
 import "../styles/streams.css";
 
 const statusText: Record<StreamStatus, string> = { playing: "Läuft", paused: "Pausiert", buffering: "Lädt" };
@@ -11,6 +11,19 @@ const statusText: Record<StreamStatus, string> = { playing: "Läuft", paused: "P
 function uhrzeit(zeit: string): string {
   const datum = new Date(zeit);
   return Number.isFinite(datum.getTime()) ? datum.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "–";
+}
+
+function transkodierungText(stream: AktiverStream): string | null {
+  if (stream.mode !== "transcode") return null;
+  const geraet = stream.hardware_accel === "qsv" ? "GPU (Intel Quick Sync)"
+    : stream.hardware_accel === "vaapi" ? "GPU (VA-API)"
+      : stream.hardware_accel === "nvenc" ? "GPU (NVIDIA)"
+        : stream.hardware_accel === "none" ? "CPU" : null;
+  if (!geraet) return null;
+  if (stream.encoder_state === "failed") return `${geraet} · fehlgeschlagen`;
+  if (stream.encoder_state === "ready") return `${geraet} · verwendet`;
+  if (stream.encoder_state === "running" && stream.segments_ready > 0) return `${geraet} · aktiv`;
+  return `${geraet} vorgesehen`;
 }
 
 export function StreamListe({ daten }: { daten: StreamUebersicht }) {
@@ -31,7 +44,9 @@ export function StreamListe({ daten }: { daten: StreamUebersicht }) {
           <td data-label="Standort">{standortText(s.geo)}</td>
           <td data-label="Wiedergabe"><strong>{statusText[s.state] ?? "Verbunden"}</strong><span>Position {dauer(s.position_s)}</span></td>
           <td data-label="Auslieferung"><strong>{s.mode === "transcode" ? "Live-Transkodierung" : "Direktwiedergabe"}</strong>
-            <span>{s.mode === "transcode" ? s.transcoding ? "Abschnitt wird umgewandelt" : `${s.segments_ready} Abschnitte vorbereitet` : "Original aus dem Archiv"}</span></td>
+            <span>{s.quality_label ? `${s.quality_label} · ` : ""}{s.mode === "transcode" ? s.transcoding ? "Abschnitt wird umgewandelt" : `${s.segments_ready} Abschnitte vorbereitet` : "Original aus dem Archiv"}</span>
+            {transkodierungText(s) ? <span>{transkodierungText(s)}</span> : null}
+            {s.mode === "transcode" && s.fallback_reason ? <span>CPU-Fallback: {s.fallback_reason}</span> : null}</td>
           <td data-label="Zeit"><strong>Seit {uhrzeit(s.started_at)}</strong><span>Zuletzt {uhrzeit(s.last_seen_at)}</span></td>
         </tr>)}</tbody>
       </table></div>}

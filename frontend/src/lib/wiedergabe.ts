@@ -74,6 +74,11 @@ export interface AktiverStream {
   last_seen_at: string;
   transcoding: boolean;
   segments_ready: number;
+  quality_label?: string;
+  encoder?: string | null;
+  hardware_accel?: "none" | "qsv" | "vaapi" | "nvenc" | null;
+  fallback_reason?: string | null;
+  encoder_state?: "pending" | "running" | "ready" | "failed" | "direct";
   geo?: StreamStandort;
 }
 

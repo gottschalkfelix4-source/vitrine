@@ -235,8 +235,34 @@ Automatisch waehlt den passenden Auslieferungsweg fuer den Browser; es ist
 keine fortlaufende Anpassung an die Netzwerkgeschwindigkeit. Die Qualitaetswahl
 gilt jeweils fuer den eigenen Player, nicht fuer andere Zuschauer.
 
-Die Live-Umwandlung verwendet den Software-Encoder mit maximal zwei parallelen
-Prozessen und zwei Encoder-Threads je Prozess. Der Abschnittscache ist auf
+Die Live-Umwandlung uebernimmt fuer neue Wiedergaben den **Hardware-Encoder**
+aus den Einstellungen: `qsv` (Intel Quick Sync), `vaapi` (Intel/AMD) oder
+`nvenc` (NVIDIA). Es ist keine zweite GPU-Einrichtung im Player erforderlich.
+`none` verwendet die CPU. Der Live-Stream wird unabhaengig vom Archivcodec
+als H.264 kodiert; Qualitaetsstufen und Bitratengrenzen gelten auch auf der GPU.
+Dekodierung, Skalierung und Tonverarbeitung erfolgen weiterhin auf der CPU.
+Bei VAAPI und QSV unter Linux gilt der konfigurierte Render-Knoten
+`YTA_HWACCEL_DEVICE`. Im Container bleiben die notwendigen Geraetegruppen nach
+dem Wechsel auf den normalen Anwendungsbenutzer erhalten.
+
+Das Stream-Dashboard zeigt die Qualitaet und den geplanten, aktiven oder
+erfolgreich verwendeten Encoder. Scheitert die GPU, wird der Abschnitt einmal
+auf der CPU versucht; die Sitzung bleibt anschliessend auf CPU und das
+Dashboard nennt den Rueckfall. Beide Versuche teilen sich das Zeitlimit von
+45 Sekunden. Neue Wiedergaben verwenden wieder die aktuelle GPU-Einstellung.
+Die Hardware-Pruefung in den Einstellungen testet weiterhin den Archivcodec;
+die Anzeige unter Streams bezieht sich auf den tatsaechlichen Live-Encode.
+
+Intel/AMD brauchen ein durchgereichtes `/dev/dri`. Fuer NVIDIA muss der Host
+das NVIDIA Container Toolkit bereitstellen und die GPU dem Container zuweisen
+(z. B. `--gpus all`). Das Image setzt
+`NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`, damit auch der Video-Encoder
+freigegeben wird. Eine eigene Ueberschreibung muss `video` enthalten.
+Das Image enthaelt die Intel- und Mesa-VAAPI-Treiber
+sowie die Intel-QSV-Laufzeit; die NVIDIA-Treiber kommen vom Host.
+
+Es laufen maximal zwei Live-Encoder parallel, auf der CPU mit zwei
+Encoder-Threads je Prozess. Der Abschnittscache ist auf
 64 MiB Arbeitsspeicher begrenzt; es entsteht keine zweite vollstaendige
 Videodatei. Maximal 64 Player, davon 16 je Verbindungsadresse, koennen offen
 sein. Weitere Anfragen erhalten eine verstaendliche Auslastungsmeldung.
@@ -306,7 +332,7 @@ Oberflaeche. Die wichtigsten Variablen:
 | `YTA_AV1_CRF` | 30 | Qualitaet der Recodierung, siehe Messwerte unten |
 | `YTA_AV1_PRESET` | 6 | Tempo 0-13; fuer grosse Kanaele 8-10 |
 | `YTA_HWACCEL` | none | `qsv`, `nvenc`, `vaapi` - nur mit passender GPU, siehe unten |
-| `YTA_HWACCEL_DEVICE` | /dev/dri/renderD128 | Render-Knoten, nur fuer vaapi |
+| `YTA_HWACCEL_DEVICE` | /dev/dri/renderD128 | Render-Knoten fuer VAAPI und QSV-Live-Transkodierung unter Linux |
 | `YTA_HOT_MAX_BYTES` | 50 GiB | Limit des Heissspeichers (Unraid-Template: 20 GB) |
 | `YTA_HOT_TTL_HOURS` | 24 | Frist einer Heisskopie ab letztem Zugriff |
 | `YTA_HOT_TTL_AFTER_PLAYBACK_MINUTES` | 30 | Kuerzere Frist nach Wiedergabeende |

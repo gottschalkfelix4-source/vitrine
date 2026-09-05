@@ -33,6 +33,50 @@ it("unterscheidet pausierte Direktwiedergabe und aktive Transkodierung ohne Roh-
   expect(html).not.toContain("<script>");
 });
 
+function auslieferung(stream: Partial<AktiverStream>) {
+  return renderToStaticMarkup(<MemoryRouter><StreamListe daten={{ streams: [{ ...verbindung("encoder"), ...stream }],
+    limits: { sessions: 64, transcodes: 2 } }} /></MemoryRouter>);
+}
+
+it.each([
+  ["qsv", "h264_qsv", "GPU (Intel Quick Sync)"],
+  ["vaapi", "h264_vaapi", "GPU (VA-API)"],
+  ["nvenc", "h264_nvenc", "GPU (NVIDIA)"],
+] as const)("benennt erfolgreiche %s-Transkodierung und übernimmt die Qualität des Servers", (hardware_accel, encoder, label) => {
+  const html = auslieferung({ mode: "transcode", hardware_accel, encoder, encoder_state: "running", segments_ready: 1,
+    transcoding: true, quality_label: "480p" });
+  expect(html).toContain(`${label} · aktiv`);
+  expect(html).toContain("480p · Abschnitt wird umgewandelt");
+});
+
+it.each([
+  ["pending", 0, "GPU (Intel Quick Sync) vorgesehen"],
+  ["running", 0, "GPU (Intel Quick Sync) vorgesehen"],
+  ["ready", 1, "GPU (Intel Quick Sync) · verwendet"],
+  ["failed", 0, "GPU (Intel Quick Sync) · fehlgeschlagen"],
+] as const)("behauptet beim Encoderzustand %s keine unbelegte GPU-Nutzung", (encoder_state, segments_ready, text) => {
+  const html = auslieferung({ mode: "transcode", hardware_accel: "qsv", encoder: "h264_qsv", encoder_state, segments_ready });
+  expect(html).toContain(text);
+  expect(html).not.toContain("GPU (Intel Quick Sync) · aktiv");
+});
+
+it("zeigt CPU-Fallback samt unveränderter, als Text behandelter Serverbegründung", () => {
+  const html = auslieferung({ mode: "transcode", hardware_accel: "none", encoder: "libx264", encoder_state: "running",
+    segments_ready: 1, fallback_reason: "GPU nicht verfügbar <Test>" });
+  expect(html).toContain("CPU · aktiv");
+  expect(html).toContain("CPU-Fallback: GPU nicht verfügbar &lt;Test&gt;");
+  expect(html).not.toContain("<Test>");
+});
+
+it("zeigt bei Direktwiedergabe die Serverqualität ohne Encoder oder Fallback", () => {
+  const html = auslieferung({ quality_label: "Original (720p)", encoder: null, hardware_accel: null, encoder_state: "direct",
+    fallback_reason: "Nicht für Direktwiedergabe" });
+  expect(html).toContain("Original (720p) · Original aus dem Archiv");
+  expect(html).not.toContain("CPU");
+  expect(html).not.toContain("GPU");
+  expect(html).not.toContain("Nicht für Direktwiedergabe");
+});
+
 it("gruppiert nahe Verbindungen stabil und trennt sie beim Hineinzoomen", () => {
   const streams = [verbindung("a", ort), verbindung("b", ort), verbindung("c", { ...ort, longitude: 23.4 })];
   expect(standorteGruppieren(streams, 1)).toHaveLength(1);

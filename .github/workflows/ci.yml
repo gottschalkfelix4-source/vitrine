@@ -132,6 +132,9 @@ jobs:
             python -c "import yt_dlp, yt_dlp_ejs; print(\"yt-dlp\", yt_dlp.version.__version__, \"mit EJS-Solver\")"
           '
 
+      - name: GPU-Geraeterechte ohne root-Betrieb
+        run: python .github/scripts/check_gpu_permissions.py
+
       - name: Container startet und antwortet
         run: |
           docker run -d --name pruefling -p 127.0.0.1:8000:8000 vitrine:ci

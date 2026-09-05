@@ -16,8 +16,10 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("liest Standortdaten mit der Streamübersicht ohne externen GeoIP-Aufruf", async () => {
-  const daten = { streams: [{ geo: { status: "located", city: "Berlin", region: "Berlin", country: "Deutschland" } }], geoip: { available: true, database_date: "2026-09-01" } };
+it("liest Standort- und Encoderdaten mit der Streamübersicht ohne Zusatzaufruf", async () => {
+  const daten = { streams: [{ geo: { status: "located", city: "Berlin", region: "Berlin", country: "Deutschland" },
+    quality_label: "480p", encoder: "libx264", hardware_accel: "none", encoder_state: "running", fallback_reason: "GPU nicht verfügbar" }],
+    geoip: { available: true, database_date: "2026-09-01" } };
   netz.mockResolvedValueOnce(Response.json(daten));
   await expect(streamsLaden()).resolves.toEqual(daten);
   expect(netz).toHaveBeenCalledTimes(1);

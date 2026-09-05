@@ -20,8 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from app.config import settings
-from app.services import playback_quality
+from app.config import HardwareAccel, settings
+from app.services import live_encoding, playback_quality
 
 SEGMENT_SECONDS = 6
 MAX_SESSIONS = 64
@@ -32,6 +32,16 @@ MAX_SEGMENT_BYTES = 8 * 1024**2
 MAX_DURATION_SECONDS = 48 * 3600
 IDLE_SECONDS = 90
 ENCODE_TIMEOUT_SECONDS = 45
+# Eine blockierte GPU-Initialisierung darf nicht das gesamte CPU-Fallbackbudget
+# verbrauchen. Beide Versuche teilen weiterhin dieselbe 45-Sekunden-Frist.
+HARDWARE_TIMEOUT_SECONDS = 15
+HARDWARE_FALLBACK_REASON = "GPU-Transkodierung nicht verfuegbar; diese Wiedergabe verwendet die CPU."
+HARDWARE_TIMEOUT_REASON = "GPU-Transkodierung hat zu lange gedauert; diese Wiedergabe verwendet die CPU."
+
+
+class _EncodingFailure(Exception):
+    def __init__(self, *, timed_out: bool = False) -> None:
+        self.timed_out = timed_out
 
 
 class PlaybackError(Exception):
@@ -71,6 +81,9 @@ class Viewer:
     quality: playback_quality.Quality = "auto"
     quality_label: str = "Automatisch"
     profile: playback_quality.Profile = playback_quality.PROFILES["1080p"]
+    encoding: live_encoding.Encoding = live_encoding.SOFTWARE
+    encoder_state: str = "pending"
+    fallback_reason: str | None = None
     started_at: str = field(default_factory=_iso)
     last_seen_at: str = field(default_factory=_iso)
     last_seen: float = field(default_factory=time.monotonic)
@@ -132,6 +145,13 @@ class StreamManager:
                 not math.isfinite(viewer.duration_s) or viewer.duration_s <= 0
             ):
                 viewer.duration_s = None
+            if viewer.mode == "transcode":
+                try:
+                    viewer.encoding = live_encoding.configured()
+                except ValueError:
+                    viewer.fallback_reason = HARDWARE_FALLBACK_REASON
+            else:
+                viewer.encoder_state = "direct"
             self._viewers[viewer.token] = viewer
             return viewer
 
@@ -177,15 +197,14 @@ class StreamManager:
         length = min(SEGMENT_SECONDS, (viewer.duration_s or 0) - start)
         return [
             settings.ffmpeg_path, "-hide_banner", "-loglevel", "error", "-nostdin",
+            *viewer.encoding.device_options,
             "-protocol_whitelist", "file,subfile,pipe", "-threads", "2",
             "-format_whitelist", "mov,matroska,webm,ogg,mp3",
             "-ss", str(start), "-i", source, "-t", str(length),
             "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
-            "-vf", viewer.profile.scale_filter,
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-            "-maxrate", f"{viewer.profile.max_rate_kbps}k", "-bufsize", f"{viewer.profile.max_rate_kbps * 2}k", "-pix_fmt", "yuv420p",
+            *viewer.encoding.video_options(viewer.profile),
             "-threads", "2", "-filter_threads", "1", "-r", "30", "-g", "180",
-            "-keyint_min", "180", "-sc_threshold", "0", "-c:a", "aac",
+            "-c:a", "aac",
             "-b:a", f"{viewer.profile.audio_bitrate_kbps}k", "-ac", "2", "-ar", "48000",
             "-fs", str(MAX_SEGMENT_BYTES), "-f", "mpegts", "pipe:1",
         ]
@@ -194,6 +213,91 @@ class StreamManager:
     def _check_cancelled(cancelled: threading.Event | None) -> None:
         if cancelled is not None and cancelled.is_set():
             raise PlaybackError("Der Videoabruf wurde beendet.", 499)
+
+    def _finish_process(self, viewer: Viewer, process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is None:
+            with suppress(OSError):
+                process.kill()
+        if process.poll() is None:
+            try:
+                process.wait(timeout=1)
+            except (subprocess.TimeoutExpired, OSError):
+                # Kein zweiter Encoder, solange der erste noch lebt. Der Slot
+                # bleibt bis zum tatsaechlichen Prozessende reserviert.
+                if process.poll() is None:
+                    with self._lock:
+                        if viewer.encoding.hardware_accel is not HardwareAccel.NONE:
+                            viewer.encoding = live_encoding.SOFTWARE
+                            viewer.fallback_reason = HARDWARE_FALLBACK_REASON
+                    raise PlaybackError("Die Live-Transkodierung wird noch beendet. Bitte kurz warten.", 503) from None
+        if getattr(process, "stdout", None) is not None:
+            with suppress(OSError):
+                process.stdout.close()
+        with self._lock:
+            if viewer.process is process:
+                viewer.process = None
+
+    def _release_slot(self, viewer: Viewer) -> None:
+        process = viewer.process
+        if process is None or process.poll() is not None:
+            self._slots.release()
+            return
+
+        def after_exit() -> None:
+            # Hoechstens MAX_TRANSCODES solcher Aufraeumer sind moeglich:
+            # Solange der Prozess lebt, bleibt sein Encoderplatz belegt.
+            while process.poll() is None:
+                with suppress(subprocess.TimeoutExpired, OSError):
+                    process.wait(timeout=1)
+                if process.poll() is None:
+                    time.sleep(0.1)
+            with self._lock:
+                if viewer.process is process:
+                    viewer.process = None
+            if getattr(process, "stdout", None) is not None:
+                with suppress(OSError):
+                    process.stdout.close()
+            self._slots.release()
+
+        threading.Thread(target=after_exit, name="wiedergabe-prozessende", daemon=True).start()
+
+    def _encode_attempt(self, viewer: Viewer, index: int, cancelled: threading.Event | None,
+                        deadline: float) -> bytes:
+        process = None
+        try:
+            self._check_cancelled(cancelled)
+            with self._lock:
+                self._get(viewer.token)
+                process = subprocess.Popen(
+                    self._command(viewer, index), stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+                )
+                viewer.process = process
+                viewer.encoder_state = "running"
+            while True:
+                self._check_cancelled(cancelled)
+                with self._lock:
+                    self._get(viewer.token)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _EncodingFailure(timed_out=True)
+                try:
+                    data, _ = process.communicate(timeout=min(0.25, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            self._check_cancelled(cancelled)
+            with self._lock:
+                self._get(viewer.token)
+            if process.returncode != 0 or not data or len(data) >= MAX_SEGMENT_BYTES:
+                raise _EncodingFailure()
+            return data
+        except OSError:
+            raise _EncodingFailure() from None
+        finally:
+            if process is not None:
+                self._finish_process(viewer, process)
 
     def segment(self, token: str, index: int, cancelled: threading.Event | None = None) -> bytes:
         self._check_cancelled(cancelled)
@@ -213,53 +317,56 @@ class StreamManager:
             key = (token, index)
             with self._lock:
                 self._get(token)
+                if viewer.process is not None and viewer.process.poll() is None:
+                    raise PlaybackError("Die Live-Transkodierung wird noch beendet. Bitte kurz warten.", 503)
                 if key in self._segments:
                     self._segments.move_to_end(key)
                     return self._segments[key]
             if not self._slots.acquire(timeout=3):
                 raise PlaybackError("Die Live-Transkodierung ist ausgelastet. Bitte kurz warten.", 503)
-            process = None
             try:
                 self._check_cancelled(cancelled)
-                with self._lock:
-                    self._get(token)
-                    process = subprocess.Popen(
-                        self._command(viewer, index), stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-                    )
-                    viewer.process = process
                 deadline = time.monotonic() + ENCODE_TIMEOUT_SECONDS
                 while True:
-                    self._check_cancelled(cancelled)
+                    hardware = viewer.encoding.hardware_accel is not HardwareAccel.NONE
+                    attempt_deadline = min(deadline, time.monotonic() + HARDWARE_TIMEOUT_SECONDS) if hardware else deadline
                     try:
-                        data, _ = process.communicate(timeout=0.25)
+                        data = self._encode_attempt(viewer, index, cancelled, attempt_deadline)
                         break
-                    except subprocess.TimeoutExpired:
-                        if time.monotonic() >= deadline:
-                            process.kill()
-                            process.communicate()
-                            raise PlaybackError("Die Live-Transkodierung hat zu lange gedauert.", 503) from None
-                if process.returncode != 0 or not data or len(data) >= MAX_SEGMENT_BYTES:
-                    raise PlaybackError("Dieser Videoabschnitt konnte nicht transkodiert werden.", 503)
+                    except _EncodingFailure as failure:
+                        # Abbruch, Sitzungsende und Ablauf sind keine GPU-Fehler
+                        # und duerfen keinen neuen CPU-Prozess ausloesen.
+                        self._check_cancelled(cancelled)
+                        with self._lock:
+                            self._get(token)
+                            if hardware:
+                                viewer.encoding = live_encoding.SOFTWARE
+                                viewer.encoder_state = "pending"
+                                viewer.fallback_reason = HARDWARE_TIMEOUT_REASON if failure.timed_out else HARDWARE_FALLBACK_REASON
+                        if hardware and time.monotonic() < deadline:
+                            continue
+                        message = ("Die Live-Transkodierung hat zu lange gedauert." if failure.timed_out
+                                   else "Dieser Videoabschnitt konnte nicht transkodiert werden.")
+                        raise PlaybackError(message, 503) from None
                 with self._lock:
                     self._get(token)
                     self._touch(viewer)
+                    viewer.encoder_state = "ready"
                     while self._segments and self._cache_bytes + len(data) > MAX_CACHE_BYTES:
                         _, discarded = self._segments.popitem(last=False)
                         self._cache_bytes -= len(discarded)
                     self._segments[key] = data
                     self._cache_bytes += len(data)
                 return data
-            except OSError:
-                raise PlaybackError("Die Live-Transkodierung ist momentan nicht verfuegbar.", 503) from None
-            finally:
+            except PlaybackError as error:
                 with self._lock:
-                    viewer.process = None
-                if process is not None and process.poll() is None:
-                    process.kill()
-                    process.wait(timeout=5)
-                self._slots.release()
+                    if error.status_code in (404, 499):
+                        viewer.encoder_state = "ready" if any(k[0] == token for k in self._segments) else "pending"
+                    else:
+                        viewer.encoder_state = "failed"
+                raise
+            finally:
+                self._release_slot(viewer)
         finally:
             viewer.segment_lock.release()
 
@@ -287,6 +394,9 @@ class StreamManager:
                 "channel_title": v.channel_title, "client_address": v.client_address,
                 "client_name": v.client_name, "mode": v.mode, "state": v.state,
                 "quality": v.quality, "quality_label": v.quality_label,
+                "encoder": v.encoding.encoder if v.mode == "transcode" else None,
+                "hardware_accel": v.encoding.hardware_accel.value if v.mode == "transcode" else "none",
+                "encoder_state": v.encoder_state, "fallback_reason": v.fallback_reason,
                 "position_s": v.position_s, "duration_s": v.duration_s,
                 "started_at": v.started_at, "last_seen_at": v.last_seen_at,
                 "transcoding": v.process is not None and v.process.poll() is None,

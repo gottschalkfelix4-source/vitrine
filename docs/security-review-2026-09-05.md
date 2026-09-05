@@ -230,3 +230,18 @@ Ein Qualitaetswechsel gibt die alte Sitzung frei. Die bestehenden Grenzen
 fuer gleichzeitige Sitzungen, Encoderprozesse, Laufzeit und Arbeitsspeicher
 gelten weiter. Die Qualitaetswahl erweitert die oeffentlichen Rechte fuer
 Warteschlange, Speicher, Einstellungen oder Stream-Dashboard nicht.
+
+## Ergaenzung: GPU fuer Live-Transkodierung
+
+Die Encoder- und Geraeteauswahl kommt ausschliesslich aus den vorhandenen
+Admin-Einstellungen, nicht aus oeffentlichen Wiedergabeanfragen. Die festen
+H.264-Profile und Grenzen fuer Prozesse, Abschnitte, Cache und Laufzeit bleiben
+erhalten. Ein GPU-Fehler erlaubt genau einen CPU-Versuch pro Abschnitt innerhalb
+desselben Zeitbudgets; weitere Abschnitte derselben Sitzung bleiben auf CPU.
+Abgebrochene Abrufe duerfen keinen Ersatzprozess starten.
+
+Encoderstatus und eine feste Rueckfallmeldung sind nur im Admin-Dashboard
+enthalten. Interne FFmpeg-Fehler, Quelldateipfade und Wiedergabetoken werden
+darueber nicht offengelegt. Die Anwendung laeuft weiterhin als konfigurierter
+Benutzer. Beim Containerstart werden nur die nicht-root Gruppen eingebundener
+GPU-Zeichengeraete ergaenzt; Host-Geraeterechte werden nicht veraendert.

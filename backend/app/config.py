@@ -100,8 +100,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------- Kaltspeicher
     archive_codec: ArchiveCodec = ArchiveCodec.AV1
     hwaccel: HardwareAccel = HardwareAccel.NONE
-    #: Render-Knoten der Grafikkarte im Container. Nur fuer vaapi noetig; qsv
-    #: und nvenc finden ihr Geraet selbst.
+    #: Render-Knoten fuer VAAPI und die QSV-Live-Transkodierung unter Linux.
+    #: Die QSV-Archivierung und NVENC waehlen ihr Geraet weiterhin selbst.
     #:
     #: renderD128 ist der erste Knoten. Steckt neben der Arc noch eine
     #: iGPU im Rechner, kann die Arc auch renderD129 sein - welcher der

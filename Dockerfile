@@ -27,10 +27,15 @@ FROM python:3.13-slim AS runtime
 # vainfo ist kein Beiwerk: Es ist das einzige Werkzeug, das im laufenden
 # Container beantwortet, ob die Karte wirklich da ist und was sie kann. Die
 # Hardware-Pruefung in den Einstellungen ruft es auf.
+# libmfx-gen1.2 ist die GPU-Implementierung hinter dem oneVPL-Dispatcher von
+# FFmpeg; libvpl allein kann keine QSV-Sitzung starten. Mesa liefert VAAPI
+# fuer AMD. NVIDIA bindet seine Laufzeit ueber das Container Toolkit ein.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ffmpeg \
       intel-media-va-driver \
+      libmfx-gen1.2 \
+      mesa-va-drivers \
       vainfo \
       ca-certificates \
       curl \
@@ -123,6 +128,7 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 ENV YTA_DATA_DIR=/data \
     YTA_HOST=0.0.0.0 \
     YTA_PORT=8000 \
+    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 

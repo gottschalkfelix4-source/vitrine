@@ -13,7 +13,7 @@ CONTAINER = "pruefling"
 PASSWORD = "Ci!test8"  # Genau acht Zeichen; nur fuer diesen kurzlebigen Testcontainer.
 
 
-def request(path, payload=None, cookie=None, *, origin=None, extra_headers=None):
+def request(path, payload=None, cookie=None, *, origin=None, extra_headers=None, method=None):
     headers = {}
     if payload is not None:
         headers = {"Content-Type": "application/json", "X-Vitrine-Request": "1"}
@@ -22,7 +22,7 @@ def request(path, payload=None, cookie=None, *, origin=None, extra_headers=None)
     if origin is not None:
         headers["Origin"] = origin
     headers.update(extra_headers or {})
-    req = Request(BASE + path, data=None if payload is None else json.dumps(payload).encode(), headers=headers)
+    req = Request(BASE + path, data=None if payload is None else json.dumps(payload).encode(), headers=headers, method=method)
     try:
         response = urlopen(req, timeout=60)
     except HTTPError as error:
@@ -118,6 +118,8 @@ media.unlink()
     assert len(streams) == 1 and streams[0]["position_s"] == 13 and streams[0]["segments_ready"] == 1
     assert streams[0]["geo"]["status"] == "private"
     assert streams[0]["geo"]["latitude"] is None and streams[0]["geo"]["longitude"] is None
+    assert streams[0]["encoder"] == "libx264" and streams[0]["hardware_accel"] == "none"
+    assert streams[0]["encoder_state"] == "ready" and streams[0]["fallback_reason"] is None
     assert live["token"] not in json.dumps(streams)
     assert request(path + "/ended", {}, origin=BASE)[0] == 204
     assert json.loads(request("/api/streams", cookie=admin_cookie)[2])["streams"] == []
@@ -126,6 +128,38 @@ media.unlink()
     assert status == 200 and original["mode"] == "direct" and original["quality"] == "original"
     assert request(original["url"], extra_headers={"Range": "bytes=0-99"})[0] == 206
     assert request("/api/playback/" + original["token"] + "/ended", {}, origin=BASE)[0] == 204
+    check_gpu_fallback(admin_cookie)
+
+
+def check_gpu_fallback(admin_cookie):
+    # Der CI-Runner hat keine GPU. Ein absichtlich fehlender Render-Knoten
+    # prueft den echten FFmpeg-Geraetefehler mit erfolgreicher Gastwiedergabe.
+    csrf = json.loads(request("/api/auth/session", cookie=admin_cookie)[2])["csrf_token"]
+
+    def configure(values):
+        assert request("/api/settings", values, cookie=admin_cookie, origin=BASE,
+                       extra_headers={"X-CSRF-Token": csrf}, method="PUT")[0] == 200
+
+    configure({"hwaccel": "vaapi", "hwaccel_device": "/dev/dri/renderD9999"})
+    try:
+        status, _, body = request("/api/videos/ci-demo/playback", {"quality": "240p"}, origin=BASE)
+        assert status == 200
+        live = json.loads(body)
+        path = "/api/playback/" + live["token"]
+        pending = json.loads(request("/api/streams", cookie=admin_cookie)[2])["streams"][0]
+        assert pending["hardware_accel"] == "vaapi" and pending["encoder_state"] == "pending"
+        for index in (2, 0):
+            status, _, data = request(path + f"/segments/{index}.ts")
+            assert status == 200 and len(data) > 188 and data[0] == 0x47
+        overview = json.loads(request("/api/streams", cookie=admin_cookie)[2])
+        active = overview["streams"][0]
+        assert active["encoder"] == "libx264" and active["hardware_accel"] == "none"
+        assert active["encoder_state"] == "ready" and active["fallback_reason"]
+        assert active["segments_ready"] == 2 and active["quality_label"] == "240p"
+        assert "renderD9999" not in json.dumps(overview) and live["token"] not in json.dumps(overview)
+        assert request(path + "/ended", {}, origin=BASE)[0] == 204
+    finally:
+        configure({"hwaccel": "none", "hwaccel_device": "/dev/dri/renderD128"})
 
 
 def main():
