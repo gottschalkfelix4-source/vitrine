@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { auth } from "./auth";
-import { wiedergabeBeenden, wiedergabeMelden, wiedergabeStarten } from "./wiedergabe";
+import { standortText, streamsLaden, wiedergabeBeenden, wiedergabeMelden, wiedergabeStarten } from "./wiedergabe";
 import { lokalFortschrittLesen, lokalFortschrittMerken } from "./wiedergabeFortschritt";
 
 vi.mock("./capabilities", () => ({ faehigkeiten: () => "mp4,h264,aac" }));
@@ -15,6 +15,16 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.unstubAllGlobals());
+
+it("liest Standortdaten mit der Streamübersicht ohne externen GeoIP-Aufruf", async () => {
+  const daten = { streams: [{ geo: { status: "located", city: "Berlin", region: "Berlin", country: "Deutschland" } }], geoip: { available: true, database_date: "2026-09-01" } };
+  netz.mockResolvedValueOnce(Response.json(daten));
+  await expect(streamsLaden()).resolves.toEqual(daten);
+  expect(netz).toHaveBeenCalledTimes(1);
+  expect(netz.mock.calls[0][0]).toBe("/api/streams");
+  expect(standortText({ ...daten.streams[0].geo, status: "located", latitude: 52, longitude: 13, country_code: "DE" })).toBe("Berlin, Deutschland");
+  expect(standortText()).toBe("Standort unbekannt");
+});
 
 it("startet Gastwiedergabe ohne Admin-CSRF und beendet genau die eigene Sitzung", async () => {
   netz.mockResolvedValueOnce(Response.json({ token: "test-token", mode: "direct", url: "/media" }));

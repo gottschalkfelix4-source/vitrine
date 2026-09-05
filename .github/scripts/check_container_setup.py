@@ -60,6 +60,10 @@ import subprocess
 from app.db import session_scope
 from app.models import Channel, Video
 from app.services.bundle import BundleManifest, write_bundle
+from app.services.geoip import locator
+geo = locator.lookup('8.8.8.8')
+assert geo['status'] == 'located' and geo['country_code'] == 'US'
+assert -90 <= geo['latitude'] <= 90 and -180 <= geo['longitude'] <= 180
 media = Path('/tmp/vitrine-ci-demo.mp4')
 subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=15',
                 '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '15',
@@ -93,8 +97,12 @@ media.unlink()
     status, _, data = request(path + "/segments/2.ts")
     assert status == 200 and len(data) > 188 and data[0] == 0x47
     assert request(path + "/heartbeat", {"position_s": 13, "state": "playing"}, origin=BASE)[0] == 204
-    streams = json.loads(request("/api/streams", cookie=admin_cookie)[2])["streams"]
+    overview = json.loads(request("/api/streams", cookie=admin_cookie)[2])
+    assert overview["geoip"]["available"] is True and overview["geoip"]["database_date"]
+    streams = overview["streams"]
     assert len(streams) == 1 and streams[0]["position_s"] == 13 and streams[0]["segments_ready"] == 1
+    assert streams[0]["geo"]["status"] == "private"
+    assert streams[0]["geo"]["latitude"] is None and streams[0]["geo"]["longitude"] is None
     assert live["token"] not in json.dumps(streams)
     assert request(path + "/ended", {}, origin=BASE)[0] == 204
     assert json.loads(request("/api/streams", cookie=admin_cookie)[2])["streams"] == []
@@ -135,7 +143,7 @@ def main():
     assert json.loads(request("/api/auth/session")[2])["eingerichtet"] is True
     assert request("/api/auth/setup", payload, origin=BASE)[0] == 409
     sign_in()
-    print("Gastarchiv, HTTP/HTTPS-Anmeldung, Live-Transkodierung, Stream-Dashboard und Neustart erfolgreich.")
+    print("Gastarchiv, HTTP/HTTPS-Anmeldung, Live-Transkodierung, Stream-Dashboard, lokale GeoIP-Datenbank und Neustart erfolgreich.")
 
 
 if __name__ == "__main__":

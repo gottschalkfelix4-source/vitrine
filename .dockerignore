@@ -1,0 +1,13 @@
+.git
+**/.venv
+**/venv
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.tsbuildinfo
+.env
+data
+**/*.mmdb
+**/*.mmdb.gz

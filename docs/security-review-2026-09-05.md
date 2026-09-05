@@ -191,3 +191,25 @@ Gezielte Pruefungen umfassen HTTP-/HTTPS-Cookiewechsel, Admin-/Gasttrennung,
 Suchfilter vor Trefferbegrenzung, gesperrte Mutationen, getrennten Fortschritt,
 echtes FFmpeg-Lesen aus MP4-/MKV-Buendeln, Spulen zu spaeten Abschnitten,
 parallele Zuschauer, Prozessgrenzen, Abbruch und ablaufende Sitzungen.
+
+## Ergaenzung: lokale Geo-IP-Livekarte
+
+Die Standortzuordnung ergaenzt ausschliesslich die vorhandene Admin-Antwort
+`GET /api/streams`. Es gibt keinen frei aufrufbaren Lookup-Endpunkt und keine
+zusaetzliche Freigabe fuer Gaeste. Verwendet wird nur die bereits beim
+Wiedergabestart erfasste Verbindungsadresse, nach der bestehenden
+Uvicorn-Proxy-Vertrauenspruefung; rohe Forwarded-Header werden nicht ausgewertet.
+
+DB-IP City Lite liegt lesbar im Container-Image. Der Build prueft die gepinnte
+Download-Pruefsumme und die Lesbarkeit der Datenbank. Lookup und Weltkarte
+brauchen keine externen Anfragen; Zuschaueradressen verlassen den Server
+dadurch nicht. Der begrenzte Lookup-Cache bleibt im Arbeitsspeicher. Private,
+reservierte und nicht zuordenbare Adressen bekommen keine Koordinaten. Fehlende
+oder defekte Datenbanken werden als nicht verfuegbar gemeldet, ohne Dateipfade
+oder interne Fehlermeldungen an den Browser weiterzugeben.
+
+Die Anreicherung erfolgt nach dem Stream-Snapshot ausserhalb dessen Sperre.
+Die Gegenpruefung hat Admin-Zugriff, abgewiesene fremde Lookup-Pfade,
+IPv4/IPv6-Sonderfaelle, endende Streams und die Unabhaengigkeit der
+Wiedergabe-Lebenszeichen von einem blockierten Geo-IP-Reader geprueft.
+Standortangaben sind ausdruecklich Naeherungen und kein genauer Aufenthaltsort.

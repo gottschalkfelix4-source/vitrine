@@ -25,7 +25,7 @@ from app.api import auth, cookies, hardware, library, stream, vpn
 from app.config import settings
 from app.db import init_db, session_scope
 from app.security import SecurityMiddleware
-from app.services import abbruch, cache, einstellungen, jobs, live_streams
+from app.services import abbruch, cache, einstellungen, geoip, jobs, live_streams
 from app.services import auth as auth_dienst
 from app.services import vpn as vpn_dienst
 from app.workers.runner import werk
@@ -160,6 +160,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     abbruch.anfordern()
     _stop.set()
     live_streams.manager.close()
+    geoip.locator.close()
     werk.stop()
     # Erst nach den Arbeitern: Ein Strang, der gerade noch einen Download
     # sauber abschliesst, braucht seinen Tunnel bis zuletzt.

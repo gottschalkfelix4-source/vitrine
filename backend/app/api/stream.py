@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.models import HotCopy, HotCopyStatus, Video, VideoStatus
-from app.services import cache, live_streams, paths, playback
+from app.services import cache, geoip, live_streams, paths, playback
 from app.services.bundle import BundleError, BundleReader
 from app.services.ranges import UnsatisfiableRange, parse_range
 
@@ -321,4 +321,5 @@ def playback_session_ended(token: str) -> Response:
 
 @playback_router.get("/streams")
 def active_streams() -> dict[str, object]:
-    return live_streams.manager.snapshot()
+    snapshot = live_streams.manager.snapshot()
+    return geoip.locator.enrich(snapshot)

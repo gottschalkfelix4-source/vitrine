@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     # folgen jetzt automatisch HTTP/HTTPS; dieser Wert bleibt nur kompatibel.
     auth_cookie_secure: bool = True
     auth_session_hours: int = Field(default=12, ge=1, le=24)
+    geoip_database: Path = Path("/app/geoip/dbip-city-lite.mmdb")
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173"]
     )

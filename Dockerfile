@@ -93,6 +93,20 @@ WORKDIR /app
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Lokale Geo-IP-Abfragen ohne Weitergabe von Zuschaueradressen. Monat und
+# Pruefsumme gemeinsam aktualisieren; fehlende/falsche Downloads brechen den
+# Build ab, damit kein vermeintlich vollstaendiges Image veroeffentlicht wird.
+ARG GEOIP_RELEASE=2026-09
+ARG GEOIP_SHA256=c5d05b35a45c3eea0cadc728c8f5ad751693d4e270529b731442172a73f05954
+RUN mkdir -p /app/geoip \
+ && curl -fSL --retry 3 --connect-timeout 15 --max-time 180 \
+      "https://download.db-ip.com/free/dbip-city-lite-${GEOIP_RELEASE}.mmdb.gz" -o /tmp/geoip.mmdb.gz \
+ && echo "${GEOIP_SHA256}  /tmp/geoip.mmdb.gz" | sha256sum -c - \
+ && gzip -dc /tmp/geoip.mmdb.gz > /app/geoip/dbip-city-lite.mmdb \
+ && rm /tmp/geoip.mmdb.gz \
+ && python -c "import maxminddb; r = maxminddb.open_database('/app/geoip/dbip-city-lite.mmdb'); assert r.get('8.8.8.8')['location']; r.close()"
+COPY docker/GEOIP-NOTICE.txt /app/geoip/NOTICE.txt
+
 COPY backend/app ./app
 COPY --from=frontend /build/dist ./static
 

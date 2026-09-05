@@ -1,0 +1,13 @@
+IP Geolocation by DB-IP
+https://db-ip.com
+
+This image includes the unmodified DB-IP IP to City Lite database, September
+2026 edition. It is licensed under Creative Commons Attribution 4.0
+International (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
+
+Source and release information:
+https://db-ip.com/db/download/ip-to-city-lite
+https://download.db-ip.com/free/dbip-city-lite-2026-09.mmdb.gz
+
+The data describes approximate network locations, not exact viewer positions.
+GeoIP lookups are performed locally. No viewer IP addresses are sent to DB-IP.

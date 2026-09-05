@@ -1,0 +1,37 @@
+.stream-karte { margin: 24px 0 28px; }
+.stream-karte-kopf, .stream-karte-auswahl { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.stream-karte-kopf h2 { margin: 0; font-size: 20px; }
+.stream-karte-zoom { display: flex; align-items: center; gap: 8px; }
+.stream-karte-zoom .knopf { min-width: 40px; min-height: 40px; justify-content: center; border-radius: 8px; }
+.stream-karte-zoom output { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text-gedaempft); }
+.stream-karte-zahlen { margin: 16px 0 12px; font-size: 14px; }
+.stream-karte-meldung { color: var(--text-gedaempft); line-height: 1.6; margin: 12px 0; }
+.stream-karte-flaeche { overflow: hidden; border: 1px solid var(--rand); border-radius: 8px; }
+.stream-welt { display: block; width: 100%; aspect-ratio: 2; touch-action: none; cursor: grab; }
+.stream-welt[data-zieht="true"] { cursor: grabbing; }
+.stream-welt:focus-visible { outline: 2px solid var(--text); outline-offset: -3px; }
+.stream-meer { fill: var(--grund); }
+.stream-land { fill: var(--flaeche-hoch); stroke: var(--text-schwach); stroke-width: .6; }
+.stream-land path { vector-effect: non-scaling-stroke; }
+.stream-kartenpunkt { cursor: pointer; outline: none; }
+.stream-punkt-treffer { fill: transparent; }
+.stream-punkt-rand { fill: var(--grund); stroke: transparent; stroke-width: 3; }
+.stream-punkt { fill: #ff0033; }
+.stream-kartenpunkt text { fill: white; font-size: 12px; font-weight: 600; pointer-events: none; }
+.stream-kartenpunkt:focus-visible .stream-punkt-rand, .stream-kartenpunkt[data-aktiv="true"] .stream-punkt-rand { stroke: var(--text); }
+.stream-karte-details { padding: 16px 0; border-bottom: 1px solid var(--rand-zart); }
+.stream-karte-details p { margin: 0; color: var(--text-gedaempft); line-height: 1.6; }
+.stream-karte-auswahl h3 { margin: 0; font-size: 16px; font-weight: 500; }
+.stream-karte-details ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.stream-karte-details li { display: flex; flex-direction: column; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+.stream-karte-details li a { font-weight: 500; }
+.stream-karte-details li span { color: var(--text-gedaempft); font-size: 13px; }
+.stream-karte-hinweis, .stream-karte-quelle { color: var(--text-gedaempft); font-size: 13px; line-height: 1.6; margin: 12px 0 0; }
+.stream-karte-quelle a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 480px) {
+  .stream-karte-kopf { align-items: flex-start; }
+  .stream-karte-zoom { flex-wrap: wrap; gap: 6px; }
+  .stream-karte-zoom .knopf { padding: 8px 10px; }
+  .stream-karte-zahlen { line-height: 1.6; }
+  .stream-karte-details ul { grid-template-columns: minmax(0, 1fr); }
+}

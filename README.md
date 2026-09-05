@@ -188,6 +188,34 @@ Position, Zustand und direkte oder transkodierte Auslieferung. Pausen werden
 sofort gemeldet; die Ansicht aktualisiert sich alle fuenf Sekunden. Geschlossene
 Player melden sich ab, verlorene Verbindungen verfallen nach 90 Sekunden.
 
+Die Live-Karte im selben Admin-Dashboard ordnet oeffentliche Zuschaueradressen
+ungefaehr einer Stadt bzw. Region zu. Marker zeigen die dort verbundenen Player;
+die Karte laesst sich vergroessern und verschieben. Private, lokale und nicht
+zuordenbare Adressen bleiben in der Verbindungsliste sichtbar und bekommen
+keinen erfundenen Standort. VPNs, Mobilfunknetze und Internetanbieter koennen
+einen anderen Standort als den tatsaechlichen Aufenthaltsort ergeben.
+
+Die Geo-IP-Abfrage laeuft **lokal im Container**, ohne API-Schluessel und ohne
+Weitergabe der Zuschauer-IP an externe Dienste. Auch die Weltkarte wird lokal
+ausgeliefert. Enthalten ist [DB-IP City Lite](https://db-ip.com/db/lite.php)
+vom September 2026 unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/);
+der Datenstand wird in der Karte angezeigt. Die Kartengrenzen stammen von
+[Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/) (Public Domain).
+Standorte und Verbindungsdetails bleiben ausschliesslich fuer Administratoren
+erreichbar. Der begrenzte Lookup-Cache liegt nur im Arbeitsspeicher; es entsteht
+keine Standortchronik. Damit hinter einem Reverse Proxy die Zuschauer-IP statt
+der internen Proxy-IP verwendet wird, die oben beschriebenen
+`FORWARDED_ALLOW_IPS`/`TRUSTED_PROXY_IPS` konfigurieren.
+
+Fuer eine eigene aktuelle City-MMDB kann `YTA_GEOIP_DATABASE` auf eine als
+Datei eingebundene Datenbank zeigen (Standard: `/app/geoip/dbip-city-lite.mmdb`).
+Nach Austausch der Datei den Container neu starten. Ohne lesbare Datenbank
+funktionieren Wiedergabe und Dashboard weiter; die Karte meldet die fehlende
+Zuordnung. Lokale Entwicklung braucht ebenfalls eine solche Datenbank.
+Beim Image-Build sind Ausgabe und SHA-256 im Dockerfile festgelegt:
+`GEOIP_RELEASE` und `GEOIP_SHA256` zusammen mit dem Lizenzhinweis in
+`docker/GEOIP-NOTICE.txt` aktualisieren, um eine neuere DB-IP-Ausgabe zu buendeln.
+
 Der Player meldet seine Codec-Faehigkeiten. Kann er das Original nicht
 abspielen, liefert Vitrine HLS mit H.264/AAC, maximal 1080p und 30 Bildern pro
 Sekunde. Sechs-Sekunden-Abschnitte werden beim Abruf direkt aus dem Buendel
@@ -212,8 +240,9 @@ Sperre zurueck. Bei absichtlichem Login-Spam koennen dadurch auch eigene neue
 Anmeldungen warten; vorgeschaltete Anfragelimits helfen, solche Anfragen
 bereits am Proxy zu begrenzen.
 
-Ohne Anmeldung sind nur die Login-Oberflaeche, ihre statischen Dateien,
-der Sitzungsstatus und der knappe Zustandscheck `/api/health` erreichbar.
+Ohne Anmeldung sind das archivierte Videoangebot, Kanaele, Suche und
+Wiedergabe sowie die Login-Oberflaeche und der Zustandscheck erreichbar.
+Einstellungen, Stream-Dashboard und Verwaltungsaktionen erfordern den Admin.
 Der Einrichtungsaufruf ist ausschliesslich mit dem einmaligen Code und ohne
 bereits eingerichteten Administrator nutzbar.
 Es gibt einen Administrator und keine oeffentlichen Zuschauer-Konten.

@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
 import { Fehler } from "../components/ui";
+import { StreamKarte } from "../components/StreamKarte";
 import { useApi } from "../hooks/useApi";
 import { dauer } from "../lib/format";
-import { streamsLaden, type StreamStatus, type StreamUebersicht } from "../lib/wiedergabe";
+import { standortText, streamsLaden, type StreamStatus, type StreamUebersicht } from "../lib/wiedergabe";
 import "../styles/streams.css";
 
 const statusText: Record<StreamStatus, string> = { playing: "Läuft", paused: "Pausiert", buffering: "Lädt" };
@@ -19,13 +20,15 @@ export function StreamListe({ daten }: { daten: StreamUebersicht }) {
     <p className="streams-ueberblick" role="status">
       {daten.streams.length} {daten.streams.length === 1 ? "Verbindung" : "Verbindungen"} · {laufend} {laufend === 1 ? "Wiedergabe läuft" : "Wiedergaben laufen"} · {kodierungen} {kodierungen === 1 ? "aktive Umwandlung" : "aktive Umwandlungen"}
     </p>
+    <StreamKarte streams={daten.streams} geoip={daten.geoip} />
     {daten.streams.length === 0 ? <div className="streams-leer"><h2>Gerade schaut niemand</h2>
       <p>Sobald ein Video geöffnet wird, erscheint die Verbindung hier. Geschlossene Verbindungen verschwinden automatisch.</p></div>
       : <div className="streams-tabelle"><table>
-        <thead><tr><th scope="col">Video</th><th scope="col">Verbindung</th><th scope="col">Wiedergabe</th><th scope="col">Auslieferung</th><th scope="col">Zeit</th></tr></thead>
+        <thead><tr><th scope="col">Video</th><th scope="col">Verbindung</th><th scope="col">Standort</th><th scope="col">Wiedergabe</th><th scope="col">Auslieferung</th><th scope="col">Zeit</th></tr></thead>
         <tbody>{daten.streams.map((s) => <tr key={s.id}>
           <td data-label="Video"><Link to={`/video/${encodeURIComponent(s.video_id)}`}>{s.video_title}</Link><span>{s.channel_title || "Unbekannter Kanal"}</span></td>
           <td data-label="Verbindung"><strong>{s.client_name || "Unbekannter Browser"}</strong><span>{s.client_address || "Unbekannte Adresse"}</span></td>
+          <td data-label="Standort">{standortText(s.geo)}</td>
           <td data-label="Wiedergabe"><strong>{statusText[s.state] ?? "Verbunden"}</strong><span>Position {dauer(s.position_s)}</span></td>
           <td data-label="Auslieferung"><strong>{s.mode === "transcode" ? "Live-Transkodierung" : "Direktwiedergabe"}</strong>
             <span>{s.mode === "transcode" ? s.transcoding ? "Abschnitt wird umgewandelt" : `${s.segments_ready} Abschnitte vorbereitet` : "Original aus dem Archiv"}</span></td>
@@ -41,6 +44,7 @@ export function Streamsseite() {
   return <section className="streams-seite">
     <div className="streams-kopf"><div><h1>Streams</h1><p>Laufende Wiedergaben und Verbindungen</p></div>
       <button className="knopf" onClick={neuLaden} disabled={laedt}>Aktualisieren</button></div>
-    {fehler ? <Fehler text={fehler} erneut={neuLaden} /> : daten ? <StreamListe daten={daten} /> : <p role="status">Verbindungen werden geladen …</p>}
+    {fehler ? <Fehler text={fehler} erneut={neuLaden} /> : null}
+    {daten ? <StreamListe daten={daten} /> : !fehler ? <p role="status">Verbindungen werden geladen …</p> : null}
   </section>;
 }

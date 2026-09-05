@@ -35,6 +35,25 @@ export function wiedergabeBeenden(token: string): Promise<void> {
   return senden(`/api/playback/${encodeURIComponent(token)}/ended`, {}, true);
 }
 
+export interface StreamStandort {
+  status: "located" | "private" | "unknown" | "unavailable";
+  latitude: number | null;
+  longitude: number | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  country_code: string | null;
+}
+
+export interface GeoIpStatus { available: boolean; database_date: string | null }
+
+export function standortText(geo?: StreamStandort): string {
+  if (geo?.status === "private") return "Lokales oder privates Netzwerk";
+  if (geo?.status === "unavailable") return "Standortdaten nicht verfügbar";
+  if (geo?.status !== "located") return "Standort unbekannt";
+  return [...new Set([geo.city, geo.region, geo.country].filter(Boolean))].join(", ") || "Ungefährer Standort";
+}
+
 export interface AktiverStream {
   id: string;
   video_id: string;
@@ -49,11 +68,13 @@ export interface AktiverStream {
   last_seen_at: string;
   transcoding: boolean;
   segments_ready: number;
+  geo?: StreamStandort;
 }
 
 export interface StreamUebersicht {
   streams: AktiverStream[];
   limits: { sessions: number; transcodes: number };
+  geoip?: GeoIpStatus;
 }
 
 export async function streamsLaden(): Promise<StreamUebersicht> {
