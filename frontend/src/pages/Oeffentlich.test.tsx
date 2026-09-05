@@ -46,24 +46,48 @@ async function anmelden() {
 }
 function render(element: React.ReactNode) { return renderToStaticMarkup(<MemoryRouter>{element}</MemoryRouter>); }
 
-it("öffnet das öffentliche Archiv mit Loginlink, Warteschlange und Speicher bereits vor der Auth-Antwort", () => {
+it("öffnet das öffentliche Archiv mit Loginlink und ohne Verwaltungsnavigation", () => {
   daten.antworten = [[], []];
   const html = render(<App />);
   expect(html).toContain("Dein Videoarchiv");
   expect(html).toContain('href="/anmelden"');
-  expect(html).toContain('href="/warteschlange"');
-  expect(html).toContain('href="/speicher"');
+  expect(html).not.toContain('href="/warteschlange"');
+  expect(html).not.toContain('href="/speicher"');
+  expect(html).not.toContain("Dein Archiv");
   expect(html).not.toContain('href="/einstellungen"');
   expect(html).not.toContain('href="/streams"');
   expect(html).not.toContain("Kanal aufnehmen");
   expect(html).not.toContain("Anmeldung wird geprüft");
 });
 
-it.each(["/einstellungen", "/streams"])("montiert bei direktem Gastzugriff auf %s keine Verwaltungsseite", (pfad) => {
+it.each(["/einstellungen", "/streams", "/warteschlange", "/speicher"])("montiert bei direktem Gastzugriff auf %s keine Verwaltungsseite", async (pfad) => {
   daten.antworten = [[], []];
   const html = renderToStaticMarkup(<MemoryRouter initialEntries={[pfad]}><App /></MemoryRouter>);
   expect(html).toContain("Bei Vitrine anmelden");
-  // Nur öffentliche Kanalliste und Navigationszähler; keine Seitenabfrage.
+  // Nur öffentliche Kanalliste und inaktiver Navigationszähler; keine Seitenabfrage.
+  expect(daten.laden).toHaveLength(2);
+  const auftraege = vi.spyOn(api, "auftraege");
+  await expect(daten.laden[1]()).resolves.toEqual([]);
+  expect(auftraege).not.toHaveBeenCalled();
+  expect(html).not.toContain('href="/warteschlange"');
+  expect(html).not.toContain('href="/speicher"');
+});
+
+it.each(["/warteschlange", "/speicher"])("öffnet %s für den Admin und sperrt es nach dem Abmelden wieder", async (pfad) => {
+  await anmelden();
+  daten.antworten = [[], []];
+  const html = renderToStaticMarkup(<MemoryRouter initialEntries={[pfad]}><App /></MemoryRouter>);
+  expect(html).toContain('href="/warteschlange"');
+  expect(html).toContain('href="/speicher"');
+  expect(html).not.toContain("Bei Vitrine anmelden");
+  expect(daten.laden.length).toBeGreaterThan(3);
+
+  auth.sperren();
+  daten.antworten = [[], []]; daten.laden = [];
+  const gast = renderToStaticMarkup(<MemoryRouter initialEntries={[pfad]}><App /></MemoryRouter>);
+  expect(gast).toContain("Bei Vitrine anmelden");
+  expect(gast).not.toContain('href="/warteschlange"');
+  expect(gast).not.toContain('href="/speicher"');
   expect(daten.laden).toHaveLength(2);
 });
 
@@ -101,7 +125,7 @@ it("zeigt einen Kanal ohne Verwaltungsaktionen und fragt keine offenen Downloads
   expect(offene).not.toHaveBeenCalled();
 });
 
-it("macht die Warteschlange ohne Pause-, Wiederholen- oder Abbrechenaktionen und Fehlerdetails lesbar", () => {
+it("blendet auch bei isoliertem Gast-Rendering der Warteschlange Aktionen und Fehlerdetails aus", () => {
   daten.antworten = [[
     { id: 1, art: "video_download", titel: "Download", status: "running", fortschritt: .2, fehler: "geheimer Pfad", erstellt: null },
     { id: 2, art: "video_download", titel: "Fehlversuch", status: "failed", fortschritt: 0, meldung: "internes Detail", erstellt: null },
@@ -116,7 +140,7 @@ it("macht die Warteschlange ohne Pause-, Wiederholen- oder Abbrechenaktionen und
   expect(html).not.toContain("internes Detail");
 });
 
-it("zeigt Speicherwerte ohne Serverpfad und ohne Hochstufenformular", () => {
+it("blendet auch bei isoliertem Gast-Rendering der Speicheransicht Serverpfad und Hochstufenformular aus", () => {
   daten.antworten = [{
     kaltspeicher: { bytes: 100, quelle_bytes: 100, gespart_bytes: 0, videos: 1, dauer_s: 100 },
     heissspeicher: { bytes: 0, limit_bytes: 0, anzahl: 0 }, hochrechnung: { offene_videos: 0 },

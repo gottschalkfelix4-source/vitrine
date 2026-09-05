@@ -105,8 +105,8 @@ werden, muss das Paket von Hand auf *public* gestellt werden (Repo →
 
 Das Archiv ist ohne Anmeldung sichtbar: Gaeste koennen archivierte Kanaele,
 Playlists, Videos, Vorschaubilder und Untertitel ansehen und durchsuchen.
-Warteschlange und Speicher sind lesbar; interne Pfade und Fehlermeldungen
-werden dort fuer Gaeste ausgeblendet. Nicht archivierte Inhalte und globale
+Warteschlange und Speicher sind einschliesslich ihrer Schnittstellen nur fuer
+angemeldete Administratoren erreichbar. Nicht archivierte Inhalte und globale
 Wiedergabedaten werden nicht an Gaeste ausgegeben. Deren Fortschritt bleibt
 im jeweiligen Browser. Einstellungen, Kanalaufnahme, Archivierungs- und
 Loeschaktionen sowie das Stream-Dashboard sind dem Admin vorbehalten.
@@ -242,7 +242,8 @@ bereits am Proxy zu begrenzen.
 
 Ohne Anmeldung sind das archivierte Videoangebot, Kanaele, Suche und
 Wiedergabe sowie die Login-Oberflaeche und der Zustandscheck erreichbar.
-Einstellungen, Stream-Dashboard und Verwaltungsaktionen erfordern den Admin.
+Einstellungen, Stream-Dashboard, Warteschlange, Speicher und Verwaltungsaktionen
+erfordern den Admin.
 Der Einrichtungsaufruf ist ausschliesslich mit dem einmaligen Code und ohne
 bereits eingerichteten Administrator nutzbar.
 Es gibt einen Administrator und keine oeffentlichen Zuschauer-Konten.

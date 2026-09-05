@@ -24,7 +24,7 @@ _PUBLIC = {("GET", "/api/health"), ("GET", "/api/auth/session"),
 _CREDENTIAL_PATHS = {"/api/auth/login", "/api/auth/setup"}
 _PUBLIC_READ = re.compile(
     r"/api/(?:channels(?:/[^/]+)?|playlists/[^/]+|videos(?:/[^/]+(?:/(?:stream|playback-state|subtitles/[^/]+))?)?"
-    r"|search|thumbs/(?:quelle/)?[^/]+|jobs(?:/aktiv)?|storage"
+    r"|search|thumbs/(?:quelle/)?[^/]+"
     r"|playback/[A-Za-z0-9_-]{43}/(?:index\.m3u8|segments/[0-9]+\.ts))"
 )
 _PUBLIC_PLAYBACK = re.compile(

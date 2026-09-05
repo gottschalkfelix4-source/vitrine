@@ -117,7 +117,7 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
   const admin = useAdmin();
   const ort = useLocation();
   const kanaele = useContext(KanalKontext);
-  const { daten: auftraege } = useApi(() => api.auftraege(), [], LEISTE_INTERVALL);
+  const { daten: auftraege } = useApi(() => admin ? api.auftraege() : Promise.resolve([]), [admin], admin ? LEISTE_INTERVALL : undefined);
   const nav = useRef<HTMLElement>(null);
   const offen = auftraege?.filter((a) => a.status === "pending" || a.status === "running").length ?? 0;
   const gruppen: { titel?: string; punkte: { pfad: string; icon: IconName; text: string; zahl?: number }[] }[] = [
@@ -125,12 +125,12 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
       { pfad: "/", icon: "home", text: "Start" },
       { pfad: "/kanaele", icon: "channels", text: "Kanäle", zahl: kanaele.length },
     ] },
-    { titel: "Dein Archiv", punkte: [
+  ];
+  if (admin) gruppen.push({ titel: "Dein Archiv", punkte: [
       { pfad: "/warteschlange", icon: "queue", text: "Warteschlange", zahl: offen || undefined },
       { pfad: "/speicher", icon: "storage", text: "Speicher" },
-      ...(admin ? [{ pfad: "/streams", icon: "play" as const, text: "Streams" }] : []),
-    ] },
-  ];
+      { pfad: "/streams", icon: "play", text: "Streams" },
+    ] });
 
   useEffect(() => {
     if (!schubladeOffen) return;
@@ -245,8 +245,8 @@ function Archiv() {
             <Route path="/playlist/:playlistId" element={<Playlistseite key={ort.pathname} />} />
             <Route path="/video/:videoId" element={<Wiedergabeseite key={ort.pathname} />} />
             <Route path="/suche" element={<Suchseite />} />
-            <Route path="/warteschlange" element={<Warteschlangeseite />} />
-            <Route path="/speicher" element={<Speicherseite />} />
+            <Route path="/warteschlange" element={<AnmeldeSchranke><Warteschlangeseite /></AnmeldeSchranke>} />
+            <Route path="/speicher" element={<AnmeldeSchranke><Speicherseite /></AnmeldeSchranke>} />
             <Route path="/anmelden" element={<Anmeldeseite />} />
             <Route path="/einstellungen" element={<AnmeldeSchranke><Einstellungenseite /></AnmeldeSchranke>} />
             <Route path="/streams" element={<AnmeldeSchranke><Streamsseite /></AnmeldeSchranke>} />

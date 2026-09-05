@@ -99,24 +99,60 @@ def test_guest_media_only_uses_existing_archive_and_never_fetches_source(archive
     assert client.get("/api/thumbs/orphan.jpg").status_code == 404
 
 
-def test_public_queue_storage_are_sanitized_but_admin_keeps_management_view(archive, monkeypatch):
+def test_queue_and_storage_require_admin_and_keep_management_view(archive, monkeypatch):
     client, _ = archive
     monkeypatch.setattr("app.services.vpn.ausgang_ids", list)
-    queue = client.get("/api/jobs").json()
-    assert queue[0]["meldung"] is None and queue[0]["fehler"] is None
-    active = client.get("/api/jobs/aktiv").json()
-    assert active["laufend"][0]["meldung"] is None
-    assert "ausgaenge" not in active and "drosselung" not in active
-    storage = client.get("/api/storage")
-    assert storage.status_code == 200
-    assert str(settings.data_dir) not in storage.text
-    assert all(row["pfad"] in {"Archiv", "Wiedergabe", "Daten und Videos"} for row in storage.json()["traeger"])
+    for path in ("/api/jobs", "/api/jobs/aktiv", "/api/storage"):
+        assert client.get(path).status_code == 401
     setup(client)
     assert len(client.get("/api/channels").json()) == 2
     assert len(client.get("/api/playlists/mixed").json()["positionen"]) == 2
     assert client.get("/api/videos/private0001").status_code == 200
     assert client.get("/api/videos/archived001").json()["video"]["fortschritt_s"] == 45
     assert client.get("/api/jobs").json()[0]["fehler"] == "cookie=private-value"
+    active = client.get("/api/jobs/aktiv")
+    assert active.status_code == 200
+    assert active.json()["laufend"][0]["meldung"] == "/private/job/path"
+    assert "ausgaenge" in active.json() and "drosselung" in active.json()
+    assert client.get("/api/storage").status_code == 200
+
+
+@pytest.mark.parametrize("root_path", ["", "/vitrine"])
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+def test_guest_queue_storage_denied_with_query_trailing_slash_and_proxy_prefix(environment, root_path, method):
+    client = TestClient(main.app, base_url="https://testserver", root_path=root_path)
+    try:
+        for path in ("/api/jobs", "/api/jobs?status=running", "/api/jobs/", "/api/jobs/aktiv",
+                     "/api/jobs/aktiv/", "/api/storage", "/api/storage/"):
+            result = client.request(method, root_path + path, follow_redirects=False)
+            assert result.status_code == 401
+            assert result.headers["cache-control"] == "no-store"
+            assert "location" not in result.headers
+        # Der Proxy-Praefix sperrt die neuen Adminbereiche, nicht das Archiv.
+        if method == "GET":
+            assert client.get(root_path + "/api/channels").status_code == 200
+            assert client.get(root_path + "/api/videos").status_code == 200
+    finally:
+        client.close()
+
+
+def test_guest_playback_still_delivers_archived_bytes(archive, tmp_path):
+    from app.services.bundle import BundleManifest, write_bundle
+
+    client, factory = archive
+    media = tmp_path / "film.mp4"
+    content = b"archived-video-bytes" * 100
+    media.write_bytes(content)
+    bundle = settings.bundle_dir / "guest-playback.zip"
+    manifest = BundleManifest(schema_version=1, video_id="archived001", channel_id="public", title="Film",
+                              media_name="", media_bytes=0, mime_type="", video_codec="h264", audio_codec="aac")
+    write_bundle(bundle, manifest=manifest, media_file=media, info_json={"id": "archived001"})
+    with factory() as db:
+        db.get(Video, "archived001").bundle_file = str(bundle)
+        db.commit()
+    response = client.get("/api/videos/archived001/stream?support=mp4,h264,aac")
+    assert response.status_code == 200 and response.content == content
+    assert client.get("/api/videos/archived001/playback-state").status_code == 200
 
 
 @pytest.mark.parametrize(("method", "path"), [

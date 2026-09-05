@@ -150,10 +150,10 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/assets/gibtsnicht.js)" = "404"
           # Das Archiv ist oeffentlich, Konfiguration und Zuschauerdetails
           # sowie alle Verwaltungsaktionen bleiben dagegen beim Admin.
-          for path in settings cookies vpn hardware streams; do
+          for path in settings cookies vpn hardware streams jobs jobs/aktiv storage; do
             test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000/api/$path")" = "401"
           done
-          for path in channels videos jobs storage; do
+          for path in channels videos; do
             test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000/api/$path")" = "200"
           done
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/api/jobs/resume)" = "401"

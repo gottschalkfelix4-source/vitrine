@@ -162,8 +162,9 @@ Forwarded-Header als vertrauenswuerdig zu behandeln. Host-/Portpruefung, CSRF
 fuer Admin-Schreibzugriffe, Passwort-Hashing, Loginlimit und Einmalcode bleiben.
 
 Oeffentliche Leserechte gelten explizit fuer archivierte Kanaele, Playlists,
-Videos, Suche, Vorschaubilder und Untertitel sowie bereinigte Warteschlangen-
-und Speicheransichten. Nicht archivierte Inhalte, Admin-Fortschritt, interne
+Videos, Suche, Vorschaubilder und Untertitel. Warteschlange und Speicheransicht
+sind einschliesslich ihrer GET-/HEAD-Schnittstellen dem Admin vorbehalten.
+Nicht archivierte Inhalte, Admin-Fortschritt, interne
 Dateipfade, Konfiguration, Fehlermeldungen und VPN-Verbindungsdetails werden
 Gaesten nicht ausgegeben. Gastfortschritt bleibt im Browserspeicher. Settings,
 Kanalaufnahme, Download-/Loeschaktionen und das Stream-Dashboard bleiben

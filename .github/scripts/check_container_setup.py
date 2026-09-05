@@ -48,6 +48,10 @@ def sign_in(secure=False):
     cookie = name + "=" + session.value
     status, headers, _ = request("/api/settings", cookie=cookie)
     assert status == 200 and headers["Cache-Control"] == "no-store"
+    for path in ("/api/jobs", "/api/jobs/aktiv", "/api/storage"):
+        status, headers, _ = request(path, cookie=cookie)
+        assert status == 200 and headers["Cache-Control"] == "no-store"
+        assert request(path)[0] == 401
     return cookie
 
 
