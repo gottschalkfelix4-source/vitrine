@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.models import HotCopy, HotCopyStatus, Video, VideoStatus
-from app.services import cache, geoip, live_streams, paths, playback
+from app.services import cache, geoip, live_streams, paths, playback, playback_quality
 from app.services.bundle import BundleError, BundleReader
 from app.services.ranges import UnsatisfiableRange, parse_range
 
@@ -233,6 +233,7 @@ def playback_state(video_id: str, db: Session = Depends(get_db)) -> dict[str, ob
 class PlaybackRequest(BaseModel):
     support: str = Field(default="mp4,h264,aac", max_length=512)
     force_transcode: bool = False
+    quality: playback_quality.Quality = "auto"
 
 
 class PlaybackHeartbeat(BaseModel):
@@ -253,8 +254,11 @@ def start_playback(video_id: str, payload: PlaybackRequest, request: Request, db
     bundle = _bundle_of(video)
     try:
         with BundleReader(bundle) as reader:
-            decision = playback.decide(reader.manifest, playback.parse_client_support(payload.support))
-            mode = "transcode" if payload.force_transcode or decision.mode == playback.Mode.TRANSCODE else "direct"
+            choice = playback_quality.choose(
+                reader.manifest, playback.parse_client_support(payload.support), quality=payload.quality,
+                force_transcode=payload.force_transcode, source_width=video.width, source_height=video.height,
+            )
+            mode = choice.mode
             viewer = live_streams.manager.create(
                 video_id=video.id, video_title=video.title,
                 channel_title=video.channel.name if video.channel else None,
@@ -262,7 +266,10 @@ def start_playback(video_id: str, payload: PlaybackRequest, request: Request, db
                 client_name=live_streams.client_name(request.headers.get("user-agent", "")[:512]),
                 mode=mode, duration_s=reader.manifest.duration_s or video.duration_s,
                 source=bundle, offset=reader.media_data_offset(), size=reader.media_size,
+                quality=choice.quality, quality_label=choice.label, profile=choice.profile,
             )
+    except playback_quality.QualityError as error:
+        raise HTTPException(422, str(error)) from None
     except live_streams.PlaybackError as error:
         raise _playback_error(error) from None
     except (BundleError, zipfile.BadZipFile, OSError, ValueError, TypeError):
@@ -271,7 +278,8 @@ def start_playback(video_id: str, payload: PlaybackRequest, request: Request, db
            f"/api/videos/{quote(video.id, safe='')}/stream?support={quote(payload.support, safe='')}")
     return {"token": viewer.token, "mode": mode, "url": url,
             "duration_s": viewer.duration_s, "segment_seconds": live_streams.SEGMENT_SECONDS,
-            "reason": "Live-Transkodierung wurde angefordert" if payload.force_transcode else decision.reason}
+            "reason": choice.reason, "quality": choice.quality, "quality_label": choice.label,
+            "available_qualities": choice.available}
 
 
 @playback_router.get("/playback/{token}/index.m3u8")

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.config import settings
+from app.services import playback_quality
 
 SEGMENT_SECONDS = 6
 MAX_SESSIONS = 64
@@ -67,6 +68,9 @@ class Viewer:
     source: Path
     offset: int
     size: int
+    quality: playback_quality.Quality = "auto"
+    quality_label: str = "Automatisch"
+    profile: playback_quality.Profile = playback_quality.PROFILES["1080p"]
     started_at: str = field(default_factory=_iso)
     last_seen_at: str = field(default_factory=_iso)
     last_seen: float = field(default_factory=time.monotonic)
@@ -177,12 +181,12 @@ class StreamManager:
             "-format_whitelist", "mov,matroska,webm,ogg,mp3",
             "-ss", str(start), "-i", source, "-t", str(length),
             "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
-            "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+            "-vf", viewer.profile.scale_filter,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-            "-maxrate", "4M", "-bufsize", "8M", "-pix_fmt", "yuv420p",
+            "-maxrate", f"{viewer.profile.max_rate_kbps}k", "-bufsize", f"{viewer.profile.max_rate_kbps * 2}k", "-pix_fmt", "yuv420p",
             "-threads", "2", "-filter_threads", "1", "-r", "30", "-g", "180",
             "-keyint_min", "180", "-sc_threshold", "0", "-c:a", "aac",
-            "-b:a", "128k", "-ac", "2", "-ar", "48000",
+            "-b:a", f"{viewer.profile.audio_bitrate_kbps}k", "-ac", "2", "-ar", "48000",
             "-fs", str(MAX_SEGMENT_BYTES), "-f", "mpegts", "pipe:1",
         ]
 
@@ -282,6 +286,7 @@ class StreamManager:
                 "id": v.id, "video_id": v.video_id, "video_title": v.video_title,
                 "channel_title": v.channel_title, "client_address": v.client_address,
                 "client_name": v.client_name, "mode": v.mode, "state": v.state,
+                "quality": v.quality, "quality_label": v.quality_label,
                 "position_s": v.position_s, "duration_s": v.duration_s,
                 "started_at": v.started_at, "last_seen_at": v.last_seen_at,
                 "transcoding": v.process is not None and v.process.poll() is None,

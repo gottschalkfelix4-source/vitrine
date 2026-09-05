@@ -69,13 +69,13 @@ geo = locator.lookup('8.8.8.8')
 assert geo['status'] == 'located' and geo['country_code'] == 'US'
 assert -90 <= geo['latitude'] <= 90 and -180 <= geo['longitude'] <= 180
 media = Path('/tmp/vitrine-ci-demo.mp4')
-subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=15',
+subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=15',
                 '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '15',
                 '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(media)], check=True)
 target = Path('/data/bundles/UCci/ci-demo.zip')
 manifest = BundleManifest(schema_version=1, video_id='ci-demo', channel_id='UCci', title='CI-Video',
     media_name='', media_bytes=0, mime_type='', video_codec='h264', audio_codec='aac',
-    width=160, height=90, duration_s=15)
+    width=640, height=360, duration_s=15)
 write_bundle(target, manifest=manifest, media_file=media, root=Path('/data/bundles'))
 with session_scope() as db:
     db.add(Channel(id='UCci', name='CI-Kanal', sync_enabled=False, auto_archive=False))
@@ -89,17 +89,28 @@ media.unlink()
     assert json.loads(request("/api/videos")[2])[0]["id"] == "ci-demo"
     assert request("/api/videos/ci-demo/stream", extra_headers={"Range": "bytes=0-99"})[0] == 206
     assert request("/api/streams")[0] == 401
-    payload = {"support": "mp4,h264,aac", "force_transcode": True}
+    # Eine nicht vorhandene hoehere Stufe darf keine Sitzung erzeugen.
+    assert request("/api/videos/ci-demo/playback", {"quality": "720p"}, origin=BASE)[0] == 422
+    assert json.loads(request("/api/streams", cookie=admin_cookie)[2])["streams"] == []
+    payload = {"support": "mp4,h264,aac", "force_transcode": True, "quality": "240p"}
     status, _, body = request("/api/videos/ci-demo/playback", payload, origin=BASE)
     assert status == 200
     live = json.loads(body)
     assert live["mode"] == "transcode"
+    assert live["quality"] == "240p" and live["quality_label"] == "240p"
+    offered = {option["value"] for option in live["available_qualities"]}
+    assert {"auto", "360p", "240p"} <= offered and "720p" not in offered
     status, _, body = request(live["url"])
     assert status == 200 and b"#EXT-X-ENDLIST" in body
     # Direkt den letzten Abschnitt abrufen: kein Vollencode vor dem Spulen.
     path = "/api/playback/" + live["token"]
     status, _, data = request(path + "/segments/2.ts")
     assert status == 200 and len(data) > 188 and data[0] == 0x47
+    probe = subprocess.run(["docker", "exec", "-i", CONTAINER, "gosu", "archiv", "ffprobe", "-v", "error",
+                            "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                            "-of", "json", "-i", "pipe:0"], input=data, capture_output=True, check=True, timeout=15)
+    dimensions = json.loads(probe.stdout)["streams"][0]
+    assert dimensions["height"] == 240 and dimensions["width"] <= 428
     assert request(path + "/heartbeat", {"position_s": 13, "state": "playing"}, origin=BASE)[0] == 204
     overview = json.loads(request("/api/streams", cookie=admin_cookie)[2])
     assert overview["geoip"]["available"] is True and overview["geoip"]["database_date"]
@@ -110,6 +121,11 @@ media.unlink()
     assert live["token"] not in json.dumps(streams)
     assert request(path + "/ended", {}, origin=BASE)[0] == 204
     assert json.loads(request("/api/streams", cookie=admin_cookie)[2])["streams"] == []
+    status, _, body = request("/api/videos/ci-demo/playback", {"quality": "original"}, origin=BASE)
+    original = json.loads(body)
+    assert status == 200 and original["mode"] == "direct" and original["quality"] == "original"
+    assert request(original["url"], extra_headers={"Range": "bytes=0-99"})[0] == 206
+    assert request("/api/playback/" + original["token"] + "/ended", {}, origin=BASE)[0] == 204
 
 
 def main():

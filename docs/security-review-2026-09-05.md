@@ -214,3 +214,19 @@ Die Gegenpruefung hat Admin-Zugriff, abgewiesene fremde Lookup-Pfade,
 IPv4/IPv6-Sonderfaelle, endende Streams und die Unabhaengigkeit der
 Wiedergabe-Lebenszeichen von einem blockierten Geo-IP-Reader geprueft.
 Standortangaben sind ausdruecklich Naeherungen und kein genauer Aufenthaltsort.
+
+## Ergaenzung: Qualitaetswahl im Videoplayer
+
+Die oeffentliche Wiedergabe nimmt nur feste Qualitaetswerte entgegen:
+Automatisch, Original oder 240p/360p/480p/720p/1080p. Der Server entscheidet
+anhand der Archivabmessungen und Browserfaehigkeiten, welche davon nutzbar
+sind. Nicht angebotene Werte werden vor dem Anlegen einer Sitzung abgelehnt.
+Freie Aufloesungen, Bitraten oder FFmpeg-Argumente werden nicht angenommen.
+
+Die Live-Profile begrenzen die Ausgabe auf maximal 1920 Pixel an der langen
+Kante und 1920 x 1080 Pixel insgesamt; Hochkantvideos verwenden dieselben
+Grenzen. Profile und Abschnittscache gehoeren zur jeweiligen Zuschauersitzung.
+Ein Qualitaetswechsel gibt die alte Sitzung frei. Die bestehenden Grenzen
+fuer gleichzeitige Sitzungen, Encoderprozesse, Laufzeit und Arbeitsspeicher
+gelten weiter. Die Qualitaetswahl erweitert die oeffentlichen Rechte fuer
+Warteschlange, Speicher, Einstellungen oder Stream-Dashboard nicht.

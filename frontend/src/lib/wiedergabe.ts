@@ -1,6 +1,9 @@
 import { authFetch, auswerten } from "./auth";
 import { faehigkeiten } from "./capabilities";
 
+export type WiedergabeQualitaet = "auto" | "original" | "1080p" | "720p" | "480p" | "360p" | "240p";
+export interface Qualitaetsangebot { value: WiedergabeQualitaet; label: string }
+
 export interface Wiedergabesitzung {
   token: string;
   mode: "direct" | "transcode";
@@ -8,6 +11,9 @@ export interface Wiedergabesitzung {
   duration_s: number | null;
   segment_seconds: number;
   reason: string;
+  quality: WiedergabeQualitaet;
+  quality_label: string;
+  available_qualities: Qualitaetsangebot[];
 }
 
 export type StreamStatus = "playing" | "paused" | "buffering";
@@ -19,9 +25,9 @@ async function senden<T>(pfad: string, daten: object, keepalive = false): Promis
   }, true));
 }
 
-export function wiedergabeStarten(videoId: string, transkodieren = false): Promise<Wiedergabesitzung> {
+export function wiedergabeStarten(videoId: string, transkodieren = false, quality: WiedergabeQualitaet = "auto"): Promise<Wiedergabesitzung> {
   return senden(`/api/videos/${encodeURIComponent(videoId)}/playback`, {
-    support: faehigkeiten(), force_transcode: transkodieren,
+    support: faehigkeiten(), force_transcode: transkodieren, quality,
   });
 }
 

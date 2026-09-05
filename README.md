@@ -224,6 +224,17 @@ vollstaendigen Encode. Bei einem unerwarteten Decoderfehler versucht der
 Player automatisch die Live-Transkodierung. Browser ohne native HLS-Unterstuetzung
 verwenden das lokal mitgelieferte [hls.js](https://github.com/video-dev/hls.js).
 
+Ueber das **Zahnrad im Videoplayer > Qualitaet** koennen Gaeste und Admins die
+Wiedergabequalitaet wechseln. Angeboten werden **Automatisch**, das direkt
+abspielbare **Original** und passende Stufen von **240p bis 1080p**. Es werden
+nur Stufen angeboten, die im gespeicherten Video vorhanden sind oder durch
+Verkleinern erzeugt werden koennen. Kleinere Aufloesungen werden bei Bedarf
+live transkodiert; das Archivvideo wird dabei nicht veraendert. Beim Wechsel
+bleiben Abspielposition, Pause, Lautstaerke und Wiedergabetempo erhalten.
+Automatisch waehlt den passenden Auslieferungsweg fuer den Browser; es ist
+keine fortlaufende Anpassung an die Netzwerkgeschwindigkeit. Die Qualitaetswahl
+gilt jeweils fuer den eigenen Player, nicht fuer andere Zuschauer.
+
 Die Live-Umwandlung verwendet den Software-Encoder mit maximal zwei parallelen
 Prozessen und zwei Encoder-Threads je Prozess. Der Abschnittscache ist auf
 64 MiB Arbeitsspeicher begrenzt; es entsteht keine zweite vollstaendige

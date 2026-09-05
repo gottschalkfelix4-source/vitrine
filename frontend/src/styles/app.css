@@ -1397,6 +1397,20 @@
   .kopf-links { gap: 4px; }
   .kopf .marke > span { font-size: 21px; }
 }
+
+.player-status { position: absolute; inset: 0 0 72px; overflow: auto; background: rgba(0, 0, 0, .85); }
+.player-status h2 { font-size: 18px; margin: 8px 0; }
+.player-status p { margin: 4px 0 12px; }
+.player-einstellungen.steuer-menue { right: 12px; bottom: 66px; width: min(290px, calc(100% - 24px)); min-width: 0; max-height: calc(100% - 80px); overflow-y: auto; z-index: 5; }
+.player-einstellungen button { display: flex; align-items: center; gap: 8px; min-height: 40px; flex-shrink: 0; }
+.player-einstellungen button[role="menuitem"] > span:last-child { display: flex; align-items: center; gap: 8px; margin-left: auto; color: #d0d0d0; text-align: right; }
+.player-einstellungen .player-menue-zurueck { border-bottom: 1px solid #555; margin-bottom: 4px; }
+.player-einstellungen button:focus-visible { outline: 2px solid #fff; outline-offset: -3px; background: #444; }
+@media (max-width: 640px) {
+  .player-einstellungen.steuer-menue { bottom: 56px; max-height: calc(100% - 64px); }
+  .player-status { inset-block-end: 64px; padding: 12px; }
+  .player-status .player-meldung-icon { display: none; }
+}
 @media (display-mode: standalone) {
   .kopf { padding-top: env(safe-area-inset-top); }
   .huelle { grid-template-rows: calc(var(--kopf-hoehe) + env(safe-area-inset-top)) minmax(0,1fr); }

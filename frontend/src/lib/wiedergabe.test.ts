@@ -33,7 +33,7 @@ it("startet Gastwiedergabe ohne Admin-CSRF und beendet genau die eigene Sitzung"
   expect(url).toBe("/api/videos/video%2Fid/playback");
   expect(new Headers(init?.headers).get("X-Vitrine-Request")).toBe("1");
   expect(new Headers(init?.headers).has("X-CSRF-Token")).toBe(false);
-  expect(JSON.parse(init!.body as string)).toEqual({ support: "mp4,h264,aac", force_transcode: true });
+  expect(JSON.parse(init!.body as string)).toEqual({ support: "mp4,h264,aac", force_transcode: true, quality: "auto" });
   netz.mockResolvedValueOnce(new Response(null, { status: 204 }));
   await wiedergabeMelden(sitzung.token, 23, "paused");
   expect(JSON.parse(netz.mock.calls[1][1]!.body as string)).toEqual({ position_s: 23, state: "paused" });
@@ -41,6 +41,21 @@ it("startet Gastwiedergabe ohne Admin-CSRF und beendet genau die eigene Sitzung"
   await wiedergabeBeenden(sitzung.token);
   expect(netz.mock.calls[2][0]).toBe("/api/playback/test-token/ended");
   expect(netz.mock.calls[2][1]?.keepalive).toBe(true);
+});
+
+it.each(["auto", "original", "1080p", "720p", "480p", "360p", "240p"] as const)("sendet die gewählte Qualität %s unverändert und übernimmt ausschließlich die Serverangebote", async (quality) => {
+  const antwort = { token: "neue-sitzung", mode: quality === "original" ? "direct" : "transcode", quality,
+    quality_label: "480p", available_qualities: [{ value: "auto", label: "Automatisch" }, { value: "480p", label: "480p" }] };
+  netz.mockResolvedValueOnce(Response.json(antwort));
+  await expect(wiedergabeStarten("video", false, quality)).resolves.toEqual(antwort);
+  expect(JSON.parse(netz.mock.calls[0][1]!.body as string)).toMatchObject({ quality, force_transcode: false });
+  expect(new Headers(netz.mock.calls[0][1]?.headers).get("X-Vitrine-Request")).toBe("1");
+});
+
+it("wiederholt eine ausgelastete Qualitätsanforderung nicht automatisch", async () => {
+  netz.mockResolvedValueOnce(Response.json({ detail: "Bitte kurz warten" }, { status: 429 }));
+  await expect(wiedergabeStarten("video", false, "360p")).rejects.toMatchObject({ status: 429 });
+  expect(netz).toHaveBeenCalledTimes(1);
 });
 
 it("Gastfortschritt ist pro Video getrennt und erhält die Gesehen-Markierung", () => {

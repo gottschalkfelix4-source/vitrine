@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icon } from "./Icons";
+import { PlayerEinstellungen } from "./PlayerEinstellungen";
 import type { Kapitel } from "../lib/api";
 import { api, untertitelUrl } from "../lib/api";
 import { useAdmin } from "./Anmeldung";
 import { ApiFehler } from "../lib/auth";
 import { dauer } from "../lib/format";
 import { lokalFortschrittMerken } from "../lib/wiedergabeFortschritt";
-import { wiedergabeStarten, wiedergabeMelden, wiedergabeBeenden, type Wiedergabesitzung } from "../lib/wiedergabe";
+import { wiedergabeStarten, wiedergabeMelden, wiedergabeBeenden, type Wiedergabesitzung, type WiedergabeQualitaet, type Qualitaetsangebot } from "../lib/wiedergabe";
 import {
   istVollbild,
   vollbildUmschalten as umschaltenVollbild,
@@ -55,7 +56,6 @@ const HERZSCHLAG_MS = 15_000;
 const FORTSCHRITT_MS = 5_000;
 /** Nach so viel Ruhe verschwindet die Steuerung waehrend der Wiedergabe. */
 const AUSBLENDEN_MS = 2600;
-const TEMPI = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const SPEICHER_SCHLUESSEL = "vitrine.wiedergabe";
 
 interface Gemerkt {
@@ -114,7 +114,11 @@ export function Player({
   const [lage, setLage] = useState<Lage>({ art: "pruefen" });
   const [ladeVersuch, setLadeVersuch] = useState(0);
   const [transkodieren, setTranskodieren] = useState(false);
+  const [qualitaet, setQualitaet] = useState<WiedergabeQualitaet>("auto");
+  const [angebote, setAngebote] = useState<Qualitaetsangebot[]>([{ value: "auto", label: "Automatisch" }]);
   const wiederaufnahme = useRef<number | null>(null);
+  const sollLaufen = useRef(true);
+  const quellenwechsel = useRef(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const huelleRef = useRef<HTMLDivElement>(null);
   const leisteRef = useRef<HTMLDivElement>(null);
@@ -128,28 +132,54 @@ export function Player({
   const [wartet, setWartet] = useState(false);
   const [hochkant, setHochkant] = useState(false);
   const [gemerkt, setGemerkt] = useState<Gemerkt>(gemerktLesen);
+  const gemerktRef = useRef(gemerkt);
+  gemerktRef.current = gemerkt;
   const [vollbild, setVollbild] = useState(false);
   const [sichtbar, setSichtbar] = useState(true);
-  const [menue, setMenue] = useState<"tempo" | "untertitel" | null>(null);
+  const [menue, setMenue] = useState<"einstellungen" | "untertitel" | null>(null);
   const [spur, setSpur] = useState(-1); // -1 = aus
+  const spurRef = useRef(spur);
+  spurRef.current = spur;
   const [zeiger, setZeiger] = useState<{ x: number; zeit: number } | null>(null);
   const zieht = useRef(false);
   const ausblender = useRef<number | undefined>(undefined);
+
+  // Vor src/load/Effect-Cleanup lesen: Danach setzt der Browser Zeit und Pause zurück.
+  const wiedergabeMerken = useCallback(() => {
+    const el = videoRef.current;
+    if (!quellenwechsel.current && el && el.readyState >= 1) {
+      wiederaufnahme.current = el.currentTime;
+      sollLaufen.current = !el.paused;
+      gemerktRef.current = { lautstaerke: el.volume, stumm: el.muted, tempo: el.playbackRate };
+    }
+    quellenwechsel.current = true;
+  }, []);
+
+  useEffect(() => {
+    wiederaufnahme.current = null;
+    sollLaufen.current = true;
+    quellenwechsel.current = true;
+    setQualitaet("auto");
+    setTranskodieren(false);
+    setAngebote([{ value: "auto", label: "Automatisch" }]);
+  }, [videoId]);
 
   // ---- Quelle beschaffen -------------------------------------------------
   useEffect(() => {
     let abgebrochen = false;
     let sitzung: Wiedergabesitzung | null = null;
+    quellenwechsel.current = true;
     gesprungen.current = false;
     setLage({ art: "pruefen" });
 
     async function oeffnen(): Promise<void> {
       try {
-        sitzung = await wiedergabeStarten(videoId, transkodieren);
+        sitzung = await wiedergabeStarten(videoId, transkodieren, qualitaet);
         if (abgebrochen) {
           void wiedergabeBeenden(sitzung.token).catch(() => {});
           return;
         }
+        setAngebote(sitzung.available_qualities?.length ? sitzung.available_qualities : [{ value: "auto", label: "Automatisch" }]);
         setLage({ art: "bereit", quelle: sitzung.url, modus: sitzung.mode, sitzung });
       } catch (e) {
         if (!abgebrochen) setLage({ art: "fehler", text: e instanceof Error ? e.message : String(e) });
@@ -161,7 +191,7 @@ export function Player({
       abgebrochen = true;
       if (sitzung) void wiedergabeBeenden(sitzung.token).catch(() => {});
     };
-  }, [videoId, ladeVersuch, transkodieren]);
+  }, [videoId, ladeVersuch, transkodieren, qualitaet]);
 
   // Bei Bedarf werden nur angeforderte Abschnitte umgewandelt. Der Browser
   // kann deshalb sofort beginnen und später auch weit nach vorne springen.
@@ -190,7 +220,7 @@ export function Player({
         entfernen = () => hls.destroy();
         hls.on(Hls.Events.ERROR, (_ereignis, daten) => {
           if (geschlossen || !daten.fatal) return;
-          wiederaufnahme.current = el.currentTime || null;
+          wiedergabeMerken();
           setLage({ art: "fehler", text: "Die Live-Wiedergabe wurde unterbrochen. Bitte versuche es erneut." });
         });
         hls.attachMedia(el);
@@ -210,11 +240,12 @@ export function Player({
     const el = videoRef.current;
     if (!el) return;
 
-    el.volume = gemerkt.lautstaerke;
-    el.muted = gemerkt.stumm;
-    el.playbackRate = gemerkt.tempo;
+    el.volume = gemerktRef.current.lautstaerke;
+    el.muted = gemerktRef.current.stumm;
+    el.playbackRate = gemerktRef.current.tempo;
 
     const beiMeta = () => {
+      if (el.readyState < 1) return;
       setGesamt(Number.isFinite(el.duration) ? el.duration : dauerS || 0);
       setHochkant(el.videoHeight > el.videoWidth);
       // Nur einmal an die gemerkte Stelle springen, nicht bei jedem
@@ -226,15 +257,26 @@ export function Player({
       }
       gesprungen.current = true;
       wiederaufnahme.current = null;
+      for (let i = 0; i < el.textTracks.length; i++) el.textTracks[i].mode = i === spurRef.current ? "showing" : "disabled";
+      // preload=metadata darf den Start nicht von einem canplay abhängig
+      // machen, das manche Browser erst nach play() auslösen.
+      if (quellenwechsel.current && sollLaufen.current) void el.play().catch(() => {});
     };
     const beiZeit = () => {
       if (!zieht.current) setZeit(el.currentTime);
     };
     const beiPuffer = () => setGepuffert(bereiche(el.buffered));
-    const an = () => setLaeuft(true);
-    const aus = () => setLaeuft(false);
+    const an = () => { setLaeuft(true); if (!quellenwechsel.current) sollLaufen.current = true; };
+    const aus = () => { setLaeuft(false); if (!quellenwechsel.current) sollLaufen.current = false; };
     const warten = () => setWartet(true);
     const weiter = () => setWartet(false);
+    const bereit = () => {
+      weiter();
+      if (!quellenwechsel.current) return;
+      quellenwechsel.current = false;
+      if (sollLaufen.current) void el.play().catch(() => { /* Browser kann den ersten manuellen Klick verlangen. */ });
+      else el.pause();
+    };
     const beiTon = () =>
       setGemerkt((g) => {
         const neu = { ...g, lautstaerke: el.volume, stumm: el.muted };
@@ -257,7 +299,7 @@ export function Player({
     el.addEventListener("ended", aus);
     el.addEventListener("waiting", warten);
     el.addEventListener("playing", weiter);
-    el.addEventListener("canplay", weiter);
+    el.addEventListener("canplay", bereit);
     el.addEventListener("volumechange", beiTon);
     el.addEventListener("ratechange", beiTempo);
     if (el.readyState >= 1) beiMeta();
@@ -272,14 +314,14 @@ export function Player({
       el.removeEventListener("ended", aus);
       el.removeEventListener("waiting", warten);
       el.removeEventListener("playing", weiter);
-      el.removeEventListener("canplay", weiter);
+      el.removeEventListener("canplay", bereit);
       el.removeEventListener("volumechange", beiTon);
       el.removeEventListener("ratechange", beiTempo);
     };
     // gemerkt bewusst nicht als Abhaengigkeit: Es wird hier nur als Startwert
     // angewandt, danach fuehrt das Element selbst.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lage.art, videoId, dauerS, startSekunde, sprungSekunde]);
+  }, [lage, videoId, dauerS, startSekunde, sprungSekunde]);
 
   // Ein neuer Zeitstempel desselben Videos spult den bestehenden Player.
   // Ein Remount würde dessen aktive Server-Lease zunächst freigeben.
@@ -303,17 +345,17 @@ export function Player({
     const erneuern = () => {
       if (erneuert) return;
       erneuert = true;
-      wiederaufnahme.current = el.currentTime;
+      wiedergabeMerken();
       setLadeVersuch((n) => n + 1);
     };
     const fortschrittSpeichern = (beimVerlassen = false) => {
-      if (!Number.isFinite(el.currentTime) || el.readyState < 1) return;
+      if (quellenwechsel.current || !Number.isFinite(el.currentTime) || el.readyState < 1) return;
       if (adminRef.current) {
         void api.fortschrittMerken(videoId, el.currentTime, el.ended || undefined, beimVerlassen).catch(() => {});
       } else lokalFortschrittMerken(videoId, el.currentTime, el.ended || undefined);
     };
     const herzschlag = () => {
-      if (beendet) return;
+      if (beendet || quellenwechsel.current) return;
       const status = el.paused ? "paused" : el.readyState < 3 ? "buffering" : "playing";
       void wiedergabeMelden(token, el.currentTime, status).catch((e) => {
         // Ein lange angehaltener Hintergrundtab kann seine Server-Lease
@@ -345,6 +387,7 @@ export function Player({
     el.addEventListener("pause", pausieren);
     el.addEventListener("waiting", herzschlag);
     el.addEventListener("playing", herzschlag);
+    el.addEventListener("canplay", herzschlag);
     el.addEventListener("seeked", nachSprung);
     el.addEventListener("ended", amEnde);
     window.addEventListener("pagehide", beimVerlassen);
@@ -357,6 +400,7 @@ export function Player({
       el.removeEventListener("pause", pausieren);
       el.removeEventListener("waiting", herzschlag);
       el.removeEventListener("playing", herzschlag);
+      el.removeEventListener("canplay", herzschlag);
       el.removeEventListener("seeked", nachSprung);
       el.removeEventListener("ended", amEnde);
       window.removeEventListener("pagehide", beimVerlassen);
@@ -428,10 +472,11 @@ export function Player({
   // ---- Bedienung ---------------------------------------------------------
   const umschalten = useCallback(() => {
     const el = videoRef.current;
-    if (!el) return;
+    if (!el || lage.art !== "bereit") return;
+    sollLaufen.current = el.paused;
     if (el.paused) void el.play().catch(() => { /* Ein weiterer Klick kann die Wiedergabe starten. */ });
     else el.pause();
-  }, []);
+  }, [lage.art]);
 
   const springe = useCallback(
     (t: number) => {
@@ -468,10 +513,31 @@ export function Player({
   }, []);
 
   const tempoSetzen = useCallback((t: number) => {
+    const neu = { ...gemerktRef.current, tempo: t };
+    gemerktRef.current = neu;
+    setGemerkt(neu);
+    gemerktSchreiben(neu);
     const el = videoRef.current;
     if (el) el.playbackRate = t;
     setMenue(null);
   }, []);
+
+  function qualitaetWaehlen(q: WiedergabeQualitaet) {
+    if (q === qualitaet && lage.art !== "fehler") return;
+    wiedergabeMerken();
+    setQualitaet(q);
+    // Einen erkannten Decoderfehler für Live-Stufen behalten. Nur eine
+    // ausdrückliche Originalwahl probiert die direkte Quelle erneut.
+    if (q === "original") setTranskodieren(false);
+    if (q === qualitaet) setLadeVersuch((n) => n + 1);
+  }
+  function liveVersuchen() {
+    wiedergabeMerken();
+    // Auch eine native numerische Stufe kann außerhalb des Live-Budgets
+    // liegen. Auto wählt die tatsächlich verfügbare Umwandlungsstufe.
+    setQualitaet("auto");
+    setTranskodieren(true);
+  }
 
   // ---- Tastatur ----------------------------------------------------------
   useEffect(() => {
@@ -480,6 +546,7 @@ export function Player({
       const ziel = e.target as HTMLElement | null;
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || document.querySelector("dialog[open]") || huelleRef.current?.closest("[inert]") || ziel?.closest("input, textarea, select, [contenteditable=true]"))
         return;
+      if (ziel?.closest('[role="menu"]')) return;
       // Leertaste auf einem fokussierten Knopf gehört dem Knopf. Die übrigen
       // Player-Kürzel bleiben auch nach einem Klick auf die Steuerung aktiv.
       if ((e.key === " " || e.key === "Enter") && ziel?.closest("button, a")) return;
@@ -576,30 +643,8 @@ export function Player({
   };
 
   // ---- Darstellung -------------------------------------------------------
-  if (lage.art === "pruefen") {
-    return (
-      <div className="buehne">
-        <div className="buehne-meldung" role="status">Video wird geöffnet …</div>
-      </div>
-    );
-  }
-
-  if (lage.art === "fehler") {
-    return (
-      <div className="buehne">
-        <div className="buehne-meldung" role="alert">
-          <Icon name="info" className="player-meldung-icon" size={36} />
-          <h2>Wiedergabe nicht möglich</h2>
-          <p>{lage.text}</p>
-          <button className="knopf player-erneut" onClick={() => setLadeVersuch((n) => n + 1)}>Erneut versuchen</button>
-          {!transkodieren ? <button className="knopf player-erneut" onClick={() => setTranskodieren(true)}>Mit Live-Transkodierung versuchen</button> : null}
-        </div>
-      </div>
-    );
-  }
-
   const gespielt = gesamt > 0 ? Math.max(0, Math.min(100, (zeit / gesamt) * 100)) : 0;
-  const steuerungSichtbar = sichtbar || !laeuft || menue !== null;
+  const steuerungSichtbar = lage.art !== "bereit" || sichtbar || !laeuft || menue !== null;
   const zeigerKapitel = zeiger ? kapitelBei(zeiger.zeit) : null;
 
   return (
@@ -621,17 +666,16 @@ export function Player({
         ref={videoRef}
         poster={poster}
         aria-label={titel ?? "Video"}
-        autoPlay
         playsInline
         preload="metadata"
-        data-modus={lage.modus ?? undefined}
+        data-modus={lage.art === "bereit" ? lage.modus : undefined}
         onClick={umschalten}
         onDoubleClick={vollbildUmschalten}
         onError={(e) => {
           const fehler = e.currentTarget.error;
-          if (fehler && fehler.code !== MediaError.MEDIA_ERR_ABORTED) {
-            wiederaufnahme.current = e.currentTarget.currentTime || null;
-            if (lage.modus === "direct" && !transkodieren) setTranskodieren(true);
+          if (lage.art === "bereit" && fehler && fehler.code !== MediaError.MEDIA_ERR_ABORTED) {
+            wiedergabeMerken();
+            if (lage.modus === "direct" && !transkodieren) liveVersuchen();
             else setLage({ art: "fehler", text: "Das Video konnte nicht abgespielt werden. Bitte versuche es erneut." });
           }
         }}
@@ -647,9 +691,16 @@ export function Player({
         ))}
       </video>
 
-      {wartet && laeuft ? <div className="player-lader" aria-hidden="true" /> : null}
+      {lage.art === "pruefen" ? <div className="buehne-meldung player-status" role="status">Video wird geöffnet …</div> : null}
+      {lage.art === "fehler" ? <div className="buehne-meldung player-status" role="alert">
+        <Icon name="info" className="player-meldung-icon" size={36} />
+        <h2>Wiedergabe nicht möglich</h2><p>{lage.text}</p>
+        <button className="knopf player-erneut" onClick={() => { wiedergabeMerken(); setLadeVersuch((n) => n + 1); }}>Erneut versuchen</button>
+        {!transkodieren ? <button className="knopf player-erneut" onClick={liveVersuchen}>Mit Live-Transkodierung versuchen</button> : null}
+      </div> : null}
+      {lage.art === "bereit" && wartet && laeuft ? <div className="player-lader" aria-hidden="true" /> : null}
 
-      {!laeuft ? (
+      {lage.art === "bereit" && !laeuft ? (
         <button className="player-gross" onClick={umschalten} aria-label="Abspielen">
           <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
             <path d="M8 5v14l11-7z" fill="currentColor" />
@@ -783,27 +834,10 @@ export function Player({
 
           <div className="steuer-luecke" />
 
-          {/* Tempo */}
-          <div className="steuer-menue-anker">
-            <button
-              className="steuer-knopf steuer-text"
-              onClick={() => setMenue(menue === "tempo" ? null : "tempo")}
-              aria-label="Wiedergabegeschwindigkeit"
-              aria-expanded={menue === "tempo"}
-              title="Wiedergabegeschwindigkeit"
-            >
-              {gemerkt.tempo === 1 ? "1×" : `${gemerkt.tempo}×`}
-            </button>
-            {menue === "tempo" ? (
-              <div className="steuer-menue">
-                {TEMPI.map((t) => (
-                  <button key={t} data-aktiv={t === gemerkt.tempo} onClick={() => tempoSetzen(t)}>
-                    {t === 1 ? "Normal" : `${t}×`}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <PlayerEinstellungen offen={menue === "einstellungen"} aufOffen={(offen) => setMenue(offen ? "einstellungen" : null)}
+            bereich={huelleRef} angebote={angebote} qualitaet={qualitaet}
+            bezeichnung={lage.art === "bereit" ? lage.sitzung.quality_label || "Automatisch" : angebote.find((q) => q.value === qualitaet)?.label || "Automatisch"}
+            aufQualitaet={qualitaetWaehlen} tempo={gemerkt.tempo} aufTempo={tempoSetzen} />
 
           {/* Untertitel */}
           {untertitel.length > 0 ? (
