@@ -1,0 +1,693 @@
+.browse-meta {
+  margin: 4px 0 0;
+  color: var(--text-gedaempft);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.kanal-seite {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.kanal-seite .kanal-kopf {
+  margin-bottom: 20px;
+}
+
+.kanal-seite .banner {
+  display: block;
+  max-height: 240px;
+  margin-bottom: 24px;
+  border-radius: 12px;
+}
+
+.kanal-seite .kanal-zeile {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 24px;
+}
+
+.kanal-seite .kanal-zeile .avatar-gross {
+  width: 160px;
+  height: 160px;
+}
+
+.kanal-initial {
+  display: grid;
+  place-items: center;
+  font-size: 64px;
+  font-weight: 500;
+}
+
+.kanal-identitaet {
+  flex: 1;
+  min-width: 0;
+}
+
+.kanal-seite .kanal-identitaet h1 {
+  margin: 0 0 6px;
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -1px;
+  overflow-wrap: anywhere;
+}
+
+.kanal-abgleich {
+  font-size: 12px;
+}
+
+.kanal-beschreibung {
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.kanal-beschreibung p {
+  margin: 0;
+  color: var(--text-gedaempft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.kanal-beschreibung p[data-offen="false"] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+}
+
+.kanal-beschreibung button {
+  margin-top: 3px;
+  padding: 3px 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.kanal-seite .kanal-aktionen {
+  align-items: center;
+  margin: 14px 0 0;
+}
+
+.kanal-aktionen > span {
+  flex-basis: 100%;
+}
+
+.kanal-seite .tabs {
+  gap: 24px;
+  margin: 24px 0 18px;
+}
+
+.kanal-seite .tab {
+  padding: 12px 0;
+  font-size: 16px;
+  border-bottom-width: 3px;
+}
+
+.kanal-seite .tab .zahl {
+  font-size: 12px;
+}
+
+.kanal-sortierung {
+  margin-bottom: 24px;
+}
+
+.kanal-videoergebnisse[data-art="shorts"] .gitter {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+}
+
+.kanal-videoergebnisse[data-art="shorts"] .kachel-bild {
+  aspect-ratio: 9 / 16;
+}
+
+.playlist-kachel .kachel-bild {
+  margin-top: 6px;
+  box-shadow: 0 -4px 0 -1px var(--flaeche-hoch), 0 -8px 0 -3px var(--rand);
+}
+
+.playlist-anzahl {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.playlist-anzeigen {
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-gedaempft);
+}
+
+.kanaele-seite {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.kanal-filter {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--rand-zart);
+}
+
+.kanal-filter .eingabe {
+  width: 300px;
+  max-width: 100%;
+}
+
+.kanal-filter input,
+.kanal-filter select {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--rand);
+  border-radius: 8px;
+  background: var(--grund);
+  color: var(--text);
+}
+
+.kanal-filter .auswahl {
+  margin-left: auto;
+  min-width: 0;
+}
+
+.kanal-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.kanal-abo {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: 24px 16px;
+  border-radius: 12px;
+}
+
+.kanal-abo:hover {
+  background: var(--flaeche);
+}
+
+.kanal-abo-avatar {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 50%;
+  background: var(--flaeche-hoch);
+  font-size: 44px;
+}
+
+.kanal-abo-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.kanal-abo h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.kanal-abo-zahlen {
+  margin: 8px 0 0;
+  color: var(--text-gedaempft);
+  font-size: 14px;
+}
+
+.kanal-abo-info > .browse-meta:last-child {
+  font-size: 12px;
+}
+
+.kanal-abo-oeffnen {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.playlist-seite {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  max-width: 1480px;
+  margin: 0 auto;
+}
+
+.playlist-uebersicht {
+  position: sticky;
+  top: 0;
+  padding: 24px;
+  border-radius: 12px;
+  background: var(--flaeche-hoch);
+  max-height: calc(100vh - var(--kopf-hoehe) - 48px);
+  overflow-y: auto;
+}
+
+.playlist-cover {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--grund);
+}
+
+.playlist-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.playlist-cover .platzhalter,
+.such-seite .fundstelle-bild .platzhalter {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-gedaempft);
+}
+
+.playlist-details h1 {
+  margin: 20px 0 16px;
+  font-size: 28px;
+  line-height: 1.25;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.playlist-kanallink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.playlist-kanallink:hover {
+  text-decoration: underline;
+}
+
+.playlist-details .browse-meta {
+  font-size: 12px;
+}
+
+.playlist-start {
+  justify-content: center;
+  width: 100%;
+  margin-top: 20px;
+}
+
+.playlist-beschreibung {
+  margin: 20px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.playlist-inhalt {
+  min-width: 0;
+}
+
+.playlist-inhalt .hinweis {
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.playlist-videoliste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.playlist-position {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.playlist-position:hover {
+  background: var(--flaeche-hoch);
+}
+
+.playlist-nummer {
+  flex: 0 0 20px;
+  text-align: center;
+  color: var(--text-gedaempft);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.playlist-position .kachel {
+  display: flex;
+  flex: 1;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.playlist-position .kachel-vorschau {
+  flex: 0 0 168px;
+  width: 168px;
+}
+
+.playlist-position .kachel-bild {
+  width: 100%;
+  border-radius: 8px;
+}
+
+.playlist-position .kachel-text {
+  flex: 1;
+  padding: 0;
+}
+
+.playlist-position .kachel-titel {
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.playlist-position .kachel-kanalbild {
+  display: none;
+}
+
+.such-seite {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.such-filter {
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--rand-zart);
+}
+
+.such-seite .such-kopf {
+  display: block;
+  margin-bottom: 24px;
+}
+
+.such-seite .such-kopf h1 {
+  font-size: 20px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.such-kopf .browse-meta {
+  font-size: 12px;
+}
+
+.such-seite .gitter[data-form="liste"] {
+  gap: 24px;
+}
+
+.such-seite .gitter[data-form="liste"] .kachel {
+  display: flex;
+  flex-direction: row;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.such-seite .gitter[data-form="liste"] .kachel-vorschau,
+.such-seite .fundstelle-bild {
+  flex: 0 0 38%;
+  width: 38%;
+  max-width: 360px;
+  border-radius: 12px;
+}
+
+.such-seite .kachel-text {
+  flex: 1;
+  padding: 0;
+}
+
+.such-seite .kachel-kanalbild {
+  display: none;
+}
+
+.such-seite .kachel-titel,
+.such-seite .fundstelle-titel {
+  font-size: 19px;
+  line-height: 1.4;
+  font-weight: 500;
+  margin: 0 0 8px;
+}
+
+.such-seite .kachel-zeile {
+  margin-top: 5px;
+}
+
+.such-untertitel-kopf {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rand-zart);
+}
+
+.such-untertitel-kopf h2 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.such-seite .fundstellen {
+  gap: 24px;
+}
+
+.such-seite .fundstelle {
+  padding: 0;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.such-seite .fundstelle-titel {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.such-seite .fundstelle-zitat {
+  margin: 14px 0 8px;
+  color: var(--text-gedaempft);
+  font-style: normal;
+  font-size: 14px;
+}
+
+.fundstelle-zeit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+@media (max-width: 1150px) {
+  .playlist-seite {
+    grid-template-columns: 290px minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .playlist-uebersicht {
+    padding: 20px;
+  }
+
+  .playlist-position .kachel-vorschau {
+    flex-basis: 132px;
+    width: 132px;
+  }
+
+  .playlist-position .kachel,
+  .playlist-position {
+    gap: 10px;
+  }
+}
+
+@media (max-width: 900px) {
+  .playlist-seite {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .playlist-uebersicht {
+    position: static;
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 20px;
+    max-height: none;
+  }
+
+  .playlist-details h1 {
+    margin-top: 0;
+    font-size: 24px;
+  }
+
+  .playlist-start {
+    width: auto;
+  }
+
+  .kanal-seite .kanal-zeile .avatar-gross {
+    width: 120px;
+    height: 120px;
+  }
+
+  .kanal-seite .kanal-identitaet h1 {
+    font-size: 30px;
+  }
+
+  .kanal-abo-oeffnen {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .kanal-seite .banner {
+    aspect-ratio: 4 / 1;
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+
+  .kanal-seite .kanal-zeile {
+    display: block;
+  }
+
+  .kanal-seite .kanal-zeile .avatar-gross {
+    width: 80px;
+    height: 80px;
+    margin-bottom: 12px;
+    font-size: 32px;
+  }
+
+  .kanal-seite .kanal-identitaet h1 {
+    font-size: 26px;
+    letter-spacing: -0.5px;
+  }
+
+  .kanal-seite .tabs {
+    gap: 22px;
+    margin-top: 16px;
+  }
+
+  .kanal-seite .tab .zahl {
+    display: none;
+  }
+
+  .kanal-videoergebnisse[data-art="shorts"] .gitter {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 12px;
+  }
+
+  .kanal-filter {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .kanal-filter .eingabe {
+    width: 100%;
+  }
+
+  .kanal-filter .auswahl {
+    margin: 0;
+  }
+
+  .kanal-abo {
+    padding: 18px 0;
+    gap: 16px;
+    align-items: flex-start;
+    border-radius: 0;
+    border-bottom: 1px solid var(--rand-zart);
+  }
+
+  .kanal-abo-avatar {
+    width: 72px;
+    height: 72px;
+    font-size: 28px;
+  }
+
+  .kanal-abo h2 {
+    font-size: 18px;
+  }
+
+  .kanal-abo .browse-meta,
+  .kanal-abo-zahlen {
+    font-size: 12px;
+  }
+
+  .playlist-uebersicht {
+    display: block;
+    padding: 20px;
+  }
+
+  .playlist-details h1 {
+    margin-top: 18px;
+  }
+
+  .playlist-position {
+    gap: 6px;
+    padding: 8px 0;
+  }
+
+  .playlist-nummer {
+    flex-basis: 14px;
+    font-size: 12px;
+  }
+
+  .playlist-position .kachel-vorschau {
+    flex-basis: 120px;
+    width: 120px;
+  }
+
+  .playlist-position .kachel-titel {
+    font-size: 14px;
+  }
+
+  .such-seite .such-filter {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .such-filter .chip {
+    flex-shrink: 0;
+  }
+
+  .such-seite .gitter[data-form="liste"] .kachel,
+  .such-seite .fundstelle {
+    gap: 12px;
+  }
+
+  .such-seite .gitter[data-form="liste"] .kachel-vorschau,
+  .such-seite .fundstelle-bild {
+    flex-basis: 42%;
+    width: 42%;
+    border-radius: 8px;
+  }
+
+  .such-seite .kachel-titel,
+  .such-seite .fundstelle-titel {
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+
+  .such-seite .kachel-zeile {
+    font-size: 12px;
+  }
+
+  .such-seite .fundstelle-zitat {
+    font-size: 12px;
+    margin: 8px 0;
+  }
+
+  .fundstelle-zeit {
+    font-size: 12px;
+  }
+}

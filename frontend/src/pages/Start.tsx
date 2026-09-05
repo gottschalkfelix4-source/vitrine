@@ -20,29 +20,26 @@ export function Startseite() {
   const stapel = useVideostapel({ sortierung, nur_archiviert: !nurOffen });
 
   return (
-    <>
-      <div className="seiten-kopf">
-        <h1>Archiv</h1>
-        <span className="beiwerk">
-          {stapel.videos.length} Videos{stapel.ende ? "" : " geladen"}
-        </span>
-      </div>
-
-      <div className="chips">
+    <div className="startseite">
+      <h1 className="nur-screenreader">Dein Videoarchiv</h1>
+      <div className="chips start-filter" aria-label="Videos sortieren und filtern">
         {SORTIERUNGEN.map((s) => (
           <button
             key={s.wert}
             className="chip"
             data-aktiv={sortierung === s.wert}
+            aria-pressed={sortierung === s.wert}
             onClick={() => setSortierung(s.wert)}
           >
             {s.text}
           </button>
         ))}
-        <button className="chip" data-aktiv={nurOffen} onClick={() => setNurOffen(!nurOffen)}>
+        <span className="chip-trenner" aria-hidden="true" />
+        <button className="chip" data-aktiv={nurOffen} aria-pressed={nurOffen} onClick={() => setNurOffen(!nurOffen)}>
           Auch nicht archivierte
         </button>
       </div>
+      <div className="start-bestand">{stapel.videos.length} Videos{stapel.ende ? "" : " geladen"} · {nurOffen ? "Alle Archivzustände" : "Zum Ansehen bereit"}</div>
 
       {stapel.fehler ? <Fehler text={stapel.fehler} erneut={stapel.neuLaden} /> : null}
 
@@ -74,6 +71,6 @@ export function Startseite() {
           }
         />
       ) : null}
-    </>
+    </div>
   );
 }

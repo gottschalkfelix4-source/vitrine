@@ -24,6 +24,7 @@ export function Einstellungenseite() {
   const [meldung, setMeldung] = useState<string | null>(null);
   const [speicherFehler, setSpeicherFehler] = useState<string | null>(null);
   const [neustartNoetig, setNeustartNoetig] = useState<string[]>([]);
+  const [bereich, setBereich] = useState("Allgemein");
 
   // Beim Neuladen der Daten den Entwurf verwerfen, sonst zeigt die Seite
   // Werte an, die es serverseitig gar nicht gibt.
@@ -70,9 +71,13 @@ export function Einstellungenseite() {
   }
 
   async function zuruecksetzen(name: string) {
-    await api.einstellungenZuruecksetzen([name]);
-    setMeldung(null);
-    neuLaden();
+    try {
+      await api.einstellungenZuruecksetzen([name]);
+      setMeldung(null);
+      neuLaden();
+    } catch (e) {
+      setSpeicherFehler(e instanceof Error ? e.message : String(e));
+    }
   }
 
   if (fehler) return <Fehler text={fehler} erneut={neuLaden} />;
@@ -80,7 +85,7 @@ export function Einstellungenseite() {
   if (!daten) return null;
 
   return (
-    <>
+    <div className="verwaltung einstellungen-seite">
       <div className="seiten-kopf">
         <h1>Einstellungen</h1>
         <span className="beiwerk">
@@ -88,9 +93,17 @@ export function Einstellungenseite() {
         </span>
       </div>
 
+      <div className="einstellungen-layout">
+      <nav className="einstellungen-nav" aria-label="Einstellungsbereiche">
+        {["Allgemein", "Cookies", "VPN-Tunnel", "Hardware", ...gruppen.map((g) => g.name)].map((name) => (
+          <button key={name} data-aktiv={bereich === name} aria-pressed={bereich === name}
+            onClick={() => setBereich(name)}>{name}</button>
+        ))}
+      </nav>
+      <div className="einstellungen-inhalt">
       {/* Ganz oben, weil es die einzige Einstellung ist, die nicht am Server
           haengt, sondern am Geraet, auf dem man gerade schaut. */}
-      <AppInstallieren />
+      <div hidden={bereich !== "Allgemein"} className="einst-gruppe"><h2>App auf diesem Gerät</h2><AppInstallieren /></div>
 
       {neustartNoetig.length > 0 ? (
         <Hinweis art="arbeit">
@@ -121,12 +134,12 @@ export function Einstellungenseite() {
         </Hinweis>
       ) : null}
 
-      <CookieAssistent />
-      <VpnTunnelListe />
-      <HardwarePruefung />
+      <div hidden={bereich !== "Cookies"}><CookieAssistent /></div>
+      <div hidden={bereich !== "VPN-Tunnel"}><VpnTunnelListe /></div>
+      <div hidden={bereich !== "Hardware"}><HardwarePruefung /></div>
 
       {gruppen.map((g) => (
-        <section key={g.name} className="einst-gruppe">
+        <section key={g.name} className="einst-gruppe" hidden={bereich !== g.name}>
           <h2>{g.name}</h2>
           {g.felder.map((f) => (
             <Zeile
@@ -140,6 +153,8 @@ export function Einstellungenseite() {
           ))}
         </section>
       ))}
+      </div>
+      </div>
 
       {/* Die Leiste erscheint erst, wenn es etwas zu speichern gibt - so bleibt
           klar, dass Tippen allein noch nichts verändert. */}
@@ -156,7 +171,7 @@ export function Einstellungenseite() {
           </button>
         </div>
       ) : null}
-    </>
+    </div>
   );
 }
 

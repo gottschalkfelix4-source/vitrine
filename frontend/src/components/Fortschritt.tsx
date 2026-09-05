@@ -4,6 +4,7 @@ import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
 import type { LaufenderAuftrag } from "../lib/api";
 import { AUFTRAG_TEXT, prozent, wartedauer } from "../lib/format";
+import { Icon } from "./Icons";
 
 /**
  * Zeigt an, was gerade läuft - immer sichtbar, auf jeder Seite.
@@ -60,6 +61,15 @@ export function Fortschrittsleiste() {
   if (laufend.length === 0 && wartend === 0) return null;
 
   return (
+    <details className="fortschritt-details">
+      <summary>
+        <Icon name="download" size={20} />
+        <span>{drosselung?.pausiert ? `Downloads pausieren · weiter in ${wartedauer(drosselung.rest_s)}` : `${laufend.length} ${laufend.length === 1 ? "Auftrag läuft" : "Aufträge laufen"}`}
+          {wartend > 0 ? ` · ${wartend} warten` : ""}
+          {gesperrt > 0 && !drosselung?.pausiert ? ` · ${gesperrt} Ausgänge gesperrt` : ""}
+        </span>
+        <Icon name="chevronDown" size={18} />
+      </summary>
     <Link className="fortschrittsleiste" to="/warteschlange" title="Zur Warteschlange">
       {laufend.map((a) => (
         <Zeile key={a.id} auftrag={a} />
@@ -121,5 +131,6 @@ export function Fortschrittsleiste() {
         </div>
       ) : null}
     </Link>
+    </details>
   );
 }

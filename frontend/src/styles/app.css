@@ -1,520 +1,117 @@
-/* Aufbau der Oberflaeche. */
-
+/* YouTube-vertraute Navigation und Videobibliothek. */
 .huelle {
   display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: var(--kopf-hoehe) 1fr;
-  grid-template-areas:
-    "kopf kopf"
-    "leiste inhalt";
-  height: 100%;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: var(--kopf-hoehe) minmax(0, 1fr);
+  grid-template-areas: "kopf kopf" "leiste inhalt";
+  height: 100dvh;
+  overflow: hidden;
 }
-
-/* ------------------------------------------------------------- Kopfleiste */
-
 .kopf {
   grid-area: kopf;
   display: flex;
   align-items: center;
-  gap: var(--spalt);
-  padding: 0 var(--spalt);
-  background: var(--grund);
-  border-bottom: 1px solid var(--rand-zart);
-  position: sticky;
-  top: 0;
-  z-index: 20;
-}
-
-.marke {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.4px;
-  white-space: nowrap;
-}
-
-.marke-zeichen {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--akzent);
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 13px;
-  flex-shrink: 0;
-}
-
-.suche {
-  flex: 1;
-  max-width: 560px;
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--flaeche);
-  border: 1px solid var(--rand);
-  border-radius: var(--radius-rund);
-  padding: 0 8px 0 16px;
-  height: 38px;
-  transition: border-color var(--uebergang);
-}
-
-.suche:focus-within {
-  border-color: var(--text-schwach);
-}
-
-.suche input {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  height: 100%;
-}
-
-.suche input::placeholder {
-  color: var(--text-schwach);
-}
-
-.kopf-rechts {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* ------------------------------------------------------------ Seitenleiste */
-
-.leiste {
-  grid-area: leiste;
-  width: var(--leiste-breite);
-  padding: 12px 12px 32px;
-  overflow-y: auto;
-  border-right: 1px solid var(--rand-zart);
-  transition: width var(--uebergang);
-}
-
-.leiste[data-schmal="true"] {
-  width: var(--leiste-schmal);
-  padding: 12px 4px;
-}
-
-.leiste-gruppe + .leiste-gruppe {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--rand-zart);
-}
-
-.leiste-titel {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-gedaempft);
-  padding: 8px 12px 6px;
-  text-transform: none;
-}
-
-.leiste[data-schmal="true"] .leiste-titel {
-  display: none;
-}
-
-.nav-punkt {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 0 12px;
-  height: 40px;
-  border-radius: var(--radius-klein);
-  color: var(--text);
-  transition: background var(--uebergang);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.nav-punkt:hover {
-  background: var(--flaeche-hoch);
-}
-
-.nav-punkt[data-aktiv="true"] {
-  background: var(--flaeche-hoch);
-  font-weight: 500;
-}
-
-.nav-punkt .zeichen {
-  width: 22px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  font-size: 17px;
-}
-
-.leiste[data-schmal="true"] .nav-punkt {
-  flex-direction: column;
-  gap: 4px;
-  height: 66px;
-  justify-content: center;
-  font-size: 10px;
-  padding: 0 2px;
-}
-
-.nav-zahl {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--text-schwach);
-  font-variant-numeric: tabular-nums;
-}
-
-.leiste[data-schmal="true"] .nav-zahl {
-  display: none;
-}
-
-.kanal-punkt .avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--flaeche-hoch);
-  flex-shrink: 0;
-}
-
-/* ----------------------------------------------------------------- Inhalt */
-
-.inhalt {
-  grid-area: inhalt;
-  overflow-y: auto;
-  padding: var(--spalt-gross);
-}
-
-.seiten-kopf {
-  display: flex;
-  align-items: baseline;
   justify-content: space-between;
-  gap: var(--spalt);
-  margin-bottom: var(--spalt-gross);
-  flex-wrap: wrap;
+  gap: 32px;
+  padding: 0 24px 0 16px;
+  background: var(--grund);
+  z-index: 40;
 }
-
-.seiten-kopf h1 {
-  font-size: 22px;
-  font-weight: 600;
-  margin: 0;
-  letter-spacing: -0.3px;
+.kopf-links, .kopf-rechts { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+.kopf-links { min-width: 208px; }
+.kopf-rechts { gap: 12px; }
+.marke { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.marke > span { font-size: 25px; font-weight: 750; letter-spacing: -1.4px; }
+.marke-zeichen { width: 32px; height: 24px; flex-shrink: 0; }
+.symbol-knopf {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; padding: 8px; border-radius: 50%; flex-shrink: 0;
 }
-
-.seiten-kopf .beiwerk {
-  color: var(--text-gedaempft);
-  font-size: 13px;
+.symbol-knopf:hover { background: var(--flaeche-hoch); }
+.symbol-knopf svg, .knopf svg, .chip svg { flex-shrink: 0; }
+.suche {
+  display: flex; flex: 1; min-width: 0; max-width: 640px; height: 40px;
+  margin: 0 auto; background: var(--grund); border: 1px solid var(--rand);
+  border-radius: 24px;
 }
-
-/* ------------------------------------------------------------------ Gitter */
-
-.gitter {
-  display: grid;
-  gap: var(--spalt-gross) var(--spalt);
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-}
-
-/* Auf der Wiedergabeseite steht das Gitter in einer schmalen Spalte -
-   dort nur eine Kachel pro Zeile, dafuer quer gelegt. */
-.gitter[data-form="liste"] {
-  grid-template-columns: 1fr;
-  gap: 8px;
-}
-
-/* -------------------------------------------------------------- Videokachel */
-
-.kachel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-
-.kachel-bild {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--flaeche-hoch);
-  display: block;
-}
-
-.kachel-bild img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  transition: transform var(--uebergang);
-}
-
-.kachel:hover .kachel-bild img {
-  transform: scale(1.02);
-}
-
-.kachel-bild .platzhalter {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  color: var(--text-schwach);
-  font-size: 26px;
-}
-
-/* Qualitaetsetikett: gegenueber der Dauer, damit sich beide nie beruehren.
-   Gedeckt gehalten - es soll ablesbar sein, nicht um Aufmerksamkeit buhlen.
-   Nur 1440p und darueber bekommen Farbe, weil dort die Aussage steckt: Dafuer
-   hat sich der Platz gelohnt. */
-.guete {
-  position: absolute;
-  right: 6px;
-  top: 6px;
-  background: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-}
-
-.guete[data-hoch] {
-  background: rgba(56, 142, 96, 0.92);
-}
-
-.dauer {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  background: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.4;
-}
-
-/* Der rote Balken am unteren Bildrand - eines der wenigen Details, die eine
-   Oberflaeche sofort vertraut wirken lassen. */
-.fortschritt {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.fortschritt span {
-  display: block;
-  height: 100%;
-  background: var(--akzent);
-}
-
-.kachel-text {
-  display: flex;
-  gap: 12px;
-  min-width: 0;
-}
-
-.kachel-text .avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  object-fit: cover;
-  background: var(--flaeche-hoch);
-}
-
-.kachel-titel {
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.35;
-  margin: 0 0 4px;
-  /* Genau zwei Zeilen - ungleich hohe Kacheln zerreissen das Gitter. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.kachel-zeile {
-  font-size: 12.5px;
-  color: var(--text-gedaempft);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.kachel-zeile a:hover {
-  color: var(--text);
-}
-
-.punkt::before {
-  content: "•";
-  margin-right: 6px;
-}
-
-/* --------------------------------------------------------- Zustandsmarken */
-
-.marke-zustand {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: var(--radius-rund);
-  background: var(--flaeche-hoch);
-  color: var(--text-gedaempft);
-  white-space: nowrap;
-}
-
-.marke-zustand::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.marke-zustand[data-zustand="archived"] {
-  color: var(--zu-archiviert);
-}
-.marke-zustand[data-zustand="queued"],
-.marke-zustand[data-zustand="new"] {
-  color: var(--zu-wartet);
-}
-.marke-zustand[data-zustand="downloading"],
-.marke-zustand[data-zustand="encoding"],
-.marke-zustand[data-zustand="remuxing"],
-.marke-zustand[data-zustand="bundling"] {
-  color: var(--zu-arbeit);
-}
-.marke-zustand[data-zustand="failed"] {
-  color: var(--zu-fehler);
-}
-.marke-zustand[data-zustand="unavailable"],
-.marke-zustand[data-zustand="skipped"] {
-  color: var(--zu-fehlt);
-}
-
-/* Nicht archivierte Positionen bleiben sichtbar, treten aber zurueck. */
-.kachel[data-verfuegbar="false"] .kachel-bild {
-  opacity: 0.45;
-}
-.kachel[data-verfuegbar="false"] .kachel-titel {
-  color: var(--text-gedaempft);
-}
-
-/* --------------------------------------------------------------- Kanalkopf */
-
-.kanal-kopf {
-  margin-bottom: var(--spalt-gross);
-}
-
-.banner {
-  width: 100%;
-  aspect-ratio: 6 / 1;
-  object-fit: cover;
-  border-radius: var(--radius-gross);
-  background: var(--flaeche-hoch);
-  margin-bottom: var(--spalt);
-}
-
-.kanal-zeile {
-  display: flex;
-  align-items: center;
-  gap: var(--spalt);
-  flex-wrap: wrap;
-}
-
-.kanal-zeile .avatar-gross {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--flaeche-hoch);
-  flex-shrink: 0;
-}
-
-.kanal-zeile h1 {
-  margin: 0 0 4px;
-  font-size: 24px;
-  letter-spacing: -0.4px;
-}
-
-/* ------------------------------------------------------------------- Tabs */
-
-.tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--rand-zart);
-  margin: var(--spalt-gross) 0 var(--spalt);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.tab {
-  padding: 10px 14px;
-  color: var(--text-gedaempft);
-  font-weight: 500;
-  white-space: nowrap;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color var(--uebergang);
-}
-
-.tab:hover {
-  color: var(--text);
-}
-
-.tab[data-aktiv="true"] {
-  color: var(--text);
-  border-bottom-color: var(--text);
-}
-
-.tab .zahl {
-  color: var(--text-schwach);
-  font-weight: 400;
-  margin-left: 6px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* --------------------------------------------------------------- Chips */
-
-.chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: var(--spalt);
-}
-
-.chip {
-  padding: 6px 12px;
-  background: var(--flaeche-hoch);
-  border-radius: var(--radius-rund);
-  font-size: 13px;
-  font-weight: 500;
-  transition: background var(--uebergang);
-}
-
-.chip:hover {
-  background: var(--flaeche-schwebend);
-}
-
-.chip[data-aktiv="true"] {
-  background: var(--text);
-  color: var(--grund);
-}
+.suche-feld { display: flex; flex: 1; min-width: 0; align-items: center; padding-left: 20px; }
+.suche input { width: 100%; min-width: 0; height: 100%; border: 0; background: none; outline: none; font-size: 16px; }
+.suche input::placeholder { color: var(--text-gedaempft); }
+.suche:focus-within { border-color: var(--text-gedaempft); }
+.suche-leeren { width: 32px; height: 32px; padding: 6px; margin-right: 4px; }
+.suche-absenden { width: 64px; flex-shrink: 0; border-left: 1px solid var(--rand); background: var(--flaeche-hoch); border-radius: 0 24px 24px 0; display: grid; place-items: center; }
+.suche-absenden:hover { background: var(--flaeche-schwebend); }
+.mobile-suche, .suche-zurueck { display: none; }
+.leiste { grid-area: leiste; width: var(--leiste-breite); padding: 12px; overflow-y: auto; overscroll-behavior: contain; background: var(--grund); }
+.leiste[data-schmal="true"] { width: var(--leiste-schmal); padding: 4px; }
+.leiste-gruppe + .leiste-gruppe { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rand-zart); }
+.leiste-titel { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 16px; font-weight: 600; }
+.nav-punkt { display: flex; align-items: center; gap: 24px; min-height: 40px; padding: 0 12px; border-radius: 10px; white-space: nowrap; font-size: 14px; }
+.nav-punkt:hover, .nav-punkt[data-aktiv="true"] { background: var(--flaeche-hoch); }
+.nav-punkt[data-aktiv="true"] { font-weight: 600; }
+.nav-punkt .zeichen { width: 24px; height: 24px; flex-shrink: 0; }
+.nav-punkt[data-aktiv="true"] .zeichen { stroke-width: 2; }
+.nav-zahl { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-gedaempft); }
+.nav-kanalname { overflow: hidden; text-overflow: ellipsis; }
+.avatar-initialen { display: inline-flex; align-items: center; justify-content: center; font-weight: 600; color: var(--text); background: var(--flaeche-hoch); }
+.kanal-punkt .avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; flex-shrink: 0; font-size: 12px; }
+.leiste[data-schmal="true"] .leiste-titel, .leiste[data-schmal="true"] .nav-zahl { display: none; }
+.leiste[data-schmal="true"] .leiste-gruppe { margin: 0; padding: 0; border: 0; }
+.leiste[data-schmal="true"] .nav-punkt { flex-direction: column; gap: 6px; padding: 12px 0; min-height: 74px; justify-content: center; font-size: 10px; }
+.inhalt { grid-area: inhalt; min-width: 0; min-height: 0; overflow-y: auto; padding: 24px 32px 40px; scroll-padding-top: 72px; }
+.seiten-kopf { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+.seiten-kopf h1 { margin: 0; font-size: 28px; line-height: 1.25; font-weight: 700; letter-spacing: -.6px; }
+.seiten-kopf .beiwerk { font-size: 14px; color: var(--text-gedaempft); }
+.gitter { display: grid; gap: 36px 20px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+.gitter[data-form="liste"] { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.kachel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.kachel-vorschau { display: block; min-width: 0; }
+.kachel-bild { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: var(--flaeche-hoch); display: block; }
+.kachel-bild img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.kachel-bild .platzhalter { width: 100%; height: 100%; display: grid; place-items: center; color: var(--text-schwach); }
+.kachel-abspielen { position: absolute; inset: 0; display: grid; place-items: center; color: white; background: rgba(0,0,0,.18); opacity: 0; transition: opacity var(--uebergang); }
+.kachel-vorschau:hover .kachel-abspielen, .kachel:focus-within .kachel-abspielen { opacity: 1; }
+.guete, .dauer { position: absolute; right: 8px; background: rgba(0,0,0,.8); color: #fff; padding: 1px 4px; border-radius: 4px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.5; }
+.guete { top: 8px; font-size: 11px; }
+.dauer { bottom: 8px; }
+.guete[data-hoch] { background: rgba(0,0,0,.8); }
+.fortschritt { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.3); }
+.fortschritt span { display: block; height: 100%; background: var(--akzent); }
+.kachel-text { display: flex; gap: 12px; min-width: 0; }
+.kachel-text .avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
+.kachel-kanalbild { flex-shrink: 0; }
+.kachel-titel { margin: 0 0 5px; font-size: 16px; font-weight: 600; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.kachel-zeile { font-size: 14px; color: var(--text-gedaempft); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.kachel-zeile a:hover { color: var(--text); }
+.kachel-archiv { gap: 8px; font-size: 12px; margin-top: 4px; }
+.kachel-archiv:empty { display: none; }
+.punkt::before { content: "•"; margin-right: 4px; }
+.marke-zustand { display: inline-flex; align-items: center; font-size: 12px; font-weight: 500; padding: 2px 6px; border-radius: 4px; background: var(--flaeche-hoch); color: var(--text-gedaempft); white-space: nowrap; }
+.marke-zustand[data-zustand="archived"], .marke-zustand[data-zustand="done"] { color: var(--zu-archiviert); }
+.marke-zustand[data-zustand="queued"], .marke-zustand[data-zustand="new"] { color: var(--zu-wartet); }
+.marke-zustand[data-zustand="downloading"], .marke-zustand[data-zustand="encoding"], .marke-zustand[data-zustand="remuxing"], .marke-zustand[data-zustand="bundling"] { color: var(--zu-arbeit); }
+.marke-zustand[data-zustand="failed"] { color: var(--zu-fehler); }
+.kachel[data-verfuegbar="false"] .kachel-bild { opacity: .65; }
+.kanal-kopf { margin-bottom: 24px; }
+.banner { width: 100%; aspect-ratio: 6 / 1; object-fit: cover; border-radius: 12px; background: var(--flaeche-hoch); margin-bottom: 24px; }
+.kanal-zeile { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.kanal-zeile .avatar-gross { width: 128px; height: 128px; border-radius: 50%; object-fit: cover; background: var(--flaeche-hoch); flex-shrink: 0; }
+.kanal-zeile h1 { margin: 0 0 8px; font-size: 36px; letter-spacing: -1px; }
+.tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--rand); margin: 24px 0 20px; overflow-x: auto; scrollbar-width: none; }
+.tab { padding: 12px 0; color: var(--text-gedaempft); font-size: 16px; font-weight: 600; white-space: nowrap; border-bottom: 3px solid transparent; }
+.tab:hover { color: var(--text); }
+.tab[data-aktiv="true"] { color: var(--text); border-bottom-color: var(--text); }
+.tab .zahl { color: var(--text-gedaempft); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; background: var(--flaeche-hoch); border-radius: 8px; font-size: 14px; font-weight: 600; white-space: nowrap; transition: background var(--uebergang); }
+.chip:hover { background: var(--flaeche-schwebend); }
+.chip[data-aktiv="true"] { background: var(--text); color: var(--grund); }
+.chip-trenner { height: 24px; border-left: 1px solid var(--rand); margin: 0 4px; flex-shrink: 0; }
+.start-filter { position: sticky; top: -24px; z-index: 10; background: var(--grund); padding: 12px 0; margin: -24px 0 12px; min-height: 64px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+.start-bestand { font-size: 12px; color: var(--text-gedaempft); margin: 0 0 20px; }
+.nur-screenreader { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sprunglink { position: fixed; top: -100px; left: 16px; padding: 12px 20px; background: var(--text); color: var(--grund); z-index: 100; }
+.sprunglink:focus { top: 8px; }
 
 /* ------------------------------------------------------------ Wiedergabe */
 
@@ -529,16 +126,6 @@
   .watch {
     grid-template-columns: 1fr;
   }
-}
-
-/* Kinomodus: Player ueber die volle Breite, Kapitel und weitere Videos
-   rutschen darunter. */
-.watch[data-theater="true"] {
-  grid-template-columns: 1fr;
-}
-
-.watch[data-theater="true"] .buehne {
-  width: 100%;
 }
 
 /* Die Buehne richtet sich nach dem Bildschirm, nicht nur nach der Breite:
@@ -580,7 +167,6 @@
   font-size: 13px;
 }
 
-.watch[data-theater="true"] .buehne,
 /* Im Vollbild gilt nichts von dem, was die Buehne sonst begrenzt: weder das
    feste Seitenverhaeltnis noch die gedeckelte Hoehe noch der negative Rand,
    mit dem sie auf dem Telefon bis an die Bildschirmkanten reicht. Der zuletzt
@@ -1469,7 +1055,7 @@
   background: var(--flaeche-schwebend);
   border-top: 1px solid var(--rand);
   font-size: 13.5px;
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 
 .speicherleiste span {
@@ -1736,212 +1322,60 @@
   color: var(--text-schwach);
 }
 
-/* ==========================================================================
-   Handbedienung
-   --------------------------------------------------------------------------
-   Bis hierher ist die Oberflaeche fuer Maus und grossen Bildschirm gebaut: eine
-   feste Leiste links, eine breite Suche in der Mitte, Kacheln mit
-   Schwebe-Zustaenden. Auf einem Telefon mit 375 Pixeln belegte allein die
-   Leiste mehr als die ganze Breite, und der Inhalt lag ausserhalb des Bildes.
-
-   Die Schwelle liegt bei 860 Pixeln und muss mit SCHMAL in
-   hooks/useMedienabfrage.ts uebereinstimmen - dort haengt daran, was der
-   Menueknopf auslöst.
-   ========================================================================== */
-
+/* Auf Telefonen wird aus der Seitenleiste eine Schublade. */
+@media (max-width: 1100px) {
+  .kopf { gap: 20px; padding-right: 16px; }
+  .kopf-links { min-width: auto; }
+  .kopf-rechts .kanal-hinzufuegen span { display: none; }
+  .kopf-rechts .kanal-hinzufuegen { width: 40px; height: 40px; padding: 8px; justify-content: center; }
+  .inhalt { padding-left: 24px; padding-right: 24px; }
+}
 @media (max-width: 860px) {
-  /* Die Leiste steht nicht mehr in der Spalte neben dem Inhalt, sondern
-     darueber. Sie aus dem Raster zu nehmen ist der Kern: Sonst bliebe ihre
-     Spalte reserviert, auch wenn sie ausgeblendet ist. */
-  .huelle {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "kopf"
-      "inhalt";
-  }
-
-  .leiste {
-    position: fixed;
-    top: var(--kopf-hoehe);
-    left: 0;
-    bottom: 0;
-    width: min(86vw, 300px);
-    z-index: 30;
-    background: var(--grund);
-    border-right: 1px solid var(--rand);
-    transform: translateX(-100%);
-    transition: transform var(--uebergang);
-    /* Der Balken am unteren Rand aktueller Telefone ueberdeckt sonst den
-       letzten Kanal in der Liste. */
-    padding-bottom: calc(32px + env(safe-area-inset-bottom));
-  }
-
-  .leiste[data-offen="true"] {
-    transform: translateX(0);
-  }
-
-  /* Am Schreibtisch wird die Leiste schmal, auf dem Telefon nie - eine
-     Schublade, die sich oeffnet und dann nur Symbole zeigt, waere sinnlos. */
-  .leiste[data-schmal="true"] {
-    width: min(86vw, 300px);
-    padding: 12px 12px 32px;
-  }
-
-  .leiste-schatten {
-    position: fixed;
-    inset: var(--kopf-hoehe) 0 0 0;
-    background: rgba(0, 0, 0, 0.6);
-    z-index: 25;
-    animation: einblenden var(--uebergang);
-  }
-
-  @keyframes einblenden {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-  }
-
-  /* ---- Kopfleiste: Platz ist knapp, die Suche bekommt den Rest */
-  .kopf {
-    gap: 8px;
-    padding: 0 10px;
-    padding-left: calc(10px + env(safe-area-inset-left));
-    padding-right: calc(10px + env(safe-area-inset-right));
-  }
-
-  /* Der Schriftzug weicht - das Zeichen allein traegt die Marke, und die
-     Suche ist das, was man auf dem Telefon tatsaechlich braucht. */
-  .marke span:last-child {
-    display: none;
-  }
-
-  .suche {
-    margin: 0;
-    min-width: 0;
-    padding-left: 12px;
-  }
-
-  /* "+ Kanal" wird zum "+". Der Text passt sonst nicht neben die Suche. */
-  .kopf-rechts .knopf {
-    font-size: 0;
-    padding: 0;
-    width: 38px;
-    height: 38px;
-    display: grid;
-    place-items: center;
-  }
-
-  .kopf-rechts .knopf::before {
-    content: "+";
-    font-size: 22px;
-    line-height: 1;
-  }
-
-  .inhalt {
-    padding: 14px 12px calc(24px + env(safe-area-inset-bottom));
-    padding-left: calc(12px + env(safe-area-inset-left));
-    padding-right: calc(12px + env(safe-area-inset-right));
-  }
-
-  /* ---- Kacheln: eine Spalte, aber nicht bildschirmfuellend hoch */
-  .gitter {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 18px;
-  }
-
-  .seiten-kopf h1 {
-    font-size: 21px;
-    /* Lange Kanalnamen ohne Leerzeichen sprengen sonst die Zeile. */
-    overflow-wrap: anywhere;
-  }
-
-  /* ---- Fingerkuppen brauchen Flaeche. Unter etwa 40 Pixeln trifft man
-     zuverlaessig daneben; das gilt fuer alles, was man antippt. */
-  .knopf,
-  .kachel-laden,
-  .tab {
-    min-height: 38px;
-  }
-
-  /* Die Reiterzeile (Videos / Shorts / Livestreams / Playlists) rollt schon
-     von sich aus seitlich. Fehlt nur: Sie darf nicht umbrechen, und der
-     Schwung soll dem Finger folgen. */
-  .tabs {
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .tab {
-    white-space: nowrap;
-  }
-
-  /* ---- Wiedergabe: Der Player nimmt die volle Breite, ohne Rundung an den
-     Raendern - ein abgerundetes Video mit Rand daneben verschenkt auf einem
-     Telefon spuerbar Bildflaeche. */
-  .buehne {
-    border-radius: 0;
-    margin: 0 -12px;
-    width: calc(100% + 24px);
-    max-height: 56vh;
-  }
-
-  .watch h1 {
-    font-size: 18px;
-    line-height: 1.35;
-  }
-
-  .watch-zeile {
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .aktionen {
-    flex-wrap: wrap;
-  }
-
-  /* ---- Tabellen (Speicher, Einstellungen, Warteschlange) duerfen seitlich
-     rollen, statt die Seite breiter zu machen. Ohne das scrollt der ganze
-     Bildschirm waagerecht, und man verliert die Navigation aus dem Blick. */
-  .tabelle {
-    display: block;
-    overflow-x: auto;
-    max-width: 100%;
-  }
-
-  .karten {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  .huelle { grid-template-columns: minmax(0, 1fr); grid-template-areas: "kopf" "inhalt"; }
+  .leiste { position: fixed; top: var(--kopf-hoehe); left: 0; bottom: 0; width: 240px; z-index: 30; visibility: hidden; border-right: 1px solid var(--rand); padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .leiste[data-offen="true"] { visibility: visible; }
+  .leiste-schatten { position: fixed; inset: var(--kopf-hoehe) 0 0; background: rgba(0,0,0,.6); z-index: 25; }
+  .kopf { gap: 16px; padding: 0 12px; }
+  .kopf-links { gap: 10px; }
+  .kopf-rechts { gap: 4px; }
+  .inhalt { padding: 20px 20px calc(24px + env(safe-area-inset-bottom)); }
+  .gitter { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 16px; }
+  .start-filter { top: -20px; margin-top: -20px; }
+  .seiten-kopf h1 { overflow-wrap: anywhere; }
+  .tabelle { display: block; overflow-x: auto; max-width: 100%; }
+  .knopf, .kachel-laden, .tab { min-height: 40px; }
+  .tabs { flex-wrap: nowrap; }
 }
-
-/* Sehr schmale Geraete: Der Schriftzug ist schon weg, jetzt geht es um die
-   letzten Pixel neben der Suche. */
-@media (max-width: 380px) {
-  .marke-zeichen {
-    width: 24px;
-    height: 24px;
-  }
-
-  .kopf {
-    gap: 6px;
-  }
+@media (max-width: 600px) {
+  .kopf { gap: 8px; padding: 0 8px; }
+  .kopf-links { gap: 8px; }
+  .kopf-rechts { margin-left: auto; gap: 0; }
+  .marke > span { font-size: 24px; }
+  .suche { display: none; }
+  .mobile-suche { display: inline-flex; }
+  .kopf[data-suche-offen="true"] .kopf-links, .kopf[data-suche-offen="true"] .kopf-rechts { display: none; }
+  .kopf[data-suche-offen="true"] .suche-zurueck { display: inline-flex; }
+  .kopf[data-suche-offen="true"] .suche { display: flex; }
+  .suche-absenden { width: 48px; }
+  .inhalt { padding: 16px 12px calc(24px + env(safe-area-inset-bottom)); }
+  .gitter { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .start-filter { top: -16px; margin-top: -16px; min-height: 56px; }
+  .start-bestand { margin-bottom: 16px; }
+  .startseite > .gitter { margin-left: -12px; margin-right: -12px; }
+  .startseite .kachel-text { padding: 0 12px; }
+  .startseite .kachel-bild { border-radius: 0; }
+  .kachel-titel { font-size: 15px; }
+  .kachel-zeile { font-size: 13px; }
+  .seiten-kopf { gap: 8px; margin-bottom: 20px; }
+  .seiten-kopf h1 { font-size: 24px; }
+  .seiten-kopf .beiwerk { font-size: 13px; }
+  .speicherleiste { margin: 0 -12px -24px; padding: 12px; gap: 8px; flex-wrap: wrap; }
+  .speicherleiste > span { flex-basis: 100%; }
 }
-
-/* Ohne Browserleiste laeuft die App bis an die Kanten des Bildschirms. Der
-   Kopf muss dann den Bereich unter der Statusleiste selbst freihalten - sonst
-   liegt der Menueknopf unter der Uhrzeit. */
 @media (display-mode: standalone) {
-  .kopf {
-    height: calc(var(--kopf-hoehe) + env(safe-area-inset-top));
-    padding-top: env(safe-area-inset-top);
-  }
-
-  .huelle {
-    grid-template-rows: calc(var(--kopf-hoehe) + env(safe-area-inset-top)) 1fr;
-  }
-
-  .leiste,
-  .leiste-schatten {
-    top: calc(var(--kopf-hoehe) + env(safe-area-inset-top));
-  }
+  .kopf { padding-top: env(safe-area-inset-top); }
+  .huelle { grid-template-rows: calc(var(--kopf-hoehe) + env(safe-area-inset-top)) minmax(0,1fr); }
+  .leiste, .leiste-schatten { top: calc(var(--kopf-hoehe) + env(safe-area-inset-top)); }
 }
 
 /* ---- Qualitaet nachtraeglich anheben */
@@ -2140,4 +1574,81 @@
 .vpn-knoepfe .knopf {
   font-size: 12.5px;
   padding: 4px 10px;
+}
+
+/* Archivverwaltung folgt denselben Flächen, Zeilen und Bedienelementen. */
+.verwaltung { max-width: 1400px; margin: 0 auto; }
+.verwaltung > .seiten-kopf { padding-bottom: 20px; border-bottom: 1px solid var(--rand-zart); }
+.einstellungen-layout { display: grid; grid-template-columns: 190px minmax(0,1fr); gap: 40px; align-items: start; }
+.einstellungen-nav { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; }
+.einstellungen-nav button { padding: 12px 16px; text-align: left; border-radius: 8px; }
+.einstellungen-nav button:hover, .einstellungen-nav button[data-aktiv="true"] { background: var(--flaeche-hoch); }
+.einstellungen-nav button[data-aktiv="true"] { font-weight: 600; }
+.einstellungen-inhalt { min-width: 0; }
+.einstellungen-inhalt .einst-gruppe { margin-bottom: 24px; max-width: none; }
+.einstellungen-inhalt .einst-gruppe h2 { color: var(--text); font-size: 20px; margin-top: 0; }
+.einst-zeile { border-bottom: 1px solid var(--rand-zart); border-radius: 0; padding: 20px 0 20px 12px; }
+.einst-marke, .einst-herkunft { border-radius: 4px; }
+.einst-eingabe input, .einst-eingabe select { max-width: 100%; }
+.einst-text p { font-size: 13px; }
+.einstellungen-inhalt input[type="checkbox"], .dialog input[type="checkbox"] { accent-color: var(--text); width: 18px; height: 18px; flex-shrink: 0; }
+.speicher-seite .karten { display: flex; gap: 0; padding: 8px 0 24px; border-bottom: 1px solid var(--rand); }
+.speicher-seite .karte { flex: 1; background: none; border-radius: 0; padding: 8px 24px; }
+.speicher-seite .karte:first-child { padding-left: 0; }
+.speicher-seite .karte + .karte { border-left: 1px solid var(--rand); }
+.speicher-seite .karte .beschriftung { font-size: 14px; }
+.speicher-seite .karte .wert { font-size: 30px; }
+.speicher-bereiche { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px 40px; }
+.speicher-bereiche .sp-block { max-width: none; margin-bottom: 12px; min-width: 0; }
+.speicher-bereiche .sp-block h2 { color: var(--text); font-size: 18px; font-weight: 600; padding-bottom: 14px; }
+.sp-prognose p { min-width: 0; flex-basis: 200px; }
+.sp-zeile-kopf { flex-wrap: wrap; gap: 4px 12px; }
+.sp-pfad { overflow-wrap: anywhere; }
+.auftrag-art svg { display: inline-block; vertical-align: middle; margin-right: 10px; }
+.auftraege-tabelle td { padding-top: 18px; padding-bottom: 18px; }
+.auftrag-titel a { font-weight: 500; }
+.auftrag-titel a:hover { text-decoration: underline; }
+.kachel-laden { display: inline-flex; align-items: center; gap: 4px; }
+.kachel-laden:disabled { opacity: .6; cursor: default; }
+.fortschritt-details { margin-bottom: 20px; border-bottom: 1px solid var(--rand-zart); color: var(--text-gedaempft); font-size: 13px; }
+.fortschritt-details summary { cursor: pointer; display: flex; align-items: center; gap: 10px; list-style: none; padding: 0 0 12px; }
+.fortschritt-details summary::-webkit-details-marker { display: none; }
+.fortschritt-details summary > svg { flex-shrink: 0; }
+.fortschritt-details summary > svg:last-child { margin-left: auto; }
+.fortschritt-details[open] summary > svg:last-child { transform: rotate(180deg); }
+.fortschritt-details .fortschrittsleiste { border: 0; border-radius: 0; margin-bottom: 12px; }
+.fortschritt-details + .startseite .start-filter { margin-top: 0; }
+.kanal-dialog { padding: 0; border: 0; background: var(--flaeche-schwebend); color: var(--text); border-radius: 12px; max-height: calc(100dvh - 32px); width: min(540px, calc(100% - 24px)); overflow-y: auto; }
+.kanal-dialog::backdrop { background: rgba(0,0,0,.65); }
+.kanal-dialog .dialog { width: 100%; border-radius: 0; box-shadow: none; }
+.dialog-kopf { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.dialog-kopf h2 { font-size: 22px; margin: 0; }
+.dialog .erklaerung { font-size: 14px; }
+.dialog .schalter { align-items: flex-start; padding: 10px 0; }
+.dialog .schalter input { margin: 2px 0 0; }
+.dialog .feld label { font-size: 14px; }
+.dialog .feld input[type="text"] { font-size: 16px; }
+[hidden] { display: none !important; }
+@media (max-width: 1000px) {
+  .einstellungen-layout { grid-template-columns: minmax(0,1fr); gap: 24px; }
+  .einstellungen-nav { flex-direction: row; overflow-x: auto; position: static; gap: 8px; padding-bottom: 8px; }
+  .einstellungen-nav button { white-space: nowrap; padding: 8px 12px; }
+}
+@media (max-width: 720px) {
+  .speicher-bereiche { grid-template-columns: minmax(0,1fr); gap: 24px; }
+  .speicher-seite .karten { flex-direction: column; padding-bottom: 12px; }
+  .speicher-seite .karte { padding: 16px 0; }
+  .speicher-seite .karte + .karte { border-left: 0; border-top: 1px solid var(--rand-zart); }
+  .speicher-seite .karte .wert { font-size: 26px; }
+  .auftraege-tabelle, .auftraege-tabelle tbody { display: block; width: 100%; overflow: visible; }
+  .auftraege-tabelle thead { display: none; }
+  .auftraege-tabelle tr { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px 16px; padding: 18px 0; border-bottom: 1px solid var(--rand); }
+  .auftraege-tabelle td { display: block; padding: 0; border: 0; min-width: 0; }
+  .auftraege-tabelle td:nth-child(1), .auftraege-tabelle td:nth-child(2) { grid-column: 1 / -1; max-width: none !important; }
+  .auftraege-tabelle td:nth-child(2) { overflow-wrap: anywhere; }
+  .auftraege-tabelle td:nth-child(5) { align-self: center; }
+  .auftraege-tabelle tr:hover td { background: none; }
+  .auftraege-tabelle .auftrag-art { font-size: 12px; color: var(--text-gedaempft); }
+  .fl-text { gap: 4px 10px; }
+  .fl-meldung { flex-basis: 100%; }
 }

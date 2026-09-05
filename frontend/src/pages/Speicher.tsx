@@ -59,7 +59,7 @@ export function Speicherseite() {
   const maxKanal = Math.max(1, ...daten.je_kanal.map((x) => x.bytes));
 
   return (
-    <>
+    <div className="verwaltung speicher-seite">
       <div className="seiten-kopf">
         <h1>Speicher</h1>
         <span className="beiwerk">aktualisiert sich alle 10 Sekunden</span>
@@ -122,6 +122,7 @@ export function Speicherseite() {
         </div>
       </div>
 
+      <div className="speicher-bereiche">
       {/* ---- Datenträger. Auf Unraid sind das zwei: Array und Cache-Pool. */}
       {daten.traeger.length > 0 ? (
         <section className="sp-block">
@@ -249,6 +250,7 @@ export function Speicherseite() {
           </tbody>
         </table>
       </section>
+      </div>
 
       {/*
         Die Erklaerung gehoert hierher, weil die Zahl sonst enttaeuscht: Wer
@@ -270,6 +272,6 @@ export function Speicherseite() {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

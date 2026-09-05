@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api } from "../lib/api";
+import { Icon } from "../components/Icons";
 
 export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => void }) {
   const navigate = useNavigate();
@@ -11,6 +12,12 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
   const [live, setLive] = useState(false);
   const [laeuft, setLaeuft] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = dialog.current;
+    el?.showModal();
+    return () => el?.close();
+  }, []);
 
   async function absenden(e: React.FormEvent) {
     e.preventDefault();
@@ -34,14 +41,19 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
   }
 
   return (
-    <div
-      className="schleier"
+    <dialog
+      ref={dialog}
+      className="kanal-dialog"
+      aria-labelledby="kanal-dialog-titel"
+      onCancel={(e) => { if (laeuft) e.preventDefault(); else aufSchliessen(); }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) aufSchliessen();
+        if (e.target === e.currentTarget && !laeuft) aufSchliessen();
       }}
     >
       <form className="dialog" onSubmit={absenden}>
-        <h2>Kanal aufnehmen</h2>
+        <div className="dialog-kopf"><h2 id="kanal-dialog-titel">Kanal aufnehmen</h2>
+          <button type="button" className="symbol-knopf" aria-label="Dialog schließen" disabled={laeuft} onClick={aufSchliessen}><Icon name="close" /></button>
+        </div>
         <p className="erklaerung">
           Adresse, Handle oder Kanal-ID. Vitrine erfasst zunächst nur, welche Videos und Playlists
           es gibt – das dauert bei großen Kanälen einige Minuten. Heruntergeladen wird erst, wenn
@@ -88,13 +100,13 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
         </label>
 
         {fehler ? (
-          <div className="hinweis" data-art="fehler" style={{ marginTop: 14, marginBottom: 0 }}>
+          <div className="hinweis" data-art="fehler" role="alert" style={{ marginTop: 14, marginBottom: 0 }}>
             <div>{fehler}</div>
           </div>
         ) : null}
 
         <div className="dialog-fuss">
-          <button type="button" className="knopf" onClick={aufSchliessen}>
+          <button type="button" className="knopf" disabled={laeuft} onClick={aufSchliessen}>
             Abbrechen
           </button>
           <button type="submit" className="knopf" data-art="stark" disabled={laeuft || !url.trim()}>
@@ -102,6 +114,6 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
           </button>
         </div>
       </form>
-    </div>
+    </dialog>
   );
 }

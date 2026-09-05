@@ -1,0 +1,137 @@
+.watch.watch-seite {
+  grid-template-columns: minmax(0, 1fr) 368px;
+  grid-template-areas: "player neben" "information neben";
+  grid-template-rows: auto 1fr;
+  column-gap: 24px;
+  row-gap: 12px;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+.watch-seite .watch-player { grid-area: player; min-width: 0; }
+.watch-seite .watch-information { grid-area: information; min-width: 0; }
+.watch-seite .watch-neben { grid-area: neben; min-width: 0; }
+.watch-seite .buehne:not([data-vollbild="true"]) { width: 100%; margin: 0; border-radius: 12px; }
+.watch.watch-seite[data-theater="true"] { grid-template-areas: "player player" "information neben"; }
+.watch-seite[data-theater="true"] .buehne:not([data-vollbild="true"]) {
+  width: 100%;
+  margin: 0;
+  height: min(72vh, 860px);
+  max-height: none;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.watch-seite .watch-information h1 { font-size: 20px; line-height: 1.4; font-weight: 700; margin: 0 0 12px; letter-spacing: 0; overflow-wrap: anywhere; }
+.watch-seite h2 { font-size: 16px; line-height: 1.4; font-weight: 600; margin: 0 0 12px; }
+
+.watch-kanalzeile { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+.watch-kanal { display: flex; align-items: center; gap: 12px; min-width: 0; margin-right: auto; }
+.watch-seite .watch-avatar { width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; object-fit: cover; background: var(--flaeche-hoch); }
+.watch-kanaltext { display: flex; flex-direction: column; min-width: 0; }
+.watch-kanaltext strong { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
+.watch-kanaltext > span { font-size: 12px; color: var(--text-gedaempft); }
+.watch-aktionen { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.watch-aktionen .knopf { height: 36px; padding: 0 12px; font-size: 14px; border-radius: 999px; }
+.watch-gesehen { display: inline-flex; align-items: center; gap: 4px; color: var(--text-gedaempft); font-size: 12px; margin-right: 4px; }
+
+.watch-beschreibung { background: var(--flaeche-hoch); border-radius: 12px; padding: 12px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.watch-beschreibung-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 6px; }
+.watch-beschreibung-meta strong { font-weight: 600; }
+.watch-archiviert { display: inline-flex; align-items: center; gap: 4px; color: var(--text-gedaempft); font-size: 12px; }
+.watch-qualitaet { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--text-gedaempft); font-size: 12px; margin: 8px 0; }
+.watch-qualitaet .guete-marke, .watch-qualitaet .guete-marke[data-hoch] { background: transparent; border: 1px solid var(--text-gedaempft); color: var(--text); border-radius: 3px; padding: 0 4px; line-height: 17px; font-size: 11px; }
+.watch-beschreibung-text { white-space: pre-wrap; }
+.watch-beschreibung-text[data-offen="false"] { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.watch-mehr { padding: 4px 0 0; font-weight: 600; font-size: 14px; }
+.watch-statusmeldung { margin: 8px 0 0; color: var(--text-gedaempft); font-size: 13px; }
+.watch-technik { border-bottom: 1px solid var(--rand); margin: 16px 0 0; padding-bottom: 8px; }
+.watch-technik dl { margin: 0; font-size: 13px; }
+.watch-technik dl > div { display: grid; grid-template-columns: minmax(100px, .6fr) minmax(0, 1fr); gap: 16px; padding: 8px 0; border-top: 1px solid var(--rand-zart); }
+.watch-technik dt { color: var(--text-gedaempft); }
+.watch-technik dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.watch-entfernen { padding: 16px; margin-bottom: 12px; border: 1px solid var(--rand); border-radius: 8px; }
+.watch-entfernen p { margin: 0 0 12px; color: var(--text-gedaempft); font-size: 13px; }
+.watch-entfernen strong { color: var(--text); font-size: 14px; }
+.watch-entfernen-aktionen { display: flex; justify-content: flex-end; gap: 8px; }
+.watch-fehler { color: var(--zu-fehler); margin-bottom: 12px; }
+
+.watch-neben > section + section { margin-top: 24px; }
+.watch-kapitel { border: 1px solid var(--rand); border-radius: 12px; overflow: hidden; }
+.watch-seite .watch-kapitel h2 { display: flex; align-items: center; gap: 8px; padding: 14px 16px; margin: 0; }
+.watch-kapitel h2 > span { color: var(--text-gedaempft); font-size: 12px; font-weight: 400; }
+.watch-kapitel .kapitel { max-height: 258px; gap: 0; padding: 0 0 6px; }
+.watch-kapitel .kapitel button { border-radius: 0; gap: 12px; padding: 10px 12px; align-items: center; }
+.watch-kapitel .kapitel button[data-aktiv="true"] { background: var(--flaeche-hoch); }
+.watch-kapitel-nummer { width: 16px; flex-shrink: 0; text-align: center; color: var(--text-gedaempft); font-size: 12px; }
+.watch-kapitel .kapitel button[data-aktiv="true"] .watch-kapitel-nummer { color: var(--text); }
+.watch-kapitel-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-weight: 500; }
+.watch-kapitel-text > span:first-child { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.watch-kapitel-text .zeit { font-size: 12px; font-weight: 400; }
+.watch-playlists a { display: flex; gap: 12px; align-items: center; border-radius: 8px; padding: 10px 8px; }
+.watch-playlists a:hover { background: var(--flaeche-hoch); }
+.watch-playlists a > span { flex: 1; min-width: 0; font-size: 13px; }
+.watch-playlists a > svg { flex-shrink: 0; }
+.watch-seite .watch-empfehlungen h2 { font-size: 14px; margin-bottom: 14px; }
+.watch-seite .watch-empfehlungen .gitter[data-form="liste"] { gap: 12px; }
+.watch-seite .watch-empfehlungen .gitter[data-form="liste"] .kachel { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 8px; align-items: start; }
+.watch-seite .watch-empfehlungen .kachel-text { padding-top: 0; gap: 0; }
+.watch-seite .watch-empfehlungen .kachel-kanalbild { display: none; }
+.watch-seite .watch-empfehlungen .kachel-titel { font-size: 13px; line-height: 1.4; -webkit-line-clamp: 2; line-clamp: 2; margin-bottom: 4px; }
+.watch-seite .watch-empfehlungen .kachel-zeile { font-size: 12px; line-height: 1.4; }
+.watch-seite .watch-empfehlungen .kachel-bild { border-radius: 8px; }
+.watch-leer { color: var(--text-gedaempft); font-size: 13px; margin: 0; }
+.watch-leer a { text-decoration: underline; }
+.watch-laden { max-width: 1200px; }
+.watch-laden-bild { width: 100%; aspect-ratio: 16 / 9; margin-bottom: 24px; }
+
+.watch-seite .player-gross { width: 68px; height: 48px; border-radius: 12px; background: rgba(0, 0, 0, .75); transition: background 120ms ease; }
+.watch-seite .player-gross:hover { transform: none; background: #f03; }
+.watch-seite .player-steuerung { padding: 34px 12px 4px; }
+.watch-seite .steuer-knopf { border-radius: 3px; }
+.watch-seite .steuer-knopf[hidden] { display: none; }
+.watch-seite .player-erneut { background: #333; color: #fff; }
+.watch-seite .player-erneut:hover:not(:disabled) { background: #444; color: #fff; }
+.watch-seite .player :focus-visible, .watch-seite .buehne-meldung :focus-visible { outline-color: #fff; }
+.watch-seite .steuer-knopf:hover { background: transparent; }
+.watch-seite .steuer-menue { box-shadow: 0 2px 8px #0004; max-height: min(280px, calc(56.25vw - 100px)); overflow-y: auto; }
+.watch-seite .player:has(:focus-visible) .player-steuerung { opacity: 1; pointer-events: auto; }
+.watch-seite .player:has(:focus-visible) { cursor: auto; }
+.watch-seite .zeitleiste:focus-visible .leiste-spur { height: 5px; }
+.watch-seite .zeitleiste:focus-visible .leiste-griff { transform: translateY(-50%) scale(1); }
+.watch-seite .player-meldung-icon { display: block; margin: 0 auto 14px; width: 36px; height: 36px; }
+.watch-seite .buehne-meldung { color: #ddd; max-width: 440px; }
+.watch-seite .buehne-meldung h2 { color: #fff; font-size: 16px; margin-bottom: 6px; }
+.watch-seite .buehne-meldung p { color: #aaa; margin: 0 0 16px; }
+
+@media (max-width: 1200px) {
+  .watch.watch-seite, .watch.watch-seite[data-theater="true"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "player" "information" "neben"; }
+  .watch-seite .watch-neben { margin-top: 12px; }
+  .watch-seite .watch-empfehlungen .gitter[data-form="liste"] .kachel { grid-template-columns: 200px minmax(0, 1fr); gap: 12px; }
+  .watch-seite .watch-empfehlungen .kachel-titel { font-size: 14px; }
+}
+
+@media (max-width: 640px) {
+  .watch.watch-seite { gap: 12px; }
+  .watch-seite .buehne:not([data-vollbild="true"]) { border-radius: 0; margin: 0 -12px; width: calc(100% + 24px); }
+  .watch-seite[data-theater="true"] .buehne:not([data-vollbild="true"]) { width: calc(100% + 24px); margin: 0 -12px; height: min(60vh, 440px); }
+  .watch-seite .watch-information h1 { font-size: 18px; line-height: 1.4; }
+  .watch-kanalzeile { gap: 12px; }
+  .watch-kanal { flex: 1 1 100%; }
+  .watch-aktionen { width: 100%; gap: 8px; }
+  .watch-aktionen .knopf { font-size: 13px; }
+  .watch-gesehen { order: 1; margin-left: auto; }
+  .watch-beschreibung { font-size: 13px; }
+  .watch-beschreibung-meta { gap: 4px 8px; }
+  .watch-seite .watch-empfehlungen .gitter[data-form="liste"] .kachel { grid-template-columns: 44% minmax(0, 1fr); gap: 10px; }
+  .watch-seite .watch-empfehlungen .kachel-titel { font-size: 13px; }
+  .watch-seite .steuer-knopf { flex-shrink: 0; width: 32px; height: 36px; }
+  .watch-seite .steuer-knopf svg { width: 22px; height: 22px; }
+  .watch-seite .steuer-knopf.steuer-text { padding: 0 6px; }
+  .watch-seite .steuer-zeit { margin-left: 3px; font-size: 11px; }
+  .watch-seite .steuer-regler, .watch-seite .steuer-ton:hover .steuer-regler { display: none; }
+  .watch-seite .player-steuerung { padding-left: 8px; padding-right: 8px; }
+}
+
+@media (max-width: 420px) {
+  .watch-seite .steuer-pip { display: none; }
+}

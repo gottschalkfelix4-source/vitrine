@@ -25,7 +25,7 @@
   /* --- Schrift ---------------------------------------------------------- */
   --text: #f1f1f1;
   --text-gedaempft: #aaaaaa;
-  --text-schwach: #717171;
+  --text-schwach: #949494;
 
   /* --- Akzent ----------------------------------------------------------- */
   /* Bewusst nur EIN Akzent. Er markiert den Fortschrittsbalken und die aktive
@@ -57,7 +57,7 @@
   --schrift: Roboto, "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
   --schrift-zahl: "Roboto Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-  --schatten: 0 4px 24px rgba(0, 0, 0, 0.55);
+  --schatten: 0 2px 8px rgba(0, 0, 0, 0.3);
   --uebergang: 120ms cubic-bezier(0.2, 0, 0.2, 1);
 }
 
@@ -72,9 +72,14 @@
   --rand-zart: #ededed;
   --text: #0f0f0f;
   --text-gedaempft: #606060;
-  --text-schwach: #909090;
+  --text-schwach: #707070;
+  --zu-archiviert: #16803d;
+  --zu-arbeit: #8a6000;
+  --zu-wartet: #2764b1;
+  --zu-fehler: #c62828;
+  --zu-fehlt: #606060;
   --akzent-matt: rgba(255, 0, 51, 0.1);
-  --schatten: 0 4px 20px rgba(0, 0, 0, 0.12);
+  --schatten: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 * {
@@ -111,7 +116,8 @@ button {
 }
 
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: inherit;
 }

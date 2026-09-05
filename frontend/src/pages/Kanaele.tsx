@@ -1,12 +1,17 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Fehler, Leer, Skelettgitter } from "../components/ui";
+import { Icon } from "../components/Icons";
 import { useApi } from "../hooks/useApi";
 import { api, thumbUrl } from "../lib/api";
 import { bytes, prozent, vorZeit } from "../lib/format";
+import "../styles/browse.css";
 
 export function Kanaeleseite({ aufAnlegen }: { aufAnlegen: () => void }) {
   const { daten, laedt, fehler, neuLaden } = useApi(() => api.kanaele(), []);
+  const [filter, setFilter] = useState("");
+  const [sortierung, setSortierung] = useState("name");
 
   if (fehler) return <Fehler text={fehler} erneut={neuLaden} />;
   if (laedt && !daten) return <Skelettgitter anzahl={4} />;
@@ -14,7 +19,7 @@ export function Kanaeleseite({ aufAnlegen }: { aufAnlegen: () => void }) {
   if (!daten || daten.length === 0) {
     return (
       <Leer
-        zeichen="📡"
+        zeichen="◎"
         titel="Noch keine Kanäle"
         text="Nimm einen Kanal auf. Vitrine liest dann dessen Videos und Playlists und lädt sie im Hintergrund."
         kinder={
@@ -26,64 +31,60 @@ export function Kanaeleseite({ aufAnlegen }: { aufAnlegen: () => void }) {
     );
   }
 
+  const sichtbar = daten
+    .filter((k) => `${k.name} ${k.handle ?? ""}`.toLocaleLowerCase("de").includes(filter.toLocaleLowerCase("de")))
+    .sort((a, b) => sortierung === "archiviert"
+      ? b.videos_archiviert - a.videos_archiviert
+      : a.name.localeCompare(b.name, "de"));
+
   return (
-    <>
+    <section className="kanaele-seite">
       <div className="seiten-kopf">
-        <h1>Kanäle</h1>
+        <div>
+          <h1>Deine Kanäle</h1>
+          <p className="browse-meta">{daten.length} {daten.length === 1 ? "Kanal" : "Kanäle"} im Archiv</p>
+        </div>
         <button className="knopf" data-art="stark" onClick={aufAnlegen}>
-          + Kanal aufnehmen
+          <Icon name="plus" size={20} /> Kanal aufnehmen
         </button>
       </div>
 
-      <table className="tabelle">
-        <thead>
-          <tr>
-            <th>Kanal</th>
-            <th style={{ width: 200 }}>Archiviert</th>
-            <th style={{ width: 120 }}>Belegung</th>
-            <th style={{ width: 150 }}>Abgleich</th>
-          </tr>
-        </thead>
-        <tbody>
-          {daten.map((k) => {
+      <div className="kanal-filter">
+        <input className="eingabe" aria-label="Kanäle filtern" placeholder="Kanäle filtern" type="search" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <select className="auswahl" aria-label="Kanäle sortieren" value={sortierung} onChange={(e) => setSortierung(e.target.value)}>
+          <option value="name">Name A–Z</option>
+          <option value="archiviert">Meiste archivierte Videos</option>
+        </select>
+      </div>
+
+      <div className="kanal-liste">
+          {sichtbar.map((k) => {
             const anteil = k.videos_gesamt ? k.videos_archiviert / k.videos_gesamt : 0;
             return (
-              <tr key={k.id}>
-                <td>
-                  <Link to={`/kanal/${k.id}`} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <Link className="kanal-abo" key={k.id} to={`/kanal/${k.id}`}>
                     {thumbUrl(k.avatar) ? (
-                      <img className="avatar" src={thumbUrl(k.avatar)!} alt="" style={{ width: 32, height: 32, borderRadius: "50%" }} />
+                      <img className="kanal-abo-avatar" src={thumbUrl(k.avatar)!} alt="" loading="lazy" />
                     ) : (
-                      <span className="avatar" style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--flaeche-hoch)" }} />
+                      <span className="kanal-abo-avatar" aria-hidden="true">{k.name.charAt(0).toLocaleUpperCase("de")}</span>
                     )}
-                    <div>
-                      <div style={{ fontWeight: 500 }}>{k.name}</div>
+                    <div className="kanal-abo-info">
+                      <h2>{k.name}</h2>
                       {k.handle ? (
-                        <div style={{ color: "var(--text-schwach)", fontSize: 12 }}>{k.handle}</div>
+                        <div className="browse-meta">{k.handle}</div>
                       ) : null}
+                      <p className="kanal-abo-zahlen">
+                        {k.videos_archiviert} von {k.videos_gesamt} Videos archiviert
+                        {k.videos_gesamt ? ` · ${prozent(anteil)}` : ""}
+                        {" · "}{bytes(k.belegung_bytes)}
+                      </p>
+                      <p className="browse-meta">Abgleich {k.abgleich_aktiv ? vorZeit(k.zuletzt_abgeglichen) || "steht aus" : "abgeschaltet"}</p>
                     </div>
-                  </Link>
-                </td>
-                <td>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div className="balken">
-                      <span style={{ width: `${anteil * 100}%`, background: "var(--zu-archiviert)" }} />
-                    </div>
-                    <span className="zahl" style={{ fontSize: 12.5, color: "var(--text-gedaempft)", whiteSpace: "nowrap" }}>
-                      {k.videos_archiviert}/{k.videos_gesamt}
-                      {k.videos_gesamt ? ` (${prozent(anteil)})` : ""}
-                    </span>
-                  </div>
-                </td>
-                <td className="zahl">{bytes(k.belegung_bytes)}</td>
-                <td style={{ color: "var(--text-gedaempft)", fontSize: 12.5 }}>
-                  {k.abgleich_aktiv ? vorZeit(k.zuletzt_abgeglichen) || "steht aus" : "abgeschaltet"}
-                </td>
-              </tr>
+                    <span className="kanal-abo-oeffnen">Kanal ansehen <Icon name="chevronRight" size={18} /></span>
+              </Link>
             );
           })}
-        </tbody>
-      </table>
-    </>
+      </div>
+      {sichtbar.length === 0 ? <Leer zeichen="⌕" titel="Kein Kanal gefunden" text={`Keiner deiner Kanäle enthält „${filter}“.`} /> : null}
+    </section>
   );
 }

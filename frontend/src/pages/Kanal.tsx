@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { Fehler, Gitter, Hinweis, Leer, Skelettgitter, Videokachel } from "../components/ui";
+import { Icon } from "../components/Icons";
 import { useApi, useVideostapel } from "../hooks/useApi";
 import type { AlleLadenErgebnis, Sammlung } from "../lib/api";
 import { api, thumbUrl } from "../lib/api";
 import { bytes, datum } from "../lib/format";
+import "../styles/browse.css";
 
 /**
  * Was „Alle laden" wirklich getan hat, in einem Satz.
@@ -47,7 +49,11 @@ export function Kanalseite() {
   const { kanalId = "" } = useParams();
   const navigate = useNavigate();
   const [suchparameter, setSuchparameter] = useSearchParams();
-  const tab = (suchparameter.get("tab") ?? "videos") as Tab;
+  const tabWert = suchparameter.get("tab");
+  const tab: Tab = tabWert === "shorts" || tabWert === "live" || tabWert === "playlists" ? tabWert : "videos";
+  const sortWert = suchparameter.get("sort");
+  const sortierung = sortWert === "alt" || sortWert === "aufrufe" ? sortWert : "neu";
+  const [beschreibungOffen, setBeschreibungOffen] = useState(false);
   const [abgleichLaeuft, setAbgleichLaeuft] = useState(false);
   const [entfernenOffen, setEntfernenOffen] = useState(false);
   // Herunterladen in zwei Schritten: Bei einem grossen Kanal geht es um Tage
@@ -56,6 +62,7 @@ export function Kanalseite() {
   const [ladenNachfrage, setLadenNachfrage] = useState(false);
   const [ladenLaeuft, setLadenLaeuft] = useState(false);
   const [ladenMeldung, setLadenMeldung] = useState<string | null>(null);
+  const [aktionsFehler, setAktionsFehler] = useState<string | null>(null);
 
   const kanal = useApi(() => api.kanal(kanalId), [kanalId]);
   const offene = useApi(() => api.kanalOffene(kanalId), [kanalId]);
@@ -67,7 +74,7 @@ export function Kanalseite() {
     kanal: kanalId,
     art: tab === "playlists" ? "videos" : tab,
     nur_archiviert: false,
-    sortierung: "neu",
+    sortierung,
   });
 
   if (kanal.fehler) return <Fehler text={kanal.fehler} erneut={kanal.neuLaden} />;
@@ -86,8 +93,12 @@ export function Kanalseite() {
 
   async function abgleichen() {
     setAbgleichLaeuft(true);
+    setAktionsFehler(null);
     try {
       await api.kanalAbgleichen(kanalId, true);
+      setLadenMeldung("Der Kanalabgleich wurde eingereiht.");
+    } catch (e) {
+      setAktionsFehler(e instanceof Error ? e.message : String(e));
     } finally {
       setAbgleichLaeuft(false);
     }
@@ -101,7 +112,8 @@ export function Kanalseite() {
   ];
 
   return (
-    <>
+    <section className="kanal-seite">
+      {aktionsFehler ? <Fehler text={aktionsFehler} /> : null}
       {ladenMeldung ? (
         <Hinweis>
           <div>
@@ -119,11 +131,11 @@ export function Kanalseite() {
           {thumbUrl(d.kanal.avatar) ? (
             <img className="avatar-gross" src={thumbUrl(d.kanal.avatar)!} alt="" />
           ) : (
-            <span className="avatar-gross" />
+            <span className="avatar-gross kanal-initial" aria-hidden="true">{d.kanal.name.charAt(0).toLocaleUpperCase("de")}</span>
           )}
-          <div style={{ minWidth: 0 }}>
+          <div className="kanal-identitaet">
             <h1>{d.kanal.name}</h1>
-            <div style={{ color: "var(--text-gedaempft)", fontSize: 13.5 }}>
+            <div className="browse-meta">
               {d.kanal.handle ? <span>{d.kanal.handle} · </span> : null}
               <span>
                 {d.kanal.videos_archiviert} von {d.kanal.videos_gesamt} archiviert
@@ -131,12 +143,19 @@ export function Kanalseite() {
               {d.kanal.belegung_bytes > 0 ? <span> · {bytes(d.kanal.belegung_bytes)}</span> : null}
             </div>
             {d.kanal.zuletzt_abgeglichen ? (
-              <div style={{ color: "var(--text-schwach)", fontSize: 12.5, marginTop: 2 }}>
+              <div className="browse-meta kanal-abgleich">
                 zuletzt abgeglichen {datum(d.kanal.zuletzt_abgeglichen)}
               </div>
             ) : null}
-          </div>
-          <div className="aktionen">
+            {d.beschreibung ? (
+              <div className="kanal-beschreibung">
+                <p id="kanal-beschreibung" data-offen={beschreibungOffen}>{d.beschreibung}</p>
+                <button type="button" aria-expanded={beschreibungOffen} aria-controls="kanal-beschreibung" onClick={() => setBeschreibungOffen(!beschreibungOffen)}>
+                  {beschreibungOffen ? "Weniger anzeigen" : "Mehr anzeigen"}
+                </button>
+              </div>
+            ) : null}
+          <div className="aktionen kanal-aktionen">
             {offene.daten && offene.daten.anzahl > 0 ? (
               ladenNachfrage ? (
                 <>
@@ -150,12 +169,15 @@ export function Kanalseite() {
                     disabled={ladenLaeuft}
                     onClick={async () => {
                       setLadenLaeuft(true);
+                      setAktionsFehler(null);
                       try {
                         const r = await api.kanalAlleLaden(kanalId);
                         setLadenMeldung(ladenBericht(r));
                         setLadenNachfrage(false);
                         offene.neuLaden();
                         stapel.neuLaden();
+                      } catch (e) {
+                        setAktionsFehler(e instanceof Error ? e.message : String(e));
                       } finally {
                         setLadenLaeuft(false);
                       }
@@ -169,23 +191,20 @@ export function Kanalseite() {
                 </>
               ) : (
                 <button className="knopf" data-art="stark" onClick={() => setLadenNachfrage(true)}>
-                  ↓ Alle laden ({offene.daten.anzahl})
+                  <Icon name="download" size={18} /> Alle laden ({offene.daten.anzahl})
                 </button>
               )
             ) : null}
             <button className="knopf" onClick={abgleichen} disabled={abgleichLaeuft}>
+              <Icon name="refresh" size={18} />
               {abgleichLaeuft ? "wird eingereiht …" : "Jetzt abgleichen"}
             </button>
             <button className="knopf" data-art="gefahr" onClick={() => setEntfernenOffen(true)}>
               Entfernen
             </button>
           </div>
-        </div>
-        {d.beschreibung ? (
-          <div className="beschreibung" data-zu="true" style={{ marginTop: 16 }}>
-            {d.beschreibung}
           </div>
-        ) : null}
+        </div>
       </div>
 
       <div className="tabs">
@@ -197,7 +216,12 @@ export function Kanalseite() {
               key={t.wert}
               className="tab"
               data-aktiv={tab === t.wert}
-              onClick={() => setSuchparameter(t.wert === "videos" ? {} : { tab: t.wert })}
+              aria-pressed={tab === t.wert}
+              onClick={() => setSuchparameter((vorher) => {
+                const neu = new URLSearchParams(vorher);
+                if (t.wert === "videos") neu.delete("tab"); else neu.set("tab", t.wert);
+                return neu;
+              })}
             >
               {t.text}
               <span className="zahl">{t.zahl}</span>
@@ -205,23 +229,36 @@ export function Kanalseite() {
           ))}
       </div>
 
+      {tab !== "playlists" ? (
+        <div className="chips kanal-sortierung" aria-label="Videos sortieren">
+          {([{ wert: "neu", text: "Neueste" }, { wert: "aufrufe", text: "Beliebt" }, { wert: "alt", text: "Älteste" }] as const).map((s) => (
+            <button className="chip" key={s.wert} data-aktiv={sortierung === s.wert} aria-pressed={sortierung === s.wert} onClick={() => setSuchparameter((vorher) => {
+              const neu = new URLSearchParams(vorher);
+              if (s.wert === "neu") neu.delete("sort"); else neu.set("sort", s.wert);
+              return neu;
+            })}>{s.text}</button>
+          ))}
+        </div>
+      ) : null}
+
       {tab === "playlists" ? (
         playlists.length > 0 ? (
           <Gitter>
             {playlists.map((p) => (
-              <Link key={p.id} className="kachel" to={`/playlist/${p.id}`}>
+              <Link key={p.id} className="kachel playlist-kachel" to={`/playlist/${p.id}`}>
                 <div className="kachel-bild">
                   {thumbUrl(p.thumb) ? (
                     <img src={thumbUrl(p.thumb)!} alt="" loading="lazy" />
                   ) : (
-                    <div className="platzhalter">☰</div>
+                    <div className="platzhalter"><Icon name="playlist" size={42} /></div>
                   )}
-                  <span className="dauer">{p.anzahl} Videos</span>
+                  <span className="dauer playlist-anzahl"><Icon name="playlist" size={16} />{p.anzahl} Videos</span>
                 </div>
                 <div className="kachel-text">
                   <div style={{ minWidth: 0 }}>
                     <h3 className="kachel-titel">{p.titel}</h3>
                     <div className="kachel-zeile">{ART_TEXT[p.art]}</div>
+                    <div className="playlist-anzeigen">Vollständige Playlist ansehen</div>
                   </div>
                 </div>
               </Link>
@@ -231,7 +268,7 @@ export function Kanalseite() {
           <Leer zeichen="☰" titel="Keine Playlists" text="Dieser Kanal führt keine öffentlichen Playlists." />
         )
       ) : (
-        <>
+        <div className="kanal-videoergebnisse" data-art={tab}>
           {stapel.fehler ? <Fehler text={stapel.fehler} erneut={stapel.neuLaden} /> : null}
           {stapel.laedt && stapel.videos.length === 0 ? (
             <Skelettgitter />
@@ -259,7 +296,7 @@ export function Kanalseite() {
               text="Sobald der Abgleich durch ist, erscheinen die Videos dieses Kanals hier."
             />
           ) : null}
-        </>
+        </div>
       )}
 
       {entfernenOffen ? (
@@ -273,7 +310,7 @@ export function Kanalseite() {
           aufFertig={() => navigate("/kanaele")}
         />
       ) : null}
-    </>
+    </section>
   );
 }
 
@@ -297,6 +334,12 @@ function KanalEntfernenDialog({
   const [dateien, setDateien] = useState(true);
   const [laeuft, setLaeuft] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = dialog.current;
+    el?.showModal();
+    return () => el?.close();
+  }, []);
 
   async function bestaetigen() {
     setLaeuft(true);
@@ -311,14 +354,17 @@ function KanalEntfernenDialog({
   }
 
   return (
-    <div
-      className="schleier"
+    <dialog
+      ref={dialog}
+      className="kanal-dialog"
+      aria-labelledby="kanal-entfernen-titel"
+      onCancel={(e) => { if (laeuft) e.preventDefault(); else aufSchliessen(); }}
       onClick={(e) => {
         if (e.target === e.currentTarget && !laeuft) aufSchliessen();
       }}
     >
       <div className="dialog">
-        <h2>„{name}“ entfernen?</h2>
+        <h2 id="kanal-entfernen-titel">„{name}“ entfernen?</h2>
         <p className="erklaerung">
           Der Kanal verschwindet mit allen {videos} erfassten Videos, den Playlists und den
           zugehörigen Aufträgen aus der Verwaltung. Das lässt sich nicht rückgängig machen –
@@ -343,7 +389,7 @@ function KanalEntfernenDialog({
         ) : null}
 
         <div className="dialog-fuss">
-          <button type="button" className="knopf" onClick={aufSchliessen} disabled={laeuft}>
+          <button type="button" className="knopf" autoFocus onClick={aufSchliessen} disabled={laeuft}>
             Abbrechen
           </button>
           <button
@@ -357,6 +403,6 @@ function KanalEntfernenDialog({
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

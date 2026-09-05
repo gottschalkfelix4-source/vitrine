@@ -623,13 +623,36 @@ ae/oe/ue/ss - "Groesse", "Größe" und "Grösse" finden dasselbe. Reines
 Der Index enthaelt nichts, was nicht auch in Datenbank oder Buendeln steht. Er
 muss weder gesichert noch migriert werden (`POST /api/search/reindex`).
 
+## Die Oberflaeche
+
+Vitrine orientiert sich an YouTube: Suchleiste mit Suchknopf, ein- und
+ausklappbare Navigation, Videoraster mit Kanalbildern sowie Kanalansichten mit
+Banner, Videos, Shorts, Livestreams und Playlists. Die Suche zeigt Videotreffer
+als Liste und kann gezielt auf Titel/Beschreibung oder Untertitel eingeschraenkt
+werden. Untertiteltreffer springen direkt an die gefundene Stelle.
+
+Auf der Wiedergabeseite stehen Player, Kanal und Beschreibung neben Kapiteln
+und weiteren archivierten Videos. Kinomodus, Vollbild, Untertitel,
+Geschwindigkeit, Bild-im-Bild und der gemerkte Wiedergabestand bleiben erhalten.
+Ueber das Sonnen-/Mondsymbol in der Kopfleiste laesst sich zwischen dunklem und
+hellem Design wechseln; die Auswahl bleibt auf diesem Geraet gespeichert.
+
+Die Archivfunktionen sind weiter direkt erreichbar: Einzelne Videos laden,
+Kanaele aufnehmen/abgleichen/entfernen und Auftraege abbrechen oder wiederholen.
+Die Warteschlange kann nach Zustand gefiltert werden. Der aktuelle Fortschritt
+steht kompakt ueber dem Inhalt und laesst sich fuer alle Auftragsdetails
+aufklappen. Einstellungen sind in Bereiche gegliedert; ungespeicherte
+Aenderungen bleiben beim Wechsel des Bereichs erhalten.
+
 ## Auf dem Telefon
 
 Die Oberflaeche schaltet unterhalb von 860 Pixeln auf Handbedienung um: Die
-Seitenleiste liegt dann als Schublade ueber dem Inhalt statt daneben, der
-Schriftzug weicht der Suche, "+ Kanal" wird zum "+", und der Player nimmt die
-volle Breite ohne Rand. Aussparungen und der Balken am unteren Rand werden
-ueber `env(safe-area-inset-*)` freigehalten.
+Seitenleiste liegt dann als Schublade ueber dem Inhalt statt daneben. Auf
+kleinen Telefonen oeffnet das Lupensymbol eine Suchzeile, "Kanal aufnehmen"
+wird zum Plus-Symbol, und der Player nimmt die volle Breite ohne Rand.
+Wartende Auftraege erscheinen als lesbare Zeilen ohne breite Tabelle;
+Einstellungsbereiche lassen sich horizontal durchblaettern. Der Balken am
+unteren Rand wird ueber `env(safe-area-inset-bottom)` freigehalten.
 
 Zusaetzlich ist das Archiv eine Progressive Web App: Mit Manifest, Symbolen und
 einem Service Worker laesst es sich auf den Startbildschirm legen und startet
@@ -647,7 +670,7 @@ Worker laeuft nur in einem *sicheren Kontext* - also ueber HTTPS oder auf
 gibt keinen Bildspeicher. Die Seite funktioniert im Browser vollstaendig
 weiter, nur eben ohne eigenes Symbol.
 
-Das Archiv sagt das auch selbst: Unter *Einstellungen* steht ganz oben, ob sich
+Das Archiv sagt das auch selbst: Unter *Einstellungen > Allgemein* steht, ob sich
 die App ablegen laesst - und wenn nicht, warum. Ein fehlender Menuepunkt ohne
 jede Meldung kostet sonst einen Abend Suche.
 

@@ -1,9 +1,11 @@
 import { Link } from "react-router-dom";
+import { useState } from "react";
 
 import { Fehler, Hinweis, Leer } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
 import { AUFTRAG_TEXT, prozent, vorZeit, wartedauer } from "../lib/format";
+import { Icon } from "../components/Icons";
 
 /** Laufende Auftraege aendern sich staendig - hier lohnt haeufiges Auffrischen. */
 const INTERVALL = 3000;
@@ -19,20 +21,28 @@ const STATUS_TEXT: Record<string, string> = {
 export function Warteschlangeseite() {
   const { daten, laedt, fehler, neuLaden } = useApi(() => api.auftraege(), [], INTERVALL);
   const { daten: aktiv } = useApi(() => api.aktiveAuftraege(), [], INTERVALL);
+  const [filter, setFilter] = useState("alle");
+  const [aktionsFehler, setAktionsFehler] = useState<string | null>(null);
+  const [beschaeftigt, setBeschaeftigt] = useState(false);
+
+  async function ausfuehren(aktion: () => Promise<unknown>) {
+    setBeschaeftigt(true);
+    setAktionsFehler(null);
+    try { await aktion(); neuLaden(); }
+    catch (e) { setAktionsFehler(e instanceof Error ? e.message : String(e)); }
+    finally { setBeschaeftigt(false); }
+  }
 
   async function abbrechen(id: number) {
-    await api.auftragAbbrechen(id);
-    neuLaden();
+    await ausfuehren(() => api.auftragAbbrechen(id));
   }
 
   async function wiederholen(id: number) {
-    await api.auftragWiederholen(id);
-    neuLaden();
+    await ausfuehren(() => api.auftragWiederholen(id));
   }
 
   async function alleWiederholen() {
-    await api.alleGescheitertenWiederholen();
-    neuLaden();
+    await ausfuehren(() => api.alleGescheitertenWiederholen());
   }
 
   if (fehler) return <Fehler text={fehler} erneut={neuLaden} />;
@@ -42,9 +52,10 @@ export function Warteschlangeseite() {
   const gescheitert = daten?.filter((a) => a.status === "failed") ?? [];
   const drosselung = aktiv?.drosselung;
   const wartendeArten = Object.entries(aktiv?.nach_art ?? {}).sort((a, b) => b[1] - a[1]);
+  const sichtbar = (daten ?? []).filter((a) => filter === "alle" || (filter === "aktiv" ? ["pending", "running"].includes(a.status) : a.status === filter));
 
   return (
-    <>
+    <div className="verwaltung warteschlange-seite">
       <div className="seiten-kopf">
         <h1>Warteschlange</h1>
         <span className="beiwerk">
@@ -52,6 +63,13 @@ export function Warteschlangeseite() {
           {gescheitert.length ? ` · ${gescheitert.length} fehlgeschlagen` : ""}
         </span>
       </div>
+      <div className="chips" aria-label="Aufträge filtern">
+        {[["alle", "Alle"], ["aktiv", "In Arbeit"], ["failed", "Fehlgeschlagen"], ["done", "Abgeschlossen"], ["cancelled", "Abgebrochen"]].map(([wert, text]) => (
+          <button key={wert} className="chip" data-aktiv={filter === wert} aria-pressed={filter === wert}
+            onClick={() => setFilter(wert)}>{text}</button>
+        ))}
+      </div>
+      {aktionsFehler ? <Fehler text={aktionsFehler} /> : null}
 
       {/*
         Die Aufschlüsselung steht bewusst oben: Ein Video erzeugt im Lauf
@@ -99,7 +117,7 @@ export function Warteschlangeseite() {
           <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
             Tragen sie alle denselben Fehler, lag es meist nicht an den Videos.
           </div>
-          <button className="knopf" style={{ marginTop: 12 }} onClick={() => void alleWiederholen()}>
+          <button className="knopf" disabled={beschaeftigt} style={{ marginTop: 12 }} onClick={() => void alleWiederholen()}>
             Alle {gescheitert.length} wiederholen
           </button>
         </Hinweis>
@@ -122,8 +140,8 @@ export function Warteschlangeseite() {
             </Link>
           }
         />
-      ) : (
-        <table className="tabelle">
+      ) : sichtbar.length === 0 && !laedt ? <Leer titel="Keine Aufträge in dieser Ansicht" text="Wähle einen anderen Filter, um weitere Aufträge zu sehen." /> : (
+        <table className="tabelle auftraege-tabelle">
           <thead>
             <tr>
               <th>Art</th>
@@ -135,10 +153,10 @@ export function Warteschlangeseite() {
             </tr>
           </thead>
           <tbody>
-            {(daten ?? []).map((a) => (
+            {sichtbar.map((a) => (
               <tr key={a.id}>
-                <td>{AUFTRAG_TEXT[a.art] ?? a.art}</td>
-                <td style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis" }}>
+                <td data-label="Art" className="auftrag-art"><Icon name={a.art === "channel_sync" ? "refresh" : "download"} size={20} />{AUFTRAG_TEXT[a.art] ?? a.art}</td>
+                <td data-label="Gegenstand" className="auftrag-titel" style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis" }}>
                   {a.ziel && a.art.startsWith("video") ? (
                     <Link to={`/video/${a.ziel}`}>{a.titel ?? a.ziel}</Link>
                   ) : a.ziel && a.art === "channel_sync" ? (
@@ -156,12 +174,12 @@ export function Warteschlangeseite() {
                     </div>
                   ) : null}
                 </td>
-                <td>
-                  <span className="marke-zustand" data-zustand={a.status === "failed" ? "failed" : a.status === "running" ? "encoding" : "queued"}>
+                <td data-label="Zustand">
+                  <span className="marke-zustand" data-zustand={a.status === "running" ? "encoding" : a.status === "pending" ? "queued" : a.status}>
                     {STATUS_TEXT[a.status] ?? a.status}
                   </span>
                 </td>
-                <td>
+                <td data-label="Fortschritt">
                   {a.status === "running" ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div className="balken">
@@ -175,16 +193,16 @@ export function Warteschlangeseite() {
                     <span style={{ color: "var(--text-schwach)" }}>–</span>
                   )}
                 </td>
-                <td className="zahl" style={{ color: "var(--text-gedaempft)", fontSize: 12.5 }}>
+                <td data-label="Angelegt" className="zahl" style={{ color: "var(--text-gedaempft)", fontSize: 12.5 }}>
                   {vorZeit(a.erstellt)}
                 </td>
                 <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                   {a.status === "failed" ? (
-                    <button className="knopf" onClick={() => void wiederholen(a.id)}>
+                    <button className="knopf" disabled={beschaeftigt} onClick={() => void wiederholen(a.id)}>
                       Nochmal
                     </button>
                   ) : a.status === "pending" || a.status === "running" ? (
-                    <button className="knopf" onClick={() => void abbrechen(a.id)}>
+                    <button className="knopf" disabled={beschaeftigt} onClick={() => void abbrechen(a.id)}>
                       Abbrechen
                     </button>
                   ) : null}
@@ -194,6 +212,6 @@ export function Warteschlangeseite() {
           </tbody>
         </table>
       )}
-    </>
+    </div>
   );
 }

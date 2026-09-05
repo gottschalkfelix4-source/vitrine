@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Icon } from "./Icons";
 import type { Kapitel } from "../lib/api";
 import { api, streamUrl, untertitelUrl } from "../lib/api";
 import { dauer, prozent } from "../lib/format";
@@ -33,7 +34,10 @@ type Lage =
 
 interface Props {
   videoId: string;
+  poster?: string;
+  titel?: string;
   startSekunde?: number;
+  sprungSekunde?: number;
   dauerS?: number | null;
   kapitel?: Kapitel[];
   untertitel?: { sprache: string; automatisch: boolean }[];
@@ -64,9 +68,9 @@ function gemerktLesen(): Gemerkt {
     if (roh) {
       const g = JSON.parse(roh) as Partial<Gemerkt>;
       return {
-        lautstaerke: typeof g.lautstaerke === "number" ? g.lautstaerke : 1,
+        lautstaerke: typeof g.lautstaerke === "number" && Number.isFinite(g.lautstaerke) ? Math.max(0, Math.min(1, g.lautstaerke)) : 1,
         stumm: !!g.stumm,
-        tempo: typeof g.tempo === "number" ? g.tempo : 1,
+        tempo: typeof g.tempo === "number" && Number.isFinite(g.tempo) ? Math.max(0.25, Math.min(3, g.tempo)) : 1,
       };
     }
   } catch {
@@ -91,7 +95,10 @@ function bereiche(tr: TimeRanges): [number, number][] {
 
 export function Player({
   videoId,
+  poster,
+  titel,
   startSekunde = 0,
+  sprungSekunde,
   dauerS,
   kapitel = [],
   untertitel = [],
@@ -100,6 +107,7 @@ export function Player({
   aufTheater,
 }: Props) {
   const [lage, setLage] = useState<Lage>({ art: "pruefen" });
+  const [ladeVersuch, setLadeVersuch] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const huelleRef = useRef<HTMLDivElement>(null);
   const leisteRef = useRef<HTMLDivElement>(null);
@@ -125,6 +133,8 @@ export function Player({
   useEffect(() => {
     let abgebrochen = false;
     let versuch = 0;
+    let zeitgeber: number | undefined;
+    const controller = new AbortController();
     gesprungen.current = false;
     setLage({ art: "pruefen" });
 
@@ -132,11 +142,12 @@ export function Player({
       try {
         // Nur das erste Byte anfordern: Das reicht, um zu erfahren, ob
         // ausgeliefert wird oder erst vorbereitet werden muss.
-        const antwort = await fetch(streamUrl(videoId), { headers: { Range: "bytes=0-0" } });
+        const antwort = await fetch(streamUrl(videoId), { headers: { Range: "bytes=0-0" }, signal: controller.signal });
         if (abgebrochen) return;
 
         if (antwort.status === 202) {
           const koerper = await antwort.json();
+          if (abgebrochen) return;
           setLage({
             art: "vorbereitung",
             grund: koerper.grund ?? "wird vorbereitet",
@@ -144,11 +155,12 @@ export function Player({
           });
           const wartezeit = Math.min(5000, 1000 + versuch * 500);
           versuch += 1;
-          window.setTimeout(() => void antasten(), wartezeit);
+          zeitgeber = window.setTimeout(() => void antasten(), wartezeit);
           return;
         }
         if (!antwort.ok && antwort.status !== 206) {
           const koerper = await antwort.json().catch(() => ({}));
+          if (abgebrochen) return;
           setLage({ art: "fehler", text: koerper.detail ?? `Fehler ${antwort.status}` });
           return;
         }
@@ -165,8 +177,10 @@ export function Player({
     void antasten();
     return () => {
       abgebrochen = true;
+      controller.abort();
+      window.clearTimeout(zeitgeber);
     };
-  }, [videoId]);
+  }, [videoId, ladeVersuch]);
 
   // ---- Medienereignisse --------------------------------------------------
   useEffect(() => {
@@ -179,11 +193,15 @@ export function Player({
     el.playbackRate = gemerkt.tempo;
 
     const beiMeta = () => {
-      setGesamt(el.duration || dauerS || 0);
+      setGesamt(Number.isFinite(el.duration) ? el.duration : dauerS || 0);
       setHochkant(el.videoHeight > el.videoWidth);
       // Nur einmal an die gemerkte Stelle springen, nicht bei jedem
       // erneuten Puffern - sonst zieht es den Nutzer beim Spulen zurueck.
-      if (!gesprungen.current && startSekunde > 1) el.currentTime = startSekunde;
+      const start = sprungSekunde ?? startSekunde;
+      if (!gesprungen.current && Number.isFinite(start) && start > 0) {
+        el.currentTime = Number.isFinite(el.duration) ? Math.min(start, el.duration) : start;
+        setZeit(el.currentTime);
+      }
       gesprungen.current = true;
     };
     const beiZeit = () => {
@@ -219,6 +237,8 @@ export function Player({
     el.addEventListener("canplay", weiter);
     el.addEventListener("volumechange", beiTon);
     el.addEventListener("ratechange", beiTempo);
+    if (el.readyState >= 1) beiMeta();
+    setLaeuft(!el.paused);
     return () => {
       el.removeEventListener("loadedmetadata", beiMeta);
       el.removeEventListener("durationchange", beiMeta);
@@ -236,7 +256,17 @@ export function Player({
     // gemerkt bewusst nicht als Abhaengigkeit: Es wird hier nur als Startwert
     // angewandt, danach fuehrt das Element selbst.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lage.art, videoId, dauerS, startSekunde]);
+  }, [lage.art, videoId, dauerS, startSekunde, sprungSekunde]);
+
+  // Ein neuer Zeitstempel desselben Videos spult den bestehenden Player.
+  // Ein Remount würde dessen aktive Server-Lease zunächst freigeben.
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || el.readyState < 1 || sprungSekunde === undefined || !Number.isFinite(sprungSekunde)) return;
+    const ziel = Math.max(0, Number.isFinite(el.duration) ? Math.min(sprungSekunde, el.duration) : sprungSekunde);
+    el.currentTime = ziel;
+    setZeit(ziel);
+  }, [lage.art, sprungSekunde]);
 
   // ---- Lease und Fortschritt --------------------------------------------
   useEffect(() => {
@@ -246,15 +276,28 @@ export function Player({
 
     let herz: number | undefined;
     let merken: number | undefined;
+    const fortschrittSpeichern = (beimVerlassen = false) => {
+      if (!Number.isFinite(el.currentTime) || el.readyState < 1) return;
+      const anfrage = beimVerlassen
+        ? fetch(`/api/videos/${videoId}/progress`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sekunden: el.currentTime }),
+            keepalive: true,
+          })
+        : api.fortschrittMerken(videoId, el.currentTime);
+      void anfrage.catch(() => { /* Beim nächsten Ereignis erneut speichern. */ });
+    };
+    const herzschlag = () => {
+      void api.herzschlag(videoId).catch(() => { /* Nächster Herzschlag folgt. */ });
+    };
     const starten = () => {
       if (herz === undefined) {
-        void api.herzschlag(videoId);
-        herz = window.setInterval(() => void api.herzschlag(videoId), HERZSCHLAG_MS);
+        herzschlag();
+        herz = window.setInterval(herzschlag, HERZSCHLAG_MS);
       }
       if (merken === undefined) {
-        merken = window.setInterval(() => {
-          if (el.currentTime > 0) void api.fortschrittMerken(videoId, el.currentTime);
-        }, FORTSCHRITT_MS);
+        merken = window.setInterval(fortschrittSpeichern, FORTSCHRITT_MS);
       }
     };
     const anhalten = () => {
@@ -262,21 +305,34 @@ export function Player({
       if (merken !== undefined) window.clearInterval(merken);
       herz = merken = undefined;
     };
-    const beenden = () => {
+    const pausieren = () => {
       anhalten();
-      if (el.currentTime > 0) void api.fortschrittMerken(videoId, el.currentTime);
-      void api.wiedergabeBeendet(videoId);
+      fortschrittSpeichern();
     };
+    const beenden = (beimVerlassen = false) => {
+      anhalten();
+      fortschrittSpeichern(beimVerlassen);
+      void api.wiedergabeBeendet(videoId).catch(() => { /* Lease läuft serverseitig ab. */ });
+    };
+    const amEnde = () => beenden();
+    const beimVerlassen = () => beenden(true);
+    const beimZurueckkehren = () => { if (!el.paused && !el.ended) starten(); };
+    const nachSprung = () => { if (el.paused) fortschrittSpeichern(); };
     el.addEventListener("play", starten);
-    el.addEventListener("pause", anhalten);
-    el.addEventListener("ended", beenden);
-    window.addEventListener("pagehide", beenden);
+    el.addEventListener("pause", pausieren);
+    el.addEventListener("seeked", nachSprung);
+    el.addEventListener("ended", amEnde);
+    window.addEventListener("pagehide", beimVerlassen);
+    window.addEventListener("pageshow", beimZurueckkehren);
+    if (!el.paused) starten();
     return () => {
       el.removeEventListener("play", starten);
-      el.removeEventListener("pause", anhalten);
-      el.removeEventListener("ended", beenden);
-      window.removeEventListener("pagehide", beenden);
-      beenden();
+      el.removeEventListener("pause", pausieren);
+      el.removeEventListener("seeked", nachSprung);
+      el.removeEventListener("ended", amEnde);
+      window.removeEventListener("pagehide", beimVerlassen);
+      window.removeEventListener("pageshow", beimZurueckkehren);
+      beenden(true);
     };
   }, [lage.art, videoId]);
 
@@ -312,7 +368,7 @@ export function Player({
       el?.removeEventListener("webkitbeginfullscreen", beim);
       el?.removeEventListener("webkitendfullscreen", beim);
     };
-  }, []);
+  }, [lage.art]);
 
   // Kann dieses Geraet ueberhaupt Vollbild? Wird erst nach dem ersten Rendern
   // bestimmt, weil dafuer die Elemente stehen muessen.
@@ -344,7 +400,7 @@ export function Player({
   const umschalten = useCallback(() => {
     const el = videoRef.current;
     if (!el) return;
-    if (el.paused) void el.play();
+    if (el.paused) void el.play().catch(() => { /* Ein weiterer Klick kann die Wiedergabe starten. */ });
     else el.pause();
   }, []);
 
@@ -393,14 +449,20 @@ export function Player({
     if (lage.art !== "bereit") return;
     const beim = (e: KeyboardEvent) => {
       const ziel = e.target as HTMLElement | null;
-      if (ziel && (ziel.tagName === "INPUT" || ziel.tagName === "TEXTAREA" || ziel.isContentEditable))
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || document.querySelector("dialog[open]") || huelleRef.current?.closest("[inert]") || ziel?.closest("input, textarea, select, [contenteditable=true]"))
         return;
+      // Leertaste auf einem fokussierten Knopf gehört dem Knopf. Die übrigen
+      // Player-Kürzel bleiben auch nach einem Klick auf die Steuerung aktiv.
+      if ((e.key === " " || e.key === "Enter") && ziel?.closest("button, a")) return;
       const el = videoRef.current;
       if (!el) return;
       zeigen();
 
       // Die Belegung, die YouTube-Nutzer im Muskelgedaechtnis haben.
       switch (e.key.toLowerCase()) {
+        case "escape":
+          setMenue(null);
+          break;
         case " ":
         case "k":
           e.preventDefault();
@@ -413,9 +475,11 @@ export function Player({
           springe(el.currentTime + 10);
           break;
         case "arrowleft":
+          e.preventDefault();
           springe(el.currentTime - 5);
           break;
         case "arrowright":
+          e.preventDefault();
           springe(el.currentTime + 5);
           break;
         case "arrowup":
@@ -450,9 +514,11 @@ export function Player({
           el.playbackRate = Math.min(3, el.playbackRate + 0.25);
           break;
         case "home":
+          e.preventDefault();
           springe(0);
           break;
         case "end":
+          e.preventDefault();
           springe(gesamt);
           break;
         default:
@@ -484,7 +550,7 @@ export function Player({
   if (lage.art === "pruefen") {
     return (
       <div className="buehne">
-        <div className="buehne-meldung">wird geöffnet …</div>
+        <div className="buehne-meldung" role="status">Video wird geöffnet …</div>
       </div>
     );
   }
@@ -492,16 +558,16 @@ export function Player({
   if (lage.art === "vorbereitung") {
     return (
       <div className="buehne">
-        <div className="buehne-meldung" style={{ maxWidth: 440 }}>
-          <div style={{ fontSize: 30, marginBottom: 12 }}>📦</div>
-          <div style={{ fontWeight: 500, marginBottom: 6 }}>Video wird vorbereitet</div>
-          <div style={{ color: "var(--text-gedaempft)", fontSize: 13, marginBottom: 16 }}>
+        <div className="buehne-meldung" role="status">
+          <Icon name="play" className="player-meldung-icon" size={36} />
+          <h2>Video wird vorbereitet</h2>
+          <p>
             {lage.grund}. Das passiert nur beim ersten Abspielen auf diesem Gerät.
-          </div>
+          </p>
           <div className="balken" style={{ margin: "0 auto", maxWidth: 240 }}>
             <span style={{ width: `${Math.max(4, lage.anteil * 100)}%` }} />
           </div>
-          <div style={{ color: "var(--text-schwach)", fontSize: 12, marginTop: 8 }}>
+          <div style={{ color: "#aaa", fontSize: 12, marginTop: 8 }}>
             {prozent(lage.anteil)}
           </div>
         </div>
@@ -512,16 +578,17 @@ export function Player({
   if (lage.art === "fehler") {
     return (
       <div className="buehne">
-        <div className="buehne-meldung" style={{ maxWidth: 420 }}>
-          <div style={{ fontSize: 30, marginBottom: 12 }}>⚠</div>
-          <div style={{ fontWeight: 500, marginBottom: 6 }}>Wiedergabe nicht möglich</div>
-          <div style={{ color: "var(--text-gedaempft)", fontSize: 13 }}>{lage.text}</div>
+        <div className="buehne-meldung" role="alert">
+          <Icon name="info" className="player-meldung-icon" size={36} />
+          <h2>Wiedergabe nicht möglich</h2>
+          <p>{lage.text}</p>
+          <button className="knopf player-erneut" onClick={() => setLadeVersuch((n) => n + 1)}>Erneut versuchen</button>
         </div>
       </div>
     );
   }
 
-  const gespielt = gesamt > 0 ? (zeit / gesamt) * 100 : 0;
+  const gespielt = gesamt > 0 ? Math.max(0, Math.min(100, (zeit / gesamt) * 100)) : 0;
   const steuerungSichtbar = sichtbar || !laeuft || menue !== null;
   const zeigerKapitel = zeiger ? kapitelBei(zeiger.zeit) : null;
 
@@ -535,6 +602,7 @@ export function Player({
       data-steuerung={steuerungSichtbar}
       data-laeuft={laeuft}
       onMouseMove={zeigen}
+      onFocus={zeigen}
       onMouseLeave={() => {
         if (laeuft && menue === null) setSichtbar(false);
       }}
@@ -542,12 +610,20 @@ export function Player({
       <video
         ref={videoRef}
         src={lage.quelle}
+        poster={poster}
+        aria-label={titel ?? "Video"}
         autoPlay
         playsInline
         preload="metadata"
         data-modus={lage.modus ?? undefined}
         onClick={umschalten}
         onDoubleClick={vollbildUmschalten}
+        onError={(e) => {
+          const fehler = e.currentTarget.error;
+          if (fehler && fehler.code !== MediaError.MEDIA_ERR_ABORTED) {
+            setLage({ art: "fehler", text: "Das Video konnte nicht abgespielt werden. Bitte versuche es erneut." });
+          }
+        }}
       >
         {untertitel.map((u) => (
           <track
@@ -576,10 +652,23 @@ export function Player({
           ref={leisteRef}
           className="zeitleiste"
           role="slider"
+          tabIndex={0}
           aria-label="Position"
+          aria-valuetext={`${dauer(zeit)} von ${dauer(gesamt)}`}
           aria-valuemin={0}
           aria-valuemax={Math.round(gesamt)}
           aria-valuenow={Math.round(zeit)}
+          onKeyDown={(e) => {
+            let ziel: number;
+            if (e.key === "ArrowLeft" || e.key === "ArrowDown") ziel = zeit - 5;
+            else if (e.key === "ArrowRight" || e.key === "ArrowUp") ziel = zeit + 5;
+            else if (e.key === "Home") ziel = 0;
+            else if (e.key === "End") ziel = gesamt;
+            else return;
+            e.preventDefault();
+            e.stopPropagation();
+            springe(ziel);
+          }}
           onPointerDown={(e) => {
             zieht.current = true;
             (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -594,6 +683,7 @@ export function Player({
             zieht.current = false;
             (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
           }}
+          onPointerCancel={() => { zieht.current = false; setZeiger(null); }}
           onPointerLeave={() => {
             if (!zieht.current) setZeiger(null);
           }}
@@ -627,7 +717,7 @@ export function Player({
 
         {/* ---- Knopfzeile */}
         <div className="steuer-zeile">
-          <button className="steuer-knopf" onClick={umschalten} aria-label={laeuft ? "Pause" : "Abspielen"}>
+          <button className="steuer-knopf" onClick={umschalten} aria-label={laeuft ? "Pause" : "Abspielen"} title={laeuft ? "Pause (k)" : "Abspielen (k)"}>
             {laeuft ? (
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 5h4v14H6zm8 0h4v14h-4z" fill="currentColor" />
@@ -647,6 +737,7 @@ export function Player({
                 if (el) el.muted = !el.muted;
               }}
               aria-label={gemerkt.stumm ? "Ton an" : "Stumm"}
+              title={gemerkt.stumm ? "Ton an (m)" : "Stumm (m)"}
             >
               {gemerkt.stumm || gemerkt.lautstaerke === 0 ? (
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -687,6 +778,8 @@ export function Player({
               className="steuer-knopf steuer-text"
               onClick={() => setMenue(menue === "tempo" ? null : "tempo")}
               aria-label="Wiedergabegeschwindigkeit"
+              aria-expanded={menue === "tempo"}
+              title="Wiedergabegeschwindigkeit"
             >
               {gemerkt.tempo === 1 ? "1×" : `${gemerkt.tempo}×`}
             </button>
@@ -709,6 +802,8 @@ export function Player({
                 data-aktiv={spur >= 0}
                 onClick={() => setMenue(menue === "untertitel" ? null : "untertitel")}
                 aria-label="Untertitel"
+                aria-expanded={menue === "untertitel"}
+                title="Untertitel (c)"
               >
                 CC
               </button>
@@ -730,7 +825,7 @@ export function Player({
 
           {/* Bild-im-Bild */}
           {typeof document !== "undefined" && document.pictureInPictureEnabled ? (
-            <button className="steuer-knopf" onClick={bildImBild} aria-label="Bild im Bild">
+            <button className="steuer-knopf steuer-pip" onClick={bildImBild} aria-label="Bild im Bild" title="Bild im Bild (i)">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M19 11h-8v6h8zm4 8V4.9A2 2 0 0 0 21 3H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2zm-2 0H3V5h18z" fill="currentColor" />
               </svg>
@@ -743,6 +838,7 @@ export function Player({
               className="steuer-knopf"
               onClick={() => aufTheater(!theater)}
               aria-label={theater ? "Normale Ansicht" : "Kinomodus"}
+              title={theater ? "Normale Ansicht (t)" : "Kinomodus (t)"}
             >
               {theater ? (
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -764,6 +860,7 @@ export function Player({
             onClick={vollbildUmschalten}
             hidden={!vollbildMoeglich}
             aria-label={vollbild ? "Vollbild beenden" : "Vollbild"}
+            title={vollbild ? "Vollbild beenden (f)" : "Vollbild (f)"}
           >
             {vollbild ? (
               <svg viewBox="0 0 24 24" aria-hidden="true">

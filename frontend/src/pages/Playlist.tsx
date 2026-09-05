@@ -1,9 +1,11 @@
 import { Link, useParams } from "react-router-dom";
 
-import { Fehler, Gitter, Skelettgitter, Videokachel } from "../components/ui";
+import { Fehler, Leer, Skelettgitter, Videokachel } from "../components/ui";
+import { Icon } from "../components/Icons";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
 import { prozent } from "../lib/format";
+import "../styles/browse.css";
 
 export function Playlistseite() {
   const { playlistId = "" } = useParams();
@@ -18,25 +20,27 @@ export function Playlistseite() {
   // sonst klingt es nach Arbeit, die man noch erledigen koennte.
   const fehlend = daten.positionen.length - daten.anzahl_archiviert - verschwunden;
   const anteil = daten.positionen.length ? daten.anzahl_archiviert / daten.positionen.length : 0;
+  const erstesVideo = daten.positionen.find((p) => p.video.status === "archived")?.video;
+  const vorschaubild = daten.positionen.find((p) => p.video.bild)?.video.bild;
+  const kanalName = daten.positionen.find((p) => p.video.kanal_name)?.video.kanal_name;
 
   return (
-    <>
-      <div className="seiten-kopf">
-        <div>
-          <h1>{daten.titel}</h1>
-          <div className="beiwerk" style={{ marginTop: 6 }}>
-            {daten.anzahl_archiviert} von {daten.positionen.length} archiviert ({prozent(anteil)})
-            {daten.kanal_id ? (
-              <>
-                {" · "}
-                <Link to={`/kanal/${daten.kanal_id}`} style={{ textDecoration: "underline" }}>
-                  zum Kanal
-                </Link>
-              </>
-            ) : null}
-          </div>
+    <section className="playlist-seite">
+      <aside className="playlist-uebersicht" aria-label="Über diese Playlist">
+        <div className="playlist-cover">
+          {vorschaubild ? <img src={vorschaubild} alt="" /> : <div className="platzhalter"><Icon name="playlist" size={48} /></div>}
+          <span className="dauer playlist-anzahl"><Icon name="playlist" size={16} />{daten.positionen.length} Videos</span>
         </div>
-      </div>
+        <div className="playlist-details">
+          <h1>{daten.titel}</h1>
+          {daten.kanal_id ? <Link className="playlist-kanallink" to={`/kanal/${daten.kanal_id}`}>{kanalName ?? "Zum Kanal"}<Icon name="chevronRight" size={16} /></Link> : null}
+          <p className="browse-meta">{daten.positionen.length} Videos · {daten.anzahl_archiviert} archiviert ({prozent(anteil)})</p>
+          {erstesVideo ? <Link className="knopf playlist-start" data-art="stark" to={`/video/${erstesVideo.id}`}><Icon name="play" size={20} />Wiedergeben</Link> : null}
+          {daten.beschreibung ? <p className="playlist-beschreibung">{daten.beschreibung}</p> : null}
+        </div>
+      </aside>
+
+      <div className="playlist-inhalt">
 
       {/*
         Die Playlist zeigt bewusst ALLE Positionen, auch die nicht archivierten.
@@ -66,11 +70,16 @@ export function Playlistseite() {
         </div>
       ) : null}
 
-      <Gitter>
+      <div className="playlist-videoliste">
         {daten.positionen.map((p) => (
-          <Videokachel key={p.video.id} video={p.video} position={p.position} ohneKanal />
+          <div className="playlist-position" key={`${p.position}-${p.video.id}`}>
+            <span className="playlist-nummer" aria-label={`Position ${p.position + 1}`}>{p.position + 1}</span>
+            <Videokachel video={p.video} />
+          </div>
         ))}
-      </Gitter>
-    </>
+      </div>
+      {daten.positionen.length === 0 ? <Leer zeichen="☰" titel="Diese Playlist ist noch leer" text="Sobald der Kanal abgeglichen wurde, erscheinen die Videos hier in ihrer ursprünglichen Reihenfolge." /> : null}
+      </div>
+    </section>
   );
 }
