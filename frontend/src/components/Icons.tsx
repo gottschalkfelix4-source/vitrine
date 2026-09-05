@@ -14,6 +14,7 @@ const paths = {
   chevronRight: "m9 5 7 7-7 7",
   chevronDown: "m5 9 7 7 7-7",
   play: "m8 4 12 8-12 8Z",
+  pause: "M7 4h3v16H7ZM14 4h3v16h-3Z",
   playlist: "M3 5h14M3 10h14M3 15h7m5-2 7 4-7 4Z",
   download: "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
   filter: "M3 6h18M3 12h18M3 18h18M8 3v6M16 9v6M10 15v6",

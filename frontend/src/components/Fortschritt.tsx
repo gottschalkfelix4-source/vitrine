@@ -51,6 +51,7 @@ export function Fortschrittsleiste() {
   const laufend = daten?.laufend ?? [];
   const wartend = daten?.wartend ?? 0;
   const drosselung = daten?.drosselung;
+  const pause = daten?.pause;
   const ausgaenge = daten?.ausgaenge;
   // Wie viele Wege ins Netz gerade dicht sind. Mit einem einzigen Ausgang ist
   // das entweder 0 oder 1 und deckt sich mit "pausiert"; mit Tunneln ist es
@@ -58,19 +59,27 @@ export function Fortschrittsleiste() {
   const gesperrt = ausgaenge ? ausgaenge.gesamt - ausgaenge.frei : 0;
   // Absteigend, damit das Gewichtigste zuerst steht.
   const arten = Object.entries(daten?.nach_art ?? {}).sort((a, b) => b[1] - a[1]);
-  if (laufend.length === 0 && wartend === 0) return null;
+  if (laufend.length === 0 && wartend === 0 && !pause?.aktiv) return null;
 
   return (
     <details className="fortschritt-details">
       <summary>
-        <Icon name="download" size={20} />
-        <span>{drosselung?.pausiert ? `Downloads pausieren · weiter in ${wartedauer(drosselung.rest_s)}` : `${laufend.length} ${laufend.length === 1 ? "Auftrag läuft" : "Aufträge laufen"}`}
+        <Icon name={pause?.aktiv ? "pause" : "download"} size={20} />
+        <span>{pause?.aktiv
+          ? `Download-Warteschlange pausiert${pause.bis && pause.rest_s !== null ? ` · noch ${wartedauer(pause.rest_s)}` : ""}`
+          : drosselung?.pausiert ? `Downloads pausieren · weiter in ${wartedauer(drosselung.rest_s)}` : `${laufend.length} ${laufend.length === 1 ? "Auftrag läuft" : "Aufträge laufen"}`}
+          {pause?.aktiv && pause.laufend > 0 ? ` · ${pause.laufend} ${pause.laufend === 1 ? "läuft" : "laufen"} noch` : ""}
           {wartend > 0 ? ` · ${wartend} warten` : ""}
           {gesperrt > 0 && !drosselung?.pausiert ? ` · ${gesperrt} Ausgänge gesperrt` : ""}
         </span>
         <Icon name="chevronDown" size={18} />
-      </summary>
+    </summary>
     <Link className="fortschrittsleiste" to="/warteschlange" title="Zur Warteschlange">
+      {pause?.aktiv ? <div className="fl-zeile"><div className="fl-text">
+        <strong>Manuell pausiert</strong>
+        <span>{pause.bis ? "Nach Ablauf der Pause dürfen neue Downloads starten, sofern die IP nicht mehr gesperrt ist." : "Es starten keine neuen Downloads oder Kanalabgleiche, bis du die Pause beendest."}</span>
+        <span className="fl-pause-link">Zur Warteschlange und fortsetzen →</span>
+      </div></div> : null}
       {laufend.map((a) => (
         <Zeile key={a.id} auftrag={a} />
       ))}
@@ -89,7 +98,7 @@ export function Fortschrittsleiste() {
                 ? `YouTube weist alle ${ausgaenge.gesamt} Ausgänge ab`
                 : "YouTube weist gerade ab"}
             </span>
-            <span className="fl-meldung">weiter in {wartedauer(drosselung.rest_s)}</span>
+            <span className="fl-meldung">{pause?.aktiv ? "Sperrpause endet in " : "weiter in "}{wartedauer(drosselung.rest_s)}</span>
           </div>
         </div>
       ) : gesperrt > 0 ? (

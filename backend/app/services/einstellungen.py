@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.config import ArchiveCodec, HardwareAccel, settings
 from app.models import Setting
+from app.services import pause
 
 log = logging.getLogger(__name__)
 
@@ -138,7 +139,10 @@ def _nach_text(feld: Feld, wert: Any) -> str:
 
 
 def gespeicherte(db: Session) -> dict[str, str]:
-    return {s.key: s.value for s in db.scalars(select(Setting))}
+    return {
+        s.key: s.value
+        for s in db.scalars(select(Setting).where(Setting.key != pause.SETTING_KEY))
+    }
 
 
 # -------------------------------------------------------------------- Anwenden
@@ -304,6 +308,8 @@ def zuruecksetzen(db: Session, namen: list[str] | None = None) -> list[str]:
     zu_loeschen = namen if namen is not None else list(NACH_NAME)
     entfernt = []
     for name in zu_loeschen:
+        if name == pause.SETTING_KEY:
+            continue  # Nur die Warteschlangensteuerung hebt eine Pause auf.
         eintrag = db.get(Setting, name)
         if eintrag is None:
             continue

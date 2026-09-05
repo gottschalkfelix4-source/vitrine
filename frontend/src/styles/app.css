@@ -1608,6 +1608,33 @@
 .auftraege-tabelle td { padding-top: 18px; padding-bottom: 18px; }
 .auftrag-titel a { font-weight: 500; }
 .auftrag-titel a:hover { text-decoration: underline; }
+.download-pause {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  padding: 18px 20px;
+  margin-bottom: 24px;
+  background: var(--flaeche);
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+}
+.download-pause[data-pausiert="true"] { border-left: 3px solid var(--zu-arbeit); }
+.download-pause-text { flex: 1 1 340px; min-width: 0; }
+.download-pause h2 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+.download-pause p { margin: 4px 0 0; font-size: 13px; color: var(--text-gedaempft); }
+.download-pause-aktionen { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.download-pause-aktionen label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-gedaempft); }
+.download-pause-aktionen select { min-height: 40px; padding: 8px 12px; background: var(--grund); border: 1px solid var(--rand); border-radius: 8px; color: var(--text); }
+.download-pause-aktionen .knopf { min-height: 40px; }
+.download-pause .download-pause-fehler { flex-basis: 100%; margin: 0; color: var(--zu-fehler); }
+.fl-pause-link { text-decoration: underline; color: var(--text); }
+@media (max-width: 600px) {
+  .download-pause { padding: 16px; }
+  .download-pause-aktionen { width: 100%; }
+  .download-pause-aktionen label { flex: 1; }
+  .download-pause-aktionen select { width: 100%; }
+}
 .kachel-laden { display: inline-flex; align-items: center; gap: 4px; }
 .kachel-laden:disabled { opacity: .6; cursor: default; }
 .fortschritt-details { margin-bottom: 20px; border-bottom: 1px solid var(--rand-zart); color: var(--text-gedaempft); font-size: 13px; }

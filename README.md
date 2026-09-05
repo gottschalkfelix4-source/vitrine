@@ -644,6 +644,26 @@ steht kompakt ueber dem Inhalt und laesst sich fuer alle Auftragsdetails
 aufklappen. Einstellungen sind in Bereiche gegliedert; ungespeicherte
 Aenderungen bleiben beim Wechsel des Bereichs erhalten.
 
+### Downloads pausieren
+
+Unter **Warteschlange > Downloads pausieren** kannst du neue YouTube-Auftraege
+fuer 15 Minuten, 30 Minuten, eine Stunde oder zwei Stunden anhalten. Mit
+**Bis zum Fortsetzen** bleibt die Pause aktiv, bis du **Downloads fortsetzen**
+anklickst. Die Pause bleibt auch nach einem Containerneustart erhalten;
+eine abgelaufene Zeitpause gibt die Warteschlange automatisch wieder frei.
+
+Bereits laufende Downloads und Kanal-/Playlist-Abgleiche werden noch sauber
+abgeschlossen. Die Anzeige nennt, wie viele davon noch laufen. Danach werden
+keine neuen Downloads, Qualitaets-Upgrades oder Kanal-/Playlist-Abgleiche aus
+der Warteschlange gestartet. Videos abspielen, die Wiedergabe vorbereiten und
+bereits heruntergeladene Dateien umwandeln funktioniert waehrenddessen weiter.
+Neue Auftraege duerfen eingereiht werden und warten auf das Ende der Pause.
+
+**Fortsetzen** beendet nur deine manuelle Pause. Eine automatisch erkannte
+IP-Sperre samt Wartezeit bleibt bestehen. Direkte Aktionen wie
+einen neuen Kanal aufnehmen oder Cookies testen koennen weiterhin YouTube
+aufrufen; die Pause betrifft die Auftraege der Warteschlange.
+
 ## Auf dem Telefon
 
 Die Oberflaeche schaltet unterhalb von 860 Pixeln auf Handbedienung um: Die

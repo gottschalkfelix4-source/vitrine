@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from app.config import settings
 from app.db import session_scope
 from app.models import JobType
-from app.services import abbruch, jobs, vpn
+from app.services import abbruch, jobs, pause, vpn
 from app.services.ausgang import Ausgang
 
 log = logging.getLogger(__name__)
@@ -67,16 +67,7 @@ def _gruppen() -> list[Gruppe]:
     return [
         Gruppe(
             "netz",
-            [
-                JobType.CHANNEL_SYNC,
-                JobType.PLAYLIST_SYNC,
-                JobType.VIDEO_ARCHIVE,
-                # Ein Hochstufen ist ein vollwertiger Download und muss sich
-                # dieselbe schmale Spur teilen: YouTube drosselt pro
-                # IP-Adresse, und ein eigener Strang dafuer waere nichts
-                # anderes als eine Umgehung der eigenen Begrenzung.
-                JobType.VIDEO_UPGRADE,
-            ],
+            list(pause.NETZ_TYPEN),
             settings.download_concurrency,
             netz=True,
         ),
@@ -277,6 +268,10 @@ class Arbeiterwerk:
                 with session_scope() as db:
                     job = jobs.claim_next(db, gruppe.typen)
                     if job is None:
+                        # Auch bei einer unbefristeten manuellen Pause bleibt
+                        # der Strang erreichbar. Waehrend des Wartens keine
+                        # Lesetransaktion oder Datenbankverbindung festhalten.
+                        db.rollback()
                         self._stop.wait(LEERLAUF_S)
                         continue
 

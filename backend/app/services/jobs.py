@@ -24,6 +24,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobStatus, JobType, utcnow
+from app.services import pause
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ def claim_next(db: Session, types: list[str] | None = None) -> Job | None:
     Greifen zwei Worker gleichzeitig zu, aendert nur einer eine Zeile.
     """
     for _ in range(5):  # ein paar Versuche, falls ein anderer schneller war
-        anfrage = select(Job).where(Job.status == JobStatus.PENDING)
+        anfrage = select(Job).where(Job.status == JobStatus.PENDING, pause.freigegeben())
         if types:
             anfrage = anfrage.where(Job.type.in_(types))
         kandidat = db.scalar(anfrage.order_by(Job.priority, Job.created_at).limit(1))
@@ -127,7 +128,10 @@ def claim_next(db: Session, types: list[str] | None = None) -> Job | None:
 
         ergebnis = db.execute(
             update(Job)
-            .where(Job.id == kandidat.id, Job.status == JobStatus.PENDING)
+            # Die Pause auch im UPDATE pruefen: Ein API-Aufruf kann sie
+            # zwischen Kandidatensuche und Abholen eingeschaltet haben.
+            # SQLite serialisiert diesen Schreibzugriff mit dem Pause-UPSERT.
+            .where(Job.id == kandidat.id, Job.status == JobStatus.PENDING, pause.freigegeben())
             .values(status=JobStatus.RUNNING, started_at=utcnow(), progress=0.0)
         )
         db.commit()

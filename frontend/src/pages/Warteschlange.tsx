@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Fehler, Hinweis, Leer } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
 import { AUFTRAG_TEXT, prozent, vorZeit, wartedauer } from "../lib/format";
 import { Icon } from "../components/Icons";
+import { DownloadPause } from "../components/DownloadPause";
+import type { WarteschlangenPause } from "../lib/api";
 
 /** Laufende Auftraege aendern sich staendig - hier lohnt haeufiges Auffrischen. */
 const INTERVALL = 3000;
@@ -20,7 +22,9 @@ const STATUS_TEXT: Record<string, string> = {
 
 export function Warteschlangeseite() {
   const { daten, laedt, fehler, neuLaden } = useApi(() => api.auftraege(), [], INTERVALL);
-  const { daten: aktiv } = useApi(() => api.aktiveAuftraege(), [], INTERVALL);
+  const { daten: aktiv, fehler: aktivFehler, neuLaden: aktivNeuLaden } = useApi(() => api.aktiveAuftraege(), [], INTERVALL);
+  const [pause, setPause] = useState<WarteschlangenPause>();
+  useEffect(() => { setPause(aktiv?.pause); }, [aktiv]);
   const [filter, setFilter] = useState("alle");
   const [aktionsFehler, setAktionsFehler] = useState<string | null>(null);
   const [beschaeftigt, setBeschaeftigt] = useState(false);
@@ -63,6 +67,11 @@ export function Warteschlangeseite() {
           {gescheitert.length ? ` · ${gescheitert.length} fehlgeschlagen` : ""}
         </span>
       </div>
+      <DownloadPause pause={pause} aufAenderung={(zustand) => {
+        setPause(zustand);
+        aktivNeuLaden();
+      }} />
+      {aktivFehler ? <Fehler text={`Der Pausenstatus konnte nicht aktualisiert werden: ${aktivFehler}`} erneut={aktivNeuLaden} /> : null}
       <div className="chips" aria-label="Aufträge filtern">
         {[["alle", "Alle"], ["aktiv", "In Arbeit"], ["failed", "Fehlgeschlagen"], ["done", "Abgeschlossen"], ["cancelled", "Abgebrochen"]].map(([wert, text]) => (
           <button key={wert} className="chip" data-aktiv={filter === wert} aria-pressed={filter === wert}
@@ -101,7 +110,9 @@ export function Warteschlangeseite() {
         <Hinweis art="arbeit">
           <strong>YouTube weist gerade ab – Downloads pausieren.</strong>
           <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
-            Es geht in {wartedauer(drosselung.rest_s)} von selbst weiter; nichts geht verloren.
+            {pause?.aktiv
+              ? `Die automatische Sperrpause läuft noch ${wartedauer(drosselung.rest_s)}. Downloads starten erst, wenn zusätzlich die manuelle Pause beendet ist.`
+              : `Es geht frühestens in ${wartedauer(drosselung.rest_s)} von selbst weiter; nichts geht verloren.`}{" "}
             Die Sperre gilt der IP-Adresse, nicht den Videos. Tritt sie oft auf, helfen weniger
             parallele Downloads, eine Pause zwischen den Anfragen oder eine Cookie-Datei aus
             einem Wegwerf-Konto.

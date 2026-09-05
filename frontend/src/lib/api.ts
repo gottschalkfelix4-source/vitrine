@@ -127,6 +127,16 @@ export interface Drosselung {
   ausgang?: string | null;
 }
 
+/** Manuell gesetzte Pause für neue YouTube-Aufträge. */
+export interface WarteschlangenPause {
+  aktiv: boolean;
+  /** null = bis zum manuellen Fortsetzen. */
+  bis: string | null;
+  rest_s: number | null;
+  /** Bereits laufende Netzaufträge, die noch fertig werden dürfen. */
+  laufend: number;
+}
+
 /**
  * Zustand der hinterlegten Cookie-Datei.
  *
@@ -491,9 +501,17 @@ export const api = {
       /** Wartende Aufträge je Art - ein Video erzeugt im Lauf seines Lebens mehrere. */
       nach_art: Record<string, number>;
       drosselung: Drosselung;
+      pause: WarteschlangenPause;
       /** Wie viele Wege ins Netz es gibt und wie viele davon gerade frei sind. */
       ausgaenge: { gesamt: number; frei: number };
     }>("/api/jobs/aktiv"),
+  warteschlangePausieren: (minuten: number | null) =>
+    hole<WarteschlangenPause>("/api/jobs/pause", {
+      method: "POST",
+      body: JSON.stringify({ minuten }),
+    }),
+  warteschlangeFortsetzen: () =>
+    hole<WarteschlangenPause>("/api/jobs/resume", { method: "POST" }),
   upgradeVorschau: (ziel: number, kanal?: string) =>
     hole<UpgradeVorschau>(
       `/api/upgrade/vorschau?ziel=${ziel}${kanal ? `&kanal=${encodeURIComponent(kanal)}` : ""}`,

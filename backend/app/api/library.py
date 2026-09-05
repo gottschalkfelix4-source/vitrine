@@ -12,11 +12,11 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
@@ -35,7 +35,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import cache, drosselung, jobs, vpn, ytdlp
+from app.services import cache, drosselung, jobs, pause, vpn, ytdlp
 from app.services import suche as volltext
 
 log = logging.getLogger(__name__)
@@ -936,12 +936,33 @@ def laufende_auftraege(db: Session = Depends(get_db)) -> dict[str, Any]:
         "laufend": eintraege,
         "wartend": wartend,
         "nach_art": nach_art,
+        "pause": pause.zustand(db, laufend=sum(j.type in pause.NETZ_TYPEN for j in laufend)),
         "drosselung": drosselung.zustand(ids),
         "ausgaenge": {
             "gesamt": len(ids),
             "frei": len(drosselung.frei(ids)),
         },
     }
+
+
+class Warteschlangenpause(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    minuten: Annotated[int, Field(strict=True, ge=1, le=pause.MAX_MINUTEN)] | None
+
+
+@router.post("/jobs/pause")
+def warteschlange_pausieren(
+    eingabe: Warteschlangenpause, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    """Haelt neue YouTube-Auftraege an. Laufende Auftraege enden regulaer."""
+    return dict(pause.pausieren(db, eingabe.minuten))
+
+
+@router.post("/jobs/resume")
+def warteschlange_fortsetzen(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Hebt nur die manuelle Pause auf; automatische IP-Sperren bleiben."""
+    return dict(pause.fortsetzen(db))
 
 
 @router.post("/jobs/{job_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
