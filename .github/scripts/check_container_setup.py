@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 BASE = "http://127.0.0.1:8000"
 CONTAINER = "pruefling"
-PASSWORD = "CI temporary setup password 2026!"
+PASSWORD = "Ci!test8"  # Genau acht Zeichen; nur fuer diesen kurzlebigen Testcontainer.
 
 
 def request(path, payload=None, cookie=None):

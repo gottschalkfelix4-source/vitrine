@@ -109,7 +109,8 @@ Warteschlange bleiben erhalten; Hintergrundauftraege laufen weiter.
 Nach dem Update die Seite oeffnen: Solange noch kein Administrator existiert,
 erscheint automatisch der Dialog **Administrator einrichten**. Dort den
 Einrichtungscode, Benutzername (Vorschlag `admin`) und das neue Passwort mit
-Wiederholung eingeben. Mindestens 14 Zeichen verwenden. Nach dem Speichern
+Wiederholung eingeben. Mindestens 8 Zeichen, einen Grossbuchstaben und ein
+Sonderzeichen verwenden. Nach dem Speichern
 erscheint die normale Anmeldung. Ein geschlossenes Einrichtungsfenster laesst
 sich ueber **Administrator einrichten** erneut oeffnen.
 

@@ -18,7 +18,8 @@ it("öffnet bei fehlendem Administrator den zugänglichen Einrichtungsdialog", (
   expect(html).toContain('<dialog class="kanal-dialog" aria-labelledby="einrichtung-titel" aria-describedby="einrichtung-hinweis"');
   expect(html).toContain("Einmaliger Einrichtungscode");
   expect(html).toContain("Nach einem Neustart gilt der neue Code.");
-  expect(html).toContain('minLength="14"');
+  expect(html).toContain('minLength="8"');
+  expect(html).toContain("Mindestens 8 Zeichen, ein Großbuchstabe und ein Sonderzeichen.");
   expect(html).not.toContain('id="login-passwort"');
   expect(html).not.toContain("python");
 });

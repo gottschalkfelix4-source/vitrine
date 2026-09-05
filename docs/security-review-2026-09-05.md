@@ -124,3 +124,11 @@ Fokuswechsel beim Codekopieren, Tastaturbedienung, falschen Code, Passwort-
 Wiederholung, Herkunfts- und Netzwerkfehler, die Einrichtung bis zur ersten
 Anmeldung sowie den erneuten Aufruf bei vorhandenem Konto. Desktop und
 Mobilansichten bis 320 Pixel Breite wurden visuell kontrolliert.
+
+Die Passwortregel wurde auf Wunsch des Betreibers angepasst: Neue Passwoerter
+brauchen mindestens acht Zeichen, einen Grossbuchstaben und ein Sonderzeichen.
+Einrichtung, Passwortwechsel und Konsolen-Reset verwenden dieselbe Regel;
+Leerzeichen allein gelten nicht als Sonderzeichen. Bestehende Passwoerter
+bleiben beim Anmelden gueltig. Die Containerpruefung richtet das Konto mit
+einem genau acht Zeichen langen Testpasswort ein und prueft die Anmeldung
+erneut nach einem Neustart.

@@ -9,6 +9,7 @@ import re
 import secrets
 import sys
 import threading
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -20,7 +21,7 @@ from app.config import settings
 from app.models import AdminAccount, AdminBootstrap, AdminLoginLimit, AdminSession
 
 COOKIE_NAME = "vitrine_session"
-MIN_PASSWORD = 14
+MIN_PASSWORD = 8
 MAX_PASSWORD = 256
 LOGIN_ATTEMPTS = 10
 LOGIN_WINDOW_SECONDS = 900
@@ -70,6 +71,10 @@ def _derive(password: str, salt: bytes) -> bytes:
 def validate_password(password: str) -> None:
     if not MIN_PASSWORD <= len(password) <= MAX_PASSWORD:
         raise AuthError(f"Das Passwort muss {MIN_PASSWORD} bis {MAX_PASSWORD} Zeichen lang sein.", 400)
+    if not any(unicodedata.category(char) == "Lu" for char in password):
+        raise AuthError("Das Passwort muss mindestens einen Grossbuchstaben enthalten.", 400)
+    if not any(unicodedata.category(char)[0] in {"P", "S"} for char in password):
+        raise AuthError("Das Passwort muss mindestens ein Sonderzeichen enthalten.", 400)
 
 
 def hash_password(password: str) -> str:

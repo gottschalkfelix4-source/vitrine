@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react
 import { flushSync } from "react-dom";
 
 import { ApiFehler, auth, type Anmeldezustand } from "../lib/auth";
+import { neuesPasswortFehler } from "../lib/passwort";
 import { Icon } from "./Icons";
 import { Dialog } from "./Dialog";
 
@@ -118,6 +119,8 @@ export function EinrichtungsDialog({ aufSchliessen }: { aufSchliessen: () => voi
       e.preventDefault();
       if (sendet) return;
       if (!code.trim() || !benutzer.trim()) { setFehler("Bitte gib den Einrichtungscode und einen Benutzernamen ein."); return; }
+      const regelFehler = neuesPasswortFehler(passwort);
+      if (regelFehler) { setFehler(regelFehler); return; }
       if (passwort !== wiederholung) { setFehler("Die Passwörter stimmen nicht überein."); return; }
       setSendet(true); setFehler(null);
       try { await auth.einrichten(code.trim(), benutzer.trim(), passwort); }
@@ -136,11 +139,11 @@ export function EinrichtungsDialog({ aufSchliessen }: { aufSchliessen: () => voi
           required maxLength={64} value={benutzer} disabled={sendet} onChange={(e) => setBenutzer(e.target.value)} /></div>
       <div className="feld"><label htmlFor="einrichtung-passwort">Neues Passwort</label>
         <input id="einrichtung-passwort" name="new-password" type="password" autoComplete="new-password" required
-          minLength={14} maxLength={256} aria-describedby="einrichtung-passwort-laenge" value={passwort} disabled={sendet}
-          onChange={(e) => setPasswort(e.target.value)} /><p id="einrichtung-passwort-laenge">Mindestens 14 Zeichen.</p></div>
+          minLength={8} maxLength={256} aria-describedby="einrichtung-passwort-laenge" value={passwort} disabled={sendet}
+          onChange={(e) => setPasswort(e.target.value)} /><p id="einrichtung-passwort-laenge">Mindestens 8 Zeichen, ein Großbuchstabe und ein Sonderzeichen.</p></div>
       <div className="feld"><label htmlFor="einrichtung-wiederholung">Neues Passwort wiederholen</label>
         <input id="einrichtung-wiederholung" name="confirm-password" type="password" autoComplete="new-password" required
-          minLength={14} maxLength={256} value={wiederholung} disabled={sendet} onChange={(e) => setWiederholung(e.target.value)} /></div>
+          minLength={8} maxLength={256} value={wiederholung} disabled={sendet} onChange={(e) => setWiederholung(e.target.value)} /></div>
       {fehler ? <p className="auth-fehler" role="alert">{fehler}</p> : null}
       <div className="dialog-fuss">
         <button type="button" className="knopf" disabled={sendet} onClick={aufSchliessen}>Abbrechen</button>
@@ -177,6 +180,8 @@ export function PasswortAendern() {
     <form className="zugang-formular" onSubmit={async (e) => {
       e.preventDefault();
       if (sendet) return;
+      const regelFehler = neuesPasswortFehler(neu);
+      if (regelFehler) { setFehler(regelFehler); return; }
       if (neu !== wiederholung) { setFehler("Die neuen Passwörter stimmen nicht überein."); return; }
       setSendet(true); setFehler(null);
       try { await auth.passwortAendern(aktuell, neu); }
@@ -188,11 +193,11 @@ export function PasswortAendern() {
           maxLength={256} disabled={sendet} onChange={(e) => setAktuell(e.target.value)} /></div>
       <div className="feld"><label htmlFor="passwort-neu">Neues Passwort</label>
         <input id="passwort-neu" type="password" autoComplete="new-password" value={neu} required
-          minLength={14} maxLength={256} aria-describedby="passwort-laenge" disabled={sendet} onChange={(e) => setNeu(e.target.value)} />
-        <p id="passwort-laenge">Mindestens 14 Zeichen.</p></div>
+          minLength={8} maxLength={256} aria-describedby="passwort-laenge" disabled={sendet} onChange={(e) => setNeu(e.target.value)} />
+        <p id="passwort-laenge">Mindestens 8 Zeichen, ein Großbuchstabe und ein Sonderzeichen.</p></div>
       <div className="feld"><label htmlFor="passwort-wiederholung">Neues Passwort wiederholen</label>
         <input id="passwort-wiederholung" type="password" autoComplete="new-password" value={wiederholung} required
-          minLength={14} maxLength={256} disabled={sendet} onChange={(e) => setWiederholung(e.target.value)} /></div>
+          minLength={8} maxLength={256} disabled={sendet} onChange={(e) => setWiederholung(e.target.value)} /></div>
       {fehler ? <p className="auth-fehler" role="alert">{fehler}</p> : null}
       <button className="knopf" data-art="stark" disabled={sendet}>{sendet ? "Wird geändert …" : "Passwort ändern"}</button>
     </form>

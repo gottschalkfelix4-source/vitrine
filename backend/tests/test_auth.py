@@ -197,10 +197,10 @@ def test_auth_validation_does_not_reflect_password(environment):
     assert bad.status_code == 422
     assert secret not in bad.text and '"input"' not in bad.text
     csrf = sign_in(client).json()["csrf_token"]
-    bad = client.post("/api/auth/password", json={"aktuelles_passwort": PASSWORD, "neues_passwort": "short-secret"},
+    bad = client.post("/api/auth/password", json={"aktuelles_passwort": PASSWORD, "neues_passwort": "Kurz!12"},
                       headers={"X-CSRF-Token": csrf})
     assert bad.status_code == 422
-    assert "short-secret" not in bad.text and PASSWORD not in bad.text
+    assert "Kurz!12" not in bad.text and PASSWORD not in bad.text
 
 
 def test_login_budget_persists_and_reservations_are_atomic(environment, monkeypatch):
@@ -383,7 +383,7 @@ def test_invalid_json_and_unpaired_unicode_do_not_echo_password(environment):
 def test_documented_cli_module_persists_and_resets_account(tmp_path):
     data = tmp_path / "cli-data"
     process_env = {**os.environ, "YTA_DATA_DIR": str(data), "YTA_AUTH_COOKIE_SECURE": "false"}
-    for password, expected_revision in [(PASSWORD, 1), (NEW_PASSWORD, 2)]:
+    for password, expected_revision in [("A!abcdef", 1), ("B!abcdef", 2)]:
         result = subprocess.run(
             # getpass liest unter Windows unmittelbar vom Terminal. Nur die
             # Eingabe fuer den Subprozesstest auf seine Pipe umleiten.
@@ -481,13 +481,13 @@ def test_missing_code_and_setup_validation_never_reflect_secrets(environment, ca
     code = bootstrap_code(caplog)
     for payload in [
         {"benutzer": "admin", "passwort": PASSWORD},
-        {"einrichtungscode": code, "benutzer": "admin", "passwort": "private-short"},
+        {"einrichtungscode": code, "benutzer": "admin", "passwort": "Priv!12"},
         {"einrichtungscode": code * 7, "benutzer": "admin", "passwort": PASSWORD},
     ]:
         response = client.post("/api/auth/setup", json=payload, headers=SETUP_HEADERS)
         assert response.status_code == 422
         assert code not in response.text and PASSWORD not in response.text
-        assert "private-short" not in response.text and '"input"' not in response.text
+        assert "Priv!12" not in response.text and '"input"' not in response.text
 
 
 @pytest.mark.parametrize("headers", [
@@ -684,3 +684,54 @@ def test_concurrent_startups_publish_codes_in_database_order(environment, caplog
         assert db.get(AdminBootstrap, 1).code_hash == hashlib.sha256(logged[-1].encode()).hexdigest()
     assert submit_setup(client, logged[0]).status_code == 403
     assert submit_setup(client, logged[1]).status_code == 204
+
+
+@pytest.mark.parametrize("password", ["A!abcdef", "ABCDEFG!", "Ä€abcdef", "Ä😀abcdef", "A!" + "a" * 254])
+def test_new_password_accepts_eight_characters_uppercase_and_special(password):
+    auth.validate_password(password)
+
+
+@pytest.mark.parametrize(("password", "message"), [
+    ("A!abcde", "8 bis 256"),
+    ("a!bcdefg", "Grossbuchstaben"),
+    ("Abcdefgh", "Sonderzeichen"),
+    ("Abcdefg ", "Sonderzeichen"),
+    ("A!" + "a" * 255, "8 bis 256"),
+])
+def test_new_password_rejects_missing_requirements_without_echo(password, message):
+    with pytest.raises(auth.AuthError, match=message) as error:
+        auth.validate_password(password)
+    assert password not in str(error.value)
+
+
+def test_legacy_password_can_still_log_in(environment):
+    client, factory, _ = environment
+    legacy = "legacy old password"
+    salt = bytes(range(16))
+    encoded = f"scrypt-v1${salt.hex()}${auth._derive(legacy, salt).hex()}"
+    with factory() as db:
+        db.add(AdminAccount(id=1, username="admin", password_hash=encoded, revision=1))
+        db.commit()
+    assert sign_in(client, legacy).status_code == 200
+
+
+def test_setup_and_password_change_accept_eight_characters(environment, caplog):
+    client, _, _ = environment
+    code = bootstrap_code(caplog)
+    for invalid in ("a!bcdefg", "Abcdefgh"):
+        response = submit_setup(client, code, invalid)
+        assert response.status_code == 400 and invalid not in response.text
+        assert client.get("/api/auth/session").json()["eingerichtet"] is False
+    assert submit_setup(client, code, "A!abcdef").status_code == 204
+    csrf = sign_in(client, "A!abcdef").json()["csrf_token"]
+    headers = {"X-CSRF-Token": csrf}
+    for invalid in ("a!bcdefg", "Abcdefg "):
+        response = client.post("/api/auth/password", headers=headers,
+                               json={"aktuelles_passwort": "A!abcdef", "neues_passwort": invalid})
+        assert response.status_code == 400 and invalid not in response.text
+        assert client.get("/api/auth/session").json()["angemeldet"] is True
+    response = client.post("/api/auth/password", headers=headers,
+                           json={"aktuelles_passwort": "A!abcdef", "neues_passwort": "B!abcdef"})
+    assert response.status_code == 204
+    assert sign_in(client, "A!abcdef").status_code == 401
+    assert sign_in(client, "B!abcdef").status_code == 200

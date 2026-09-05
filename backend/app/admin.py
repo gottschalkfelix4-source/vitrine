@@ -10,7 +10,7 @@ def main() -> None:
     print("Administrator einrichten oder zuruecksetzen. Bestehende Sitzungen werden beendet.")
     try:
         username = input("Benutzername [admin]: ").strip() or "admin"
-        password = getpass.getpass("Neues Passwort (mindestens 14 Zeichen): ")
+        password = getpass.getpass("Neues Passwort (mindestens 8 Zeichen, Grossbuchstabe und Sonderzeichen): ")
         confirmation = getpass.getpass("Passwort wiederholen: ")
         if password != confirmation:
             raise auth.AuthError("Die Passwoerter stimmen nicht ueberein.", 400)
