@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -35,11 +36,31 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import cache, drosselung, jobs, pause, vpn, ytdlp
+from app.services import cache, drosselung, jobs, paths, pause, vpn, ytdlp
 from app.services import suche as volltext
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["bibliothek"])
+
+
+def _safe_path(root: Path, target: Path) -> Path:
+    try:
+        return paths.contained(root, target)
+    except paths.UnsafePath as e:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Ein gespeicherter Dateipfad ist ungueltig. Es wurde nichts entfernt.",
+        ) from e
+
+
+def _safe_child(root: Path, name: str) -> Path:
+    try:
+        return paths.child(root, name)
+    except paths.UnsafePath as e:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Ein gespeicherter Dateiname ist ungueltig. Es wurde nichts entfernt.",
+        ) from e
 
 
 # ------------------------------------------------------------------ Schemata
@@ -200,16 +221,12 @@ def kanal_anlegen(daten: KanalAnlegen, db: Session = Depends(get_db)) -> KanalKu
     dauert schon das blosse Auflisten Minuten, so lange darf keine
     HTTP-Anfrage offen stehen.
     """
-    url = daten.url.strip()
-    if not url:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "URL fehlt")
-    if url.startswith("@"):
-        url = f"https://www.youtube.com/{url}"
-    elif url.startswith("UC") and "/" not in url:
-        url = f"https://www.youtube.com/channel/{url}"
-
     try:
+        url = ytdlp.canonical_channel_url(daten.url)
         info = ytdlp.fetch_channel(url)
+        # Auch an der Schreibgrenze pruefen: Extraktor-Ergebnisse sind externe
+        # Daten, und die Kennung wird spaeter als Verzeichnisname verwendet.
+        ytdlp.validate_channel_id(info.id)
     except ytdlp.YtdlpError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Kanal nicht lesbar: {e}") from e
 
@@ -436,7 +453,7 @@ def kanal_entfernen(
     from app.models import HotCopy
 
     heisse = [
-        _Path(p)
+        _safe_path(settings.cache_dir, _Path(p))
         for p in db.scalars(
             select(HotCopy.path).join(Video, Video.id == HotCopy.video_id).where(
                 Video.channel_id == kanal_id
@@ -444,7 +461,7 @@ def kanal_entfernen(
         )
     ]
     vorschauen = [
-        settings.thumb_dir / name
+        _safe_child(settings.thumb_dir, name)
         for name in db.scalars(
             select(Video.thumb_file).where(
                 Video.channel_id == kanal_id, Video.thumb_file.is_not(None)
@@ -453,10 +470,17 @@ def kanal_entfernen(
     ]
     for name in (k.avatar_file, k.banner_file):
         if name:
-            vorschauen.append(settings.thumb_dir / name)
-    buendel_ordner = settings.bundle_dir / kanal_id
+            vorschauen.append(_safe_child(settings.thumb_dir, name))
+    buendel_ordner = _safe_child(settings.bundle_dir, kanal_id)
+    # Alle Ziele pruefen, bevor Jobs, Suchindex oder Datenbank veraendert
+    # werden. Auch ein bereits gespeicherter boesartiger Pfad darf keine
+    # teilweise geloeschte Bibliothek hinterlassen.
     buendel_bytes = (
-        sum(p.stat().st_size for p in buendel_ordner.rglob("*") if p.is_file())
+        sum(
+            safe.stat().st_size
+            for p in buendel_ordner.rglob("*")
+            if (safe := _safe_path(buendel_ordner, p)).is_file()
+        )
         if buendel_ordner.is_dir()
         else 0
     )
@@ -763,11 +787,15 @@ def video_aus_archiv_entfernen(video_id: str, db: Session = Depends(get_db)) -> 
         raise HTTPException(status.HTTP_409_CONFLICT, f"Video ist nicht archiviert (Status: {v.status})")
 
     frei = 0
-    pfade = [_Path(h.path) for h in db.scalars(select(HotCopy).where(HotCopy.video_id == video_id))]
+    pfade = [
+        _safe_path(settings.cache_dir, _Path(h.path))
+        for h in db.scalars(select(HotCopy).where(HotCopy.video_id == video_id))
+    ]
     if v.bundle_file:
-        pfade.append(_Path(v.bundle_file))
+        kanal_ordner = _safe_child(settings.bundle_dir, v.channel_id or "_lose")
+        pfade.append(_safe_path(kanal_ordner, _Path(v.bundle_file)))
     if v.thumb_file:
-        pfade.append(settings.thumb_dir / v.thumb_file)
+        pfade.append(_safe_child(settings.thumb_dir, v.thumb_file))
 
     # Erst die Datenbank, dann die Platte - siehe kanal_entfernen.
     db.execute(
@@ -1379,7 +1407,7 @@ def thumbnail_quelle(video_id: str) -> FileResponse:
     ordner = settings.thumb_dir / "quelle"
     ziel = ordner / f"{video_id}.jpg"
     if ziel.is_file():
-        return FileResponse(ziel, headers={"Cache-Control": "public, max-age=604800"})
+        return FileResponse(ziel, headers={"Cache-Control": "no-store"})
     if video_id in _ohne_bild:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "kein Vorschaubild verfuegbar")
 
@@ -1402,7 +1430,7 @@ def thumbnail_quelle(video_id: str) -> FileResponse:
         vorlaeufig = Path(f"{ziel}.{os.getpid()}.teil")
         vorlaeufig.write_bytes(daten)
         vorlaeufig.replace(ziel)
-        return FileResponse(ziel, headers={"Cache-Control": "public, max-age=604800"})
+        return FileResponse(ziel, headers={"Cache-Control": "no-store"})
 
     _ohne_bild.add(video_id)
     raise HTTPException(status.HTTP_404_NOT_FOUND, "kein Vorschaubild verfuegbar")
@@ -1416,15 +1444,13 @@ def thumbnail(datei: str) -> FileResponse:
     Kacheln wuerde sonst ebenso viele ZIP-Dateien oeffnen und auf einem Array
     mit schlafenden Platten jedes Mal die Platten wecken.
     """
-    # Pfadanteile herausfiltern: Der Wert kommt aus der URL, ein "../" darf
-    # nicht aus dem Verzeichnis herausfuehren.
-    from pathlib import PurePosixPath
-
-    name = PurePosixPath(datei).name
-    pfad = settings.thumb_dir / name
-    if not name or not pfad.is_file():
+    try:
+        pfad = paths.child(settings.thumb_dir, datei)
+    except paths.UnsafePath as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Vorschaubild unbekannt") from e
+    if pfad.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif"} or not pfad.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Vorschaubild unbekannt")
-    return FileResponse(pfad, headers={"Cache-Control": "public, max-age=604800"})
+    return FileResponse(pfad, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/videos/{video_id}/subtitles/{sprache}")
@@ -1457,5 +1483,5 @@ def untertitel(video_id: str, sprache: str, db: Session = Depends(get_db)) -> An
     return Response(
         content=inhalt,
         media_type="text/vtt; charset=utf-8",
-        headers={"Cache-Control": "private, max-age=86400"},
+        headers={"Cache-Control": "no-store"},
     )

@@ -2,6 +2,7 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { Fortschrittsleiste } from "./components/Fortschritt";
+import { Abmelden, AnmeldeSchranke } from "./components/Anmeldung";
 import { Icon, type IconName } from "./components/Icons";
 import { KanalAvatar, KanalKontext } from "./components/KanalAvatar";
 import { api } from "./lib/api";
@@ -96,6 +97,7 @@ function Kopfleiste({ aufLeiste, leisteOffen, aufKanalAnlegen }: {
           title={hell ? "Dunkles Design" : "Helles Design"}>
           <Icon name={hell ? "moon" : "sun"} />
         </button>
+        <Abmelden />
       </div>
     </header>
   );
@@ -177,6 +179,10 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
 }
 
 export default function App() {
+  return <AnmeldeSchranke><Archiv /></AnmeldeSchranke>;
+}
+
+function Archiv() {
   const ort = useLocation();
   const aufWiedergabe = ort.pathname.startsWith("/video/");
   const [vonHand, setVonHand] = useState<boolean | null>(null);

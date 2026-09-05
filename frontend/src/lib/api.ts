@@ -1,6 +1,8 @@
 /** Zugriff auf das Backend. */
 
 import { faehigkeiten } from "./capabilities";
+import { authFetch, auswerten } from "./auth";
+export { ApiFehler } from "./auth";
 
 export interface VideoKurz {
   id: string;
@@ -368,33 +370,9 @@ export interface Wiedergabezustand {
   fortschritt_s: number;
 }
 
-export class ApiFehler extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-async function auswerten<T>(antwort: Response): Promise<T> {
-  if (!antwort.ok) {
-    let text = antwort.statusText;
-    try {
-      const koerper = await antwort.json();
-      text = koerper.detail ?? text;
-    } catch {
-      /* keine JSON-Antwort */
-    }
-    throw new ApiFehler(antwort.status, text);
-  }
-  if (antwort.status === 204) return undefined as T;
-  return (await antwort.json()) as T;
-}
-
 async function hole<T>(pfad: string, init?: RequestInit): Promise<T> {
   return auswerten<T>(
-    await fetch(pfad, {
+    await authFetch(pfad, {
       ...init,
       headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     }),
@@ -417,7 +395,7 @@ async function sendeDatei<T>(
   const koerper = new FormData();
   koerper.append("datei", datei);
   for (const [k, v] of Object.entries(felder ?? {})) koerper.append(k, v);
-  return auswerten<T>(await fetch(pfad, { method: "POST", body: koerper }));
+  return auswerten<T>(await authFetch(pfad, { method: "POST", body: koerper }));
 }
 
 function frage(werte: Record<string, string | number | boolean | undefined>): string {
@@ -478,20 +456,21 @@ export const api = {
       method: "DELETE",
     }),
 
-  fortschrittMerken: (id: string, sekunden: number, gesehen?: boolean) =>
+  fortschrittMerken: (id: string, sekunden: number, gesehen?: boolean, keepalive = false) =>
     hole<void>(`/api/videos/${id}/progress`, {
       method: "PUT",
       body: JSON.stringify({ sekunden, gesehen }),
+      keepalive,
     }),
 
   wiedergabezustand: (id: string) => hole<Wiedergabezustand>(`/api/videos/${id}/playback-state`),
   herzschlag: (id: string) =>
-    fetch(`/api/videos/${id}/heartbeat`, { method: "POST", keepalive: true }),
+    hole<void>(`/api/videos/${id}/heartbeat`, { method: "POST", keepalive: true }),
   wiedergabeBeendet: (id: string) =>
     // keepalive, damit die Meldung auch dann noch rausgeht, wenn der Tab
     // gerade geschlossen wird - sonst bliebe die Heisskopie bis zum Ablauf
     // der langen Frist liegen.
-    fetch(`/api/videos/${id}/playback-ended`, { method: "POST", keepalive: true }),
+    hole<void>(`/api/videos/${id}/playback-ended`, { method: "POST", keepalive: true }),
 
   auftraege: (status?: string) => hole<Auftrag[]>(`/api/jobs${frage({ status })}`),
   aktiveAuftraege: () =>

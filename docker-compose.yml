@@ -28,6 +28,9 @@ services:
       YTA_DATA_DIR: /data
       YTA_TIMEZONE: ${TZ:-Europe/Berlin}
       YTA_LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Fuer oeffentlichen Zugriff HTTPS verwenden. Nur fuer einen lokalen
+      # HTTP-Test ausdruecklich AUTH_COOKIE_SECURE=false setzen.
+      YTA_AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
       # Kaltspeicher
       YTA_ARCHIVE_CODEC: ${ARCHIVE_CODEC:-av1}
       YTA_AV1_PRESET: ${AV1_PRESET:-6}

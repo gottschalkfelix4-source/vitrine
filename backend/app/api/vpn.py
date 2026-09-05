@@ -50,7 +50,7 @@ async def hochladen(
     oder ``ProtonVPN-NL-42.conf``, und genau diese Namen will man in der Liste
     wiedererkennen - sie sagen, welcher Standort das ist.
     """
-    roh = await datei.read()
+    roh = await datei.read(MAX_BYTES + 1)
     if len(roh) > MAX_BYTES:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,

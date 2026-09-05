@@ -147,6 +147,12 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/kanaele)" = "200"
           echo "--- Fehlende Dateien bleiben ehrliche 404 ---"
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/assets/gibtsnicht.js)" = "404"
+          # Auch ohne eingerichteten Admin darf der echte Container keine
+          # Archivdaten, Medien oder Verwaltungsaktionen freigeben.
+          for path in channels settings jobs storage thumbs/test.jpg videos/test/stream; do
+            test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000/api/$path")" = "401"
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/api/jobs/resume)" = "401"
           docker logs pruefling
           docker rm -f pruefling
 

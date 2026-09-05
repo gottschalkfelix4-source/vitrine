@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import HotCopy, HotCopyStatus, Job, JobType, Video, VideoStatus, utcnow
-from app.services import bundle, cache, jobs, media, playback
+from app.services import bundle, cache, jobs, media, paths, playback
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +63,9 @@ def vorbereiten(db: Session, job: Job) -> None:
         raise ValueError(f"Video {video_id} ist nicht archiviert")
 
     variante = jobs.payload_of(job).get("variant") or playback.TRANSCODE_VARIANT
-    buendel = Path(video.bundle_file)
+    paths.component(video_id)
+    channel_dir = paths.child(settings.bundle_dir, video.channel_id or "_lose")
+    buendel = paths.contained(channel_dir, Path(video.bundle_file))
     settings.cache_dir.mkdir(parents=True, exist_ok=True)
 
     hot: HotCopy | None = None
@@ -86,7 +88,7 @@ def vorbereiten(db: Session, job: Job) -> None:
             ziel = cache.hot_path_for(video_id, variante, playback.TRANSCODE_SUFFIX)
             hot = _eintrag_anlegen(db, video, variante, ziel)
 
-            roh = settings.tmp_dir / f"{video_id}.prepare{quell_suffix}"
+            roh = paths.child(settings.tmp_dir, f"{video_id}.prepare{quell_suffix}")
             roh.parent.mkdir(parents=True, exist_ok=True)
             jobs.fortschritt(db, job, 0.05, "Buendel wird gelesen")
             leser.extract_media(roh)

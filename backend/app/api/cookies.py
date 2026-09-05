@@ -61,7 +61,7 @@ async def hochladen(datei: UploadFile = File(...)) -> dict[str, Any]:
     eines Kanals. Eine funktionierende gegen eine kaputte zu tauschen, weil
     jemand die falsche Datei erwischt hat, waere der schlechteste Ausgang.
     """
-    roh = await datei.read()
+    roh = await datei.read(cookies.MAX_BYTES + 1)
     befund = cookies.speichern(roh)
     if not befund.brauchbar:
         # 422 statt 400: Die Anfrage war formal richtig, der Inhalt taugt nur

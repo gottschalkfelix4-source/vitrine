@@ -14,11 +14,14 @@ festgenagelte Version macht das Archiv binnen Wochen funktionsunfaehig.
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote, urlsplit
 
 import yt_dlp
 from yt_dlp.utils import UnsupportedError, YoutubeDLError
@@ -38,6 +41,88 @@ CHANNEL_TABS = {
 
 class YtdlpError(RuntimeError):
     pass
+
+
+_CHANNEL_ID = re.compile(r"UC[A-Za-z0-9_-]{22}")
+_CHANNEL_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
+_CHANNEL_TABS = {"videos", "shorts", "streams", "playlists", "featured", "about", "community",
+                 "podcasts", "releases", "courses", "channels"}
+
+
+def validate_channel_id(value: str) -> str:
+    if not isinstance(value, str) or not _CHANNEL_ID.fullmatch(value):
+        raise YtdlpError("Die Quelle hat keine gueltige YouTube-Kanal-ID geliefert.")
+    return value
+
+
+def canonical_channel_url(value: str) -> str:
+    """Nur YouTube-Kanaladressen an den Extraktor weitergeben.
+
+    Die Adresse wird aus geprueften Bestandteilen neu aufgebaut. Abfragewerte
+    wie si/feature entfallen, Fragmente (auch yt-dlp-interne Daten) sind nicht
+    erlaubt. Prozentkodierte Handles werden genau einmal dekodiert.
+    """
+    error = "Erwartet wird ein YouTube-Kanal: @Handle, Kanal-ID oder HTTPS-Kanaladresse."
+    if (
+        not isinstance(value, str)
+        or len(value) > 2048
+        or "\\" in value
+        or "#" in value
+        or any(unicodedata.category(c).startswith("C") for c in value)
+    ):
+        raise YtdlpError(error)
+    value = value.strip()
+    if _CHANNEL_ID.fullmatch(value):
+        return f"https://www.youtube.com/channel/{value}"
+    if value.startswith("@"):
+        value = f"https://www.youtube.com/{value}"
+    elif value.split("/", 1)[0].lower() in _CHANNEL_HOSTS:
+        # Das Eingabeformular erlaubt auch youtube.com/@Name ohne Schema.
+        # Nur bekannte Hosts ergaenzen; andere Eingaben bleiben ungueltig.
+        value = f"https://{value}"
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in _CHANNEL_HOSTS
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+        ):
+            raise ValueError("keine HTTPS-Kanaladresse")
+        raw_parts = parsed.path.removeprefix("/").removesuffix("/").split("/")
+        parts = [unquote(part, errors="strict") for part in raw_parts]
+        if any(
+            not part or part in {".", ".."}
+            or any(c in part for c in "/\\%?#:")
+            or any(unicodedata.category(c).startswith("C") for c in part)
+            for part in parts
+        ):
+            raise ValueError("ungueltiger Kanalpfad")
+        if parts[0].startswith("@"):
+            base_length = 1
+            name = parts[0][1:]
+        elif parts[0] in {"channel", "c", "user"} and len(parts) >= 2:
+            base_length = 2
+            name = parts[1]
+        else:
+            raise ValueError("kein Kanalpfad")
+        if len(parts) != base_length and (
+            len(parts) != base_length + 1 or parts[-1] not in _CHANNEL_TABS
+        ):
+            raise ValueError("unbekannte Kanalunterseite")
+        if parts[0] == "channel":
+            validate_channel_id(name)
+        elif (
+            not name or len(name) > 100 or name in {".", ".."}
+            or name != name.strip()
+            or any(unicodedata.category(c)[0] not in "LNM" and c not in "_-.·" for c in name)
+        ):
+            raise ValueError("ungueltiger Kanalname")
+        path = "/".join(quote(part, safe="@-._~") for part in parts[:base_length])
+        return f"https://www.youtube.com/{path}"
+    except (ValueError, UnicodeError) as e:
+        raise YtdlpError(error) from e
 
 
 class VideoUnavailable(YtdlpError):
@@ -267,12 +352,14 @@ def fetch_channel(url: str) -> ChannelInfo:
     aufloest - fuer einen Kanal mit tausenden Videos waere das ein Vielfaches
     der Laufzeit, obwohl wir hier nur Name und Bild brauchen.
     """
-    opts = _base_opts() | {"extract_flat": "in_playlist", "playlist_items": "0"}
+    url = canonical_channel_url(url)
+    opts = _base_opts() | {
+        "extract_flat": "in_playlist", "playlist_items": "0",
+        "allowed_extractors": ["^youtube:tab$"],
+    }
     info = _extract(url, opts)
 
-    kanal_id = info.get("channel_id") or info.get("uploader_id") or info.get("id")
-    if not kanal_id:
-        raise YtdlpError(f"keine Kanal-ID in {url}")
+    kanal_id = validate_channel_id(info.get("channel_id") or info.get("id"))
 
     return ChannelInfo(
         id=kanal_id,

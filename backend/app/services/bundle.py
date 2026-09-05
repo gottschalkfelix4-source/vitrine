@@ -40,6 +40,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
+from app.services import paths
+
 log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
@@ -119,7 +121,8 @@ def bundle_path_for(root: Path, channel_id: str | None, video_id: str) -> Path:
     Nach Kanal gruppiert, damit sich ein Kanal im Dateisystem als ein
     Verzeichnis loeschen oder verschieben laesst.
     """
-    return root / (channel_id or "_lose") / f"{video_id}.zip"
+    channel_dir = paths.child(root, channel_id if channel_id is not None else "_lose")
+    return paths.child(channel_dir, f"{paths.component(video_id)}.zip")
 
 
 def mime_for(name: str) -> str:
@@ -145,6 +148,7 @@ def write_bundle(
     info_json: dict[str, Any] | None = None,
     thumbnail: Path | None = None,
     subtitles: list[tuple[str, bool, Path]] | None = None,
+    root: Path | None = None,
 ) -> Path:
     """Schreibt ein vollstaendiges Buendel.
 
@@ -175,8 +179,12 @@ def write_bundle(
     else:
         vorgemerkte_metadaten = None
 
+    # Produktive Aufrufer uebergeben die konfigurierte Ablage als Wurzel.
+    # Auch die temporaere Datei muss vor der ersten Aenderung geprueft sein.
+    root = root if root is not None else dest.parent
+    dest = paths.contained(root, dest)
+    tmp = paths.contained(root, dest.with_suffix(dest.suffix + ".part"))
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".part")
     if tmp.exists():
         tmp.unlink()
 
@@ -391,8 +399,10 @@ class BundleReader:
         Schreibt ueber eine ``.part``-Datei, damit nie eine halbe Datei als
         fertig gilt.
         """
+        root = dest.parent
+        dest = paths.contained(root, dest)
+        tmp = paths.contained(root, dest.with_suffix(dest.suffix + ".part"))
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_suffix(dest.suffix + ".part")
         try:
             with self.zip.open(self.manifest.media_name) as src, open(tmp, "wb") as out:
                 shutil.copyfileobj(src, out, length=4 * 1024 * 1024)

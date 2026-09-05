@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 /**
  * Prüft die Weichenstellung des Service Workers.
@@ -47,10 +47,9 @@ describe("Service Worker: was angefasst wird", () => {
     expect(waehle("/api/videos/dQw4w9WgXcQ/subtitles/de")).toBe("durchreichen");
   });
 
-  it("speichert Vorschaubilder", () => {
-    // Der eigentliche Gewinn auf dem Telefon: 60 Kacheln je Kanalseite.
-    expect(waehle("/api/thumbs/quelle/dQw4w9WgXcQ")).toBe("bild");
-    expect(waehle("/api/thumbs/abc.webp")).toBe("bild");
+  it("lässt auch geschützte Vorschaubilder immer durch", () => {
+    expect(waehle("/api/thumbs/quelle/dQw4w9WgXcQ")).toBe("durchreichen");
+    expect(waehle("/api/thumbs/abc.webp")).toBe("durchreichen");
   });
 
   it("speichert keine anderen API-Antworten", () => {
@@ -59,6 +58,10 @@ describe("Service Worker: was angefasst wird", () => {
     expect(waehle("/api/jobs/aktiv")).toBe("durchreichen");
     expect(waehle("/api/storage")).toBe("durchreichen");
     expect(waehle("/api/settings")).toBe("durchreichen");
+    expect(waehle("/api/auth/session")).toBe("durchreichen");
+    expect(waehle("/api/auth/login", "POST")).toBe("durchreichen");
+    expect(waehle("/api/thumbs/abc.webp", "GET", "navigate")).toBe("durchreichen");
+    expect(waehle("/api", "GET", "navigate")).toBe("durchreichen");
   });
 
   it("fasst nur GET an", () => {
@@ -92,4 +95,48 @@ describe("Service Worker: was angefasst wird", () => {
     expect(waehle("/video/dQw4w9WgXcQ", "GET", "navigate")).toBe("huelle");
     expect(waehle("/api/videos/dQw4w9WgXcQ/stream", "GET", "no-cors")).toBe("durchreichen");
   });
+});
+
+it("löscht beim Aktivieren frühere Bild- und Oberflächencaches vor der Übernahme", async () => {
+  const ereignisse: Record<string, (e: { waitUntil: (p: Promise<unknown>) => void }) => void> = {};
+  const entfernen = vi.fn(async (_name: string) => true);
+  const uebernehmen = vi.fn(async () => undefined);
+  new Function("self", "caches", quelle)({
+    addEventListener: (name: string, fn: typeof ereignisse[string]) => { ereignisse[name] = fn; },
+    clients: { claim: uebernehmen },
+  }, {
+    keys: async () => ["vitrine-bilder-v1", "vitrine-bilder-v2", "vitrine-schale-v1", "vitrine-schale-v2", "andere-app"],
+    delete: entfernen,
+  });
+  let fertig: Promise<unknown> | undefined;
+  ereignisse.activate({ waitUntil: (p) => { fertig = p; } });
+  await fertig;
+  expect(entfernen.mock.calls.map((c) => c[0])).toEqual(["vitrine-bilder-v1", "vitrine-bilder-v2", "vitrine-schale-v1"]);
+  expect(uebernehmen).toHaveBeenCalledOnce();
+  expect(entfernen.mock.invocationCallOrder.at(-1)).toBeLessThan(uebernehmen.mock.invocationCallOrder[0]);
+});
+
+it.each(["/api%2fchannels", "/vitrine/api/channels", "/assets/api/channels"])(
+  "speichert no-store selbst dann nicht, wenn %s als öffentliche Datei erscheint", async (pfad) => {
+    const ablegen = vi.fn();
+    const funktionen = new Function("self", "caches", "fetch", `${quelle}; return { huelle, baustein };`)(
+      { addEventListener() {} },
+      { open: async () => ({ put: ablegen, match: async () => undefined }) },
+      async () => new Response("Private Daten", { headers: { "Cache-Control": "private, no-store", "Content-Type": "text/html" } }),
+    );
+    await funktionen.huelle(new Request(`${HERKUNFT}${pfad}`));
+    await funktionen.baustein(new Request(`${HERKUNFT}${pfad}`));
+    expect(ablegen).not.toHaveBeenCalled();
+  },
+);
+
+it("speichert API-JSON auch ohne Cache-Control niemals als HTML-Hülle", async () => {
+  const ablegen = vi.fn();
+  const huelle = new Function("self", "caches", "fetch", `${quelle}; return huelle;`)(
+    { addEventListener() {} },
+    { open: async () => ({ put: ablegen }) },
+    async () => Response.json({ privat: true }),
+  );
+  await huelle(new Request(`${HERKUNFT}/vitrine/api/channels`));
+  expect(ablegen).not.toHaveBeenCalled();
 });

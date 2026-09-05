@@ -5,7 +5,7 @@
  * Worker läuft nur in einem "sicheren Kontext". Das heißt HTTPS - oder
  * `localhost`, das der Browser als Ausnahme durchgehen lässt. Ein Aufruf über
  * `http://192.168.1.50:8000` erfüllt das **nicht**. Dort gibt es dann keine
- * Installation auf den Startbildschirm und keinen Bilder-Cache; die Seite
+ * Installation auf den Startbildschirm; die Seite
  * funktioniert im Browser ganz normal weiter.
  *
  * Deshalb wird hier nicht stumm nichts getan, sondern der Grund festgehalten
@@ -108,10 +108,18 @@ export function serviceWorkerAnmelden(): void {
     return;
   }
 
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/sw.js", { scope: "/" })
-      .then(() => setzen({ art: "aktiv" }))
-      .catch((e) => setzen({ art: "fehler", meldung: e instanceof Error ? e.message : String(e) }));
+  // Eine bereits geöffnete alte Oberfläche nach dem Sicherheitsupdate
+  // ersetzen. Der neue Worker entfernt beim Aktivieren den Bildercache.
+  const warGesteuert = !!navigator.serviceWorker.controller;
+  let neuGestartet = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (warGesteuert && !neuGestartet) {
+      neuGestartet = true;
+      window.location.reload();
+    }
   });
+  navigator.serviceWorker
+    .register("/sw.js", { scope: "/", updateViaCache: "none" })
+    .then(() => setzen({ art: "aktiv" }))
+    .catch((e) => setzen({ art: "fehler", meldung: e instanceof Error ? e.message : String(e) }));
 }

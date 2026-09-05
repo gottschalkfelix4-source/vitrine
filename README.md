@@ -11,6 +11,9 @@ Elasticsearch.
 
 ## Was es kann
 
+- **Admin-Login** fuer das gesamte Archiv, einschliesslich API, Videos,
+  Untertiteln und Vorschaubildern. Zugangsdaten werden direkt am Server
+  eingerichtet; es gibt kein Standardpasswort und keine oeffentliche Registrierung.
 - **Ganze Kanaele** aufnehmen - Videos, Shorts, Livestreams und die vom Kanal
   angelegten Playlists, in der Gliederung des Kanals. Ein Video, das in drei
   Playlists steht, liegt trotzdem genau einmal auf der Platte.
@@ -40,7 +43,7 @@ Elasticsearch.
   Sperre, wechselt das Archiv auf den naechsten, statt anzuhalten. Ohne
   erweiterte Container-Rechte. Siehe [Mehrere Adressen statt einer](#mehrere-adressen-statt-einer).
 - **Auf dem Telefon bedienbar** und als App ablegbar: Die Seitenleiste wird zur
-  Schublade, der Player laeuft randlos, Vorschaubilder bleiben gespeichert.
+  Schublade, der Player laeuft randlos.
   Siehe [Auf dem Telefon](#auf-dem-telefon).
 
 ## Schnellstart
@@ -51,7 +54,17 @@ Elasticsearch.
 docker compose up -d --build
 ```
 
-Danach `http://localhost:8000`. Die Daten liegen unter `./data`.
+Die Daten liegen unter `./data`. Zuerst den Administrator einrichten:
+
+```bash
+docker compose exec --user archiv vitrine python -m app.admin
+```
+
+Danach ueber die HTTPS-Adresse des Reverse Proxys anmelden. Fuer einen
+ausdruecklich lokalen HTTP-Test kann `AUTH_COOKIE_SECURE=false` in der
+Compose-`.env` gesetzt werden; den Container danach neu erstellen. Dann ist
+`http://localhost:8000` nutzbar. Vor oeffentlicher Freigabe wieder `true`
+setzen. Siehe [Admin-Zugang und oeffentlicher Betrieb](#admin-zugang-und-oeffentlicher-betrieb).
 
 ### Unraid
 
@@ -83,6 +96,69 @@ Das Paket auf GitHub Container Registry erbt die Sichtbarkeit des Repos und ist
 oeffentlich; Unraid zieht es ohne Anmeldung. Sollte das Repo einmal privat
 werden, muss das Paket von Hand auf *public* gestellt werden (Repo →
 *Packages* → *Package settings*) - eine API gibt es dafuer nicht.
+
+### Admin-Zugang und oeffentlicher Betrieb
+
+Auch nach einem Update eines bestehenden Archivs bleibt der Zugriff zunaechst
+gesperrt, bis der Administrator eingerichtet ist. Videos, Einstellungen und
+Warteschlange bleiben erhalten; Hintergrundauftraege laufen weiter.
+
+In Unraid die Konsole des Vitrine-Containers oeffnen und eingeben:
+
+```sh
+gosu archiv python -m app.admin
+```
+
+Alternativ vom Server-Terminal:
+
+```sh
+docker exec -it vitrine gosu archiv python -m app.admin
+```
+
+Der Dialog fragt nach Benutzername (Vorschlag `admin`) und zweimal nach dem
+Passwort. Mindestens 14 Zeichen verwenden. Das Passwort wird verdeckt
+eingegeben und nur als gesalzener Passwort-Hash gespeichert. Derselbe Befehl
+setzt einen vergessenen Zugang zurueck und meldet alle bestehenden Sitzungen
+ab. Zugangsdaten gehoeren weder ins Repository noch in einen Chat oder in
+Startargumente. Ein Neustart loescht den Zugang nicht.
+
+Fuer den Internetzugriff eine eigene **HTTPS-Adresse** am Reverse Proxy
+einrichten. Die Anmeldung erwartet standardmaessig ein sicheres Cookie
+(`YTA_AUTH_COOKIE_SECURE=true`). Der Proxy muss den urspruenglichen `Host`
+weiterreichen und **alle Pfade**, einschliesslich `/api/`, an denselben
+Vitrine-Container schicken. Den Container-Port nur fuer das eigene Netz bzw.
+den Proxy erreichbar machen; keine zusaetzliche oeffentliche HTTP-Freigabe.
+Am Proxy ein Upload-Limit von 2 MiB setzen und Zwischenspeicherung fuer
+`/api/` abschalten. Die Anwendung prueft Upload-Groessen zusaetzlich selbst.
+
+Die HTTP-Adresse hinter Unraids WebUI-Knopf ist die direkte Container-Adresse.
+Bei aktivem HTTPS-Cookie stattdessen die HTTPS-Adresse des Proxys oeffnen.
+`YTA_AUTH_COOKIE_SECURE=false` ist nur fuer bewusste Tests ueber HTTP im
+privaten Netz vorgesehen; bei HTTP werden Anmeldedaten unverschluesselt
+uebertragen.
+
+Im angemeldeten Archiv gibt es **Abmelden** und unter **Einstellungen** die
+Passwortaenderung. Eine Passwortaenderung beendet alle Sitzungen. Geschuetzte
+API-Antworten und Mediendaten werden nicht im Browser-Cache gespeichert;
+beim Update entfernt der Service Worker seinen bisherigen Vorschaubild-Cache.
+Bereits heruntergeladene oder vom Nutzer gespeicherte Dateien lassen sich
+durch Abmelden nicht zurueckholen.
+
+Sitzungen enden standardmaessig nach 12 Stunden. Hoechstens zehn Sitzungen
+bleiben gleichzeitig aktiv. Zehn fehlgeschlagene Anmeldungen innerhalb von
+15 Minuten sperren weitere Versuche voruebergehend fuer das gesamte Konto;
+diese Begrenzung bleibt auch bei einem Neustart bestehen. Bereits angemeldete
+Sitzungen funktionieren weiter. Der lokale Reset-Befehl setzt auch diese
+Sperre zurueck. Bei absichtlichem Login-Spam koennen dadurch auch eigene neue
+Anmeldungen warten; vorgeschaltete Anfragelimits helfen, solche Anfragen
+bereits am Proxy zu begrenzen.
+
+Ohne Anmeldung sind nur die Login-Oberflaeche, ihre statischen Dateien,
+der Sitzungsstatus und der knappe Zustandscheck `/api/health` erreichbar.
+Es gibt einen Administrator und keine oeffentlichen Zuschauer-Konten.
+
+Die [Sicherheitspruefung vom 5. September 2026](docs/security-review-2026-09-05.md)
+beschreibt die behobenen Befunde, die Nachpruefung und verbleibende Betriebsgrenzen.
 
 ### Der erste Kanal
 
@@ -121,6 +197,7 @@ Oberflaeche. Die wichtigsten Variablen:
 | Variable | Standard | Bedeutung |
 |---|---|---|
 | `PUID` / `PGID` | 1000 / 1000 | Nutzer, unter dem geschrieben wird (Unraid: 99/100) |
+| `YTA_AUTH_COOKIE_SECURE` | true | Anmeldung nur mit HTTPS-Cookie; false ausschliesslich fuer lokale HTTP-Tests. Compose: `AUTH_COOKIE_SECURE` |
 | `YTA_ARCHIVE_MIN_HEIGHT` | 1080 | Untergrenze, kein Deckel. Bietet die Quelle weniger, wird das Beste genommen |
 | `YTA_ARCHIVE_MAX_HEIGHT` | 0 (offen) | Obergrenze, z. B. 1440 |
 | `YTA_ARCHIVE_CODEC` | av1 | `av1`, `hevc` oder `copy` (nichts umkodieren) |
@@ -490,6 +567,12 @@ der ruhigere Weg.
 Tunnel aus, laedt das Archiv wieder ueber die Hausleitung - also ueber die
 Adresse, die man herausnehmen wollte, und ohne dass es auffiele.
 
+Diese Auswahl gilt fuer die Netzauftraege der Warteschlange. Direkte
+Kanalabfragen, der Cookie-Verbindungstest und nachgeladene Vorschaubilder
+verwenden eigene Verbindungen und sind keine zugesicherte VPN-Sperre fuer
+den gesamten Container. Ohne brauchbaren Tunnel warten die Netzarbeiter bei
+aktivem VPN und eingeschaltetem "Nur ueber Tunnel laden".
+
 ### Anmelden: der Cookie-Assistent
 
 Unter *Einstellungen -> YouTube-Anmeldung*. Datei hochladen, "Verbindung
@@ -535,8 +618,10 @@ Beim Export drei Dinge beachten:
 
 Die Datei liegt als `cookies.txt` im Datenverzeichnis, mit Rechten 0600. Sie
 laesst sich ueber die API nicht wieder herunterladen - wer die Oberflaeche
-erreicht, haette sonst das Konto. Die Oberflaeche selbst hat keine Anmeldung;
-sie gehoert ins eigene Netz und nicht ins offene Internet.
+erreicht, haette sonst das Konto. Die Oberflaeche und die API sind durch den
+separaten Admin-Login geschuetzt. Die YouTube-Cookies ersetzen diesen Login
+nicht. Datenverzeichnis und Backups enthalten vertrauliche Zugangsdaten und
+duerfen nicht als oeffentliche Freigabe erreichbar sein.
 
 Und die Erwartung geradegerueckt: Cookies heben die Grenze nicht auf, sie
 vergroessern nur das Budget. Bei einem Erstbestand von tausenden Videos wird
@@ -677,8 +762,8 @@ unteren Rand wird ueber `env(safe-area-inset-bottom)` freigehalten.
 Zusaetzlich ist das Archiv eine Progressive Web App: Mit Manifest, Symbolen und
 einem Service Worker laesst es sich auf den Startbildschirm legen und startet
 dann ohne Browserleiste. Der Worker speichert die Oberflaeche und die
-Vorschaubilder - bei 60 Kacheln je Kanalseite spart das auf Mobilfunk spuerbar.
-Videostroeme fasst er ausdruecklich **nicht** an: Sie kommen bereichsweise und
+statischen Symbole. Geschuetzte Vorschaubilder, API-Antworten und
+Videostroeme fasst er ausdruecklich **nicht** an: Letztere kommen bereichsweise und
 sind bis zu mehrere Gigabyte gross.
 
 ### Dafuer braucht es HTTPS
@@ -687,8 +772,8 @@ Das ist der Haken, an dem es im Heimnetz ueblicherweise scheitert. Ein Service
 Worker laeuft nur in einem *sicheren Kontext* - also ueber HTTPS oder auf
 `localhost`. Der uebliche Zugriff `http://192.168.1.50:8000` erfuellt das
 **nicht**: Dann fehlt der Menuepunkt "Zum Startbildschirm hinzufuegen", und es
-gibt keinen Bildspeicher. Die Seite funktioniert im Browser vollstaendig
-weiter, nur eben ohne eigenes Symbol.
+gibt keine installierbare App. Fuer den Admin-Login ist ebenfalls HTTPS
+vorgesehen; die Ausnahme fuer lokale HTTP-Tests ist oben beschrieben.
 
 Das Archiv sagt das auch selbst: Unter *Einstellungen > Allgemein* steht, ob sich
 die App ablegen laesst - und wenn nicht, warum. Ein fehlender Menuepunkt ohne
@@ -730,8 +815,16 @@ python -m venv .venv
 # Linux/macOS: .venv/bin/python   Windows: .venv/Scripts/python.exe
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
+# Nur fuer lokale HTTP-Entwicklung (Bash):
+export YTA_AUTH_COOKIE_SECURE=false
+.venv/bin/python -m app.admin
 .venv/bin/python -m uvicorn app.main:app --reload
 ```
+
+In PowerShell entspricht die lokale HTTP-Einstellung
+`$env:YTA_AUTH_COOKIE_SECURE = "false"`; die Python-Aufrufe verwenden dort
+`.venv/Scripts/python.exe`. `YTA_DATA_DIR` vor dem Einrichten des Administrators
+und vor dem Start auf denselben Entwicklungsordner setzen.
 
 Ausserhalb des Containers braucht es ffmpeg im Pfad und eine
 JavaScript-Laufzeit (Deno oder Node) - sonst liefert yt-dlp stillschweigend

@@ -11,15 +11,20 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette._utils import get_route_path
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import Response
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
-from app.api import cookies, hardware, library, stream, vpn
+from app.api import auth, cookies, hardware, library, stream, vpn
 from app.config import settings
 from app.db import init_db, session_scope
+from app.security import SecurityMiddleware
 from app.services import abbruch, cache, einstellungen, jobs
 from app.services import vpn as vpn_dienst
 from app.workers.runner import werk
@@ -162,6 +167,9 @@ app = FastAPI(
     description="Eigenes YouTube-Archiv mit Kalt- und Heissspeicher",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 app.add_middleware(
@@ -175,6 +183,21 @@ app.add_middleware(
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "X-Wiedergabe-Modus"],
 )
 
+app.add_middleware(SecurityMiddleware)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, error: RequestValidationError) -> Response:
+    if get_route_path(request.scope).startswith("/api/auth/"):
+        # Pydantic-Fehler enthalten sonst den zurueckgewiesenen Passwortwert.
+        return JSONResponse(status_code=422, content={"detail": [
+            {key: value for key, value in item.items() if key in {"loc", "msg", "type"}}
+            for item in error.errors()
+        ]})
+    return await request_validation_exception_handler(request, error)
+
+
+app.include_router(auth.router)
 app.include_router(stream.router)
 app.include_router(cookies.router)
 app.include_router(vpn.router)
@@ -184,13 +207,7 @@ app.include_router(library.router)
 
 @app.get("/api/health", tags=["system"])
 def health() -> dict[str, object]:
-    with session_scope() as db:
-        return {
-            "status": "ok",
-            "name": settings.app_name,
-            "heissspeicher": cache.usage(db),
-            "freier_platz": cache.free_space(),
-        }
+    return {"status": "ok"}
 
 
 def _frontend_verzeichnis() -> Path | None:

@@ -9,8 +9,8 @@ export default defineConfig({
     // dafuer, dass der Player dieselben relativen URLs benutzt wie spaeter im
     // Container - sonst gaebe es beim Streamen CORS-Aerger mit Range-Headern.
     proxy: {
-      "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/api": { target: "http://127.0.0.1:8000", changeOrigin: false },
     },
   },
-  build: { outDir: "dist", sourcemap: true },
+  build: { outDir: "dist", sourcemap: false },
 });

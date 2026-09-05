@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import HotCopy, HotCopyStatus, Video, utcnow
+from app.services import paths
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +44,10 @@ LEASE_SECONDS = 90
 
 
 def hot_path_for(video_id: str, variant: str, suffix: str) -> Path:
-    return settings.cache_dir / f"{video_id}.{variant}{suffix}"
+    name = f"{paths.component(video_id)}.{paths.component(variant)}{suffix}"
+    dest = paths.child(settings.cache_dir, name)
+    paths.contained(settings.cache_dir, dest.with_suffix(dest.suffix + ".part"))
+    return dest
 
 
 def _size_on_disk(p: Path) -> int:
@@ -102,6 +106,7 @@ def is_leased(hot: HotCopy, now: datetime | None = None) -> bool:
 
 def register(db: Session, video: Video, variant: str, path: Path, mime: str) -> HotCopy:
     """Traegt eine fertige Heisskopie ein bzw. aktualisiert einen Eintrag."""
+    path = paths.contained(settings.cache_dir, path)
     hot = db.scalar(select(HotCopy).where(HotCopy.video_id == video.id, HotCopy.variant == variant))
     now = utcnow()
     if hot is None:
@@ -128,14 +133,16 @@ def mark_failed(db: Session, hot: HotCopy, error: str) -> None:
 def drop(db: Session, hot: HotCopy) -> int:
     """Loescht Datei und Eintrag. Liefert die freigegebenen Bytes."""
     freed = 0
-    p = Path(hot.path)
     try:
+        p = paths.contained(settings.cache_dir, Path(hot.path))
+        # Beide Ziele pruefen, bevor die erste Datei oder der Eintrag weicht.
+        part = paths.contained(settings.cache_dir, p.with_suffix(p.suffix + ".part"))
         freed = _size_on_disk(p)
         p.unlink(missing_ok=True)
         # Ein liegengebliebener Teil-Download aus einem Abbruch.
-        p.with_suffix(p.suffix + ".part").unlink(missing_ok=True)
-    except OSError as e:
-        log.warning("Heisskopie %s liess sich nicht loeschen: %s", p, e)
+        part.unlink(missing_ok=True)
+    except (OSError, paths.UnsafePath) as e:
+        log.warning("Heisskopie %s liess sich nicht loeschen: %s", hot.id, e)
         return 0
     db.delete(hot)
     db.commit()
@@ -176,7 +183,7 @@ def reap(db: Session, *, now: datetime | None = None) -> dict[str, int]:
         exp = _as_utc(hot.expires_at)
         if exp is not None and exp <= now:
             stats["bytes_frei"] += drop(db, hot)
-            stats["abgelaufen"] += 1
+            stats["abgelaufen"] += int(hot not in db)
 
     # --- 2. Budget
     if settings.hot_max_bytes > 0:
@@ -206,12 +213,21 @@ def reap(db: Session, *, now: datetime | None = None) -> dict[str, int]:
                     stats["bytes_frei"] += groesse
 
     # --- 3. Verwaiste Dateien im Cache-Verzeichnis
-    bekannt = {Path(h.path).resolve() for h in db.scalars(select(HotCopy))}
+    bekannt = set()
+    for hot in db.scalars(select(HotCopy)):
+        try:
+            bekannt.add(paths.contained(settings.cache_dir, Path(hot.path)))
+        except paths.UnsafePath:
+            continue
     if settings.cache_dir.is_dir():
         for p in settings.cache_dir.iterdir():
+            try:
+                p = paths.contained(settings.cache_dir, p)
+            except paths.UnsafePath:
+                continue
             if not p.is_file():
                 continue
-            if p.resolve() in bekannt:
+            if p in bekannt:
                 continue
             # Abgebrochene Vorbereitungen erst nach der Gnadenfrist entfernen,
             # damit ein gerade laufendes Entpacken nicht abgeraeumt wird.

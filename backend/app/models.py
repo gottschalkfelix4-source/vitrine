@@ -34,6 +34,34 @@ class Base(DeclarativeBase):
     pass
 
 
+class AdminAccount(Base):
+    """Ein lokales Administratorkonto, ohne Klartextpasswort."""
+
+    __tablename__ = "admin_account"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64))
+    password_hash: Mapped[str] = mapped_column(String(256))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_session"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_revision: Mapped[int] = mapped_column(Integer)
+    csrf_token: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AdminLoginLimit(Base):
+    """Globales, neustartfestes Budget; keine vom Client behauptete IP."""
+
+    __tablename__ = "admin_login_limit"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    window_started: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+
+
 # --------------------------------------------------------------------- Enums
 
 

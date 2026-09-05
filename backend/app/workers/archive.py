@@ -33,7 +33,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import abbruch, bundle, drosselung, jobs, media, suche, ytdlp
+from app.services import abbruch, bundle, drosselung, jobs, media, paths, suche, ytdlp
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ def _thumbnail_ablegen(video_id: str, quelle: Path | None) -> str | None:
     if quelle is None or not quelle.is_file():
         return None
     settings.thumb_dir.mkdir(parents=True, exist_ok=True)
-    ziel = settings.thumb_dir / f"{video_id}{quelle.suffix.lower()}"
+    ziel = paths.child(settings.thumb_dir, f"{paths.component(video_id)}{quelle.suffix.lower()}")
     shutil.copy2(quelle, ziel)
     return ziel.name
 
@@ -303,7 +303,12 @@ def _ablegen(
     umgepackt" gesetzt, verschwaende das Video fuer die Dauer des Vorgangs aus
     der Oberflaeche, obwohl die alte Fassung durchgehend abspielbar ist.
     """
-    video_id = video.id
+    video_id = paths.component(video.id)
+    # Gespeicherte Alt-IDs duerfen normale Namen sein, aber keine Pfade.
+    # Vor Umpacken oder Statusaenderungen auch das endgueltige Ziel pruefen.
+    ziel = bundle.bundle_path_for(settings.bundle_dir, video.channel_id, video_id)
+    paths.contained(settings.bundle_dir, ziel.with_suffix(ziel.suffix + ".part"))
+    arbeitsordner = paths.contained(settings.tmp_dir, arbeitsordner)
 
     # ---- Umpacken in einen browsertauglichen Behaelter (60 bis 80 %)
     plan = media.plan_container(info_medien)
@@ -315,9 +320,9 @@ def _ablegen(
         # Eigenes Unterverzeichnis, damit der Dateiname sauber bleibt: Er
         # landet unveraendert als Medienname im Buendel, und dort will
         # niemand ein "demo1.zwischenschritt.mp4" wiederfinden.
-        fertig_ordner = arbeitsordner / "fertig"
+        fertig_ordner = paths.child(arbeitsordner, "fertig")
         fertig_ordner.mkdir(parents=True, exist_ok=True)
-        umgepackt = fertig_ordner / f"{video_id}{plan.suffix}"
+        umgepackt = paths.child(fertig_ordner, f"{video_id}{plan.suffix}")
         media.run_ffmpeg(
             media.build_remux_cmd(ergebnis.path, umgepackt, plan),
             dauer_s=info_medien.duration_s,
@@ -332,7 +337,6 @@ def _ablegen(
         _status(db, video, VideoStatus.BUNDLING)
     jobs.fortschritt(db, job, 0.82, "Buendel wird geschrieben")
 
-    ziel = bundle.bundle_path_for(settings.bundle_dir, video.channel_id, video_id)
     manifest = bundle.BundleManifest(
         schema_version=bundle.SCHEMA_VERSION,
         video_id=video_id,
@@ -361,6 +365,7 @@ def _ablegen(
         info_json=ergebnis.info,
         thumbnail=ergebnis.thumbnail,
         subtitles=ergebnis.subtitles,
+        root=settings.bundle_dir,
     )
 
     # ---- Datenbank nachziehen
@@ -397,6 +402,9 @@ def archivieren(db: Session, job: Job) -> None:
     if video is None:
         raise ValueError(f"Video {video_id} nicht in der Datenbank")
 
+    bundle.bundle_path_for(settings.bundle_dir, video.channel_id, video_id)
+    arbeitsordner = paths.child(settings.tmp_dir, video_id)
+
     # Der Wachposten. Er kostet einen Blick auf die Platte und verhindert den
     # teuersten Unsinn, den dieses Programm anstellen kann: ein Video erneut
     # herunterzuladen, das vollstaendig im Archiv liegt.
@@ -426,7 +434,6 @@ def archivieren(db: Session, job: Job) -> None:
             video_id, video.bundle_file,
         )
 
-    arbeitsordner = settings.tmp_dir / video_id
     fortsetzbar = _fortsetzmarke_einloesen(arbeitsordner)
     if arbeitsordner.exists() and not fortsetzbar:
         # Reste eines abgestuerzten oder gescheiterten Laufs. Was davon
@@ -612,8 +619,11 @@ def recodieren(db: Session, job: Job) -> None:
     if video is None or not video.bundle_file:
         raise ValueError(f"Video {video_id} ist nicht archiviert")
 
-    quelle_buendel = Path(video.bundle_file)
-    arbeitsordner = settings.tmp_dir / f"{video_id}.recode"
+    paths.component(video_id)
+    channel_dir = paths.child(settings.bundle_dir, video.channel_id or "_lose")
+    quelle_buendel = paths.contained(channel_dir, Path(video.bundle_file))
+    paths.contained(channel_dir, quelle_buendel.with_suffix(quelle_buendel.suffix + ".part"))
+    arbeitsordner = paths.child(settings.tmp_dir, f"{video_id}.recode")
     shutil.rmtree(arbeitsordner, ignore_errors=True)
     arbeitsordner.mkdir(parents=True, exist_ok=True)
 
@@ -624,18 +634,18 @@ def recodieren(db: Session, job: Job) -> None:
         with bundle.BundleReader(quelle_buendel) as leser:
             manifest = leser.manifest
             info_json = leser.info_json()
-            entpackt = arbeitsordner / Path(manifest.media_name).name
+            entpackt = paths.child(arbeitsordner, Path(manifest.media_name).name)
             jobs.fortschritt(db, job, 0.05, "Buendel wird gelesen")
             leser.extract_media(entpackt)
             # Beiwerk mitnehmen, damit das neue Buendel vollstaendig bleibt.
             beiwerk: list[tuple[str, bool, Path]] = []
             for eintrag in manifest.subtitles:
-                p = arbeitsordner / Path(eintrag.name_in_bundle).name
+                p = paths.child(arbeitsordner, Path(eintrag.name_in_bundle).name)
                 p.write_bytes(leser.read(eintrag.name_in_bundle))
                 beiwerk.append((eintrag.language, eintrag.is_auto, p))
             vorschau: Path | None = None
             if manifest.thumbnail_name:
-                vorschau = arbeitsordner / manifest.thumbnail_name
+                vorschau = paths.child(arbeitsordner, manifest.thumbnail_name)
                 vorschau.write_bytes(leser.read(manifest.thumbnail_name))
 
         info_vorher = media.probe(entpackt)
@@ -647,9 +657,9 @@ def recodieren(db: Session, job: Job) -> None:
         _status(db, video, VideoStatus.ENCODING, grund)
         # Wie beim Umpacken: eigenes Verzeichnis, damit der Medienname im
         # Buendel schlicht "<video-id>.<endung>" bleibt.
-        fertig_ordner = arbeitsordner / "fertig"
+        fertig_ordner = paths.child(arbeitsordner, "fertig")
         fertig_ordner.mkdir(parents=True, exist_ok=True)
-        ziel_datei = fertig_ordner / f"{video_id}{media.archive_container(codec)}"
+        ziel_datei = paths.child(fertig_ordner, f"{video_id}{media.archive_container(codec)}")
         _kodieren_mit_rueckfall(
             db, job, entpackt, ziel_datei, codec, dauer_s=info_vorher.duration_s
         )
@@ -679,6 +689,7 @@ def recodieren(db: Session, job: Job) -> None:
             info_json=info_json,
             thumbnail=vorschau,
             subtitles=beiwerk,
+            root=settings.bundle_dir,
         )
 
         video.bundle_bytes = quelle_buendel.stat().st_size
@@ -765,6 +776,9 @@ def hochstufen(db: Session, job: Job) -> None:
     if video.status != VideoStatus.ARCHIVED or not video.bundle_file:
         raise ValueError(f"Video {video_id} ist nicht archiviert - nichts zum Hochstufen")
 
+    bundle.bundle_path_for(settings.bundle_dir, video.channel_id, video_id)
+    arbeitsordner = paths.child(settings.tmp_dir, f"{paths.component(video_id)}.hochstufen")
+
     ziel_guete = int(jobs.payload_of(job).get("ziel") or settings.archive_min_height)
     vorher = ytdlp.guete({"width": video.width, "height": video.height}) or 0
 
@@ -798,7 +812,6 @@ def hochstufen(db: Session, job: Job) -> None:
         return
 
     # ---- 2. Herunterladen, in einen eigenen Ordner.
-    arbeitsordner = settings.tmp_dir / f"{video_id}.hochstufen"
     shutil.rmtree(arbeitsordner, ignore_errors=True)
     waehler = (
         f"bestvideo[height>={erreichbar}][width>={erreichbar}]+bestaudio"

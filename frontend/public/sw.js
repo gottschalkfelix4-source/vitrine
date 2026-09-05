@@ -3,12 +3,10 @@
  *
  * Zweck ist nicht "alles offline verfügbar machen" - ein Videoarchiv lebt vom
  * Server, und die Dateien sind zu groß, um sie im Browser zu spiegeln. Der
- * Worker sorgt für dreierlei:
+ * Worker sorgt für zweierlei:
  *
  *   1. Die App ist installierbar und startet ohne Browserleiste.
  *   2. Die Oberfläche erscheint sofort, auch bei schlechtem Mobilfunk.
- *   3. Vorschaubilder werden nicht bei jedem Blättern erneut geladen - auf
- *      einer Kanalseite mit 60 Kacheln sind das schnell mehrere Megabyte.
  *
  * Was hier NICHT passiert, ist genauso wichtig. Drei Regeln, und die erste
  * ist die, an der eine unbedachte Umsetzung dieses Projekt zerlegen würde:
@@ -18,23 +16,14 @@
  *     schleift, sprengt den Speicher des Telefons und zerbricht das Springen
  *     in der Zeitleiste, weil eine Teilantwort (206) nicht als vollständige
  *     Antwort zwischengespeichert werden darf.
- *   - API-Antworten werden nicht zwischengespeichert. Eine Warteschlange oder
- *     ein Speicherstand von gestern wäre schlimmer als gar keine Anzeige.
+ *   - API-Antworten und Vorschaubilder werden nie zwischengespeichert.
+ *     Nach dem Abmelden dürfen keine geschützten Dateien verfügbar bleiben.
  *   - Nur GET. Ein zwischengespeichertes POST gibt es nicht, und ein
  *     abgefangenes DELETE wäre ein Datenverlust.
  */
 
-const VERSION = "v1";
+const VERSION = "v2";
 const SCHALE = `vitrine-schale-${VERSION}`;
-const BILDER = `vitrine-bilder-${VERSION}`;
-
-/** Höchstzahl gespeicherter Vorschaubilder.
- *
- * Bei rund 60 KB je Bild sind das etwa 24 MB - genug für mehrere
- * Kanalseiten, wenig genug, dass niemand sein Telefon deswegen aufräumen muss.
- * Ohne Grenze wüchse der Cache bei einem Kanal mit 3000 Videos ungebremst.
- */
-const BILDER_MAX = 400;
 
 /** Was beim Installieren schon geholt wird, damit der erste Start offline
  *  gelingt. Bewusst nur die Hülle - die gehashten Bündel von Vite kommen beim
@@ -64,7 +53,7 @@ self.addEventListener("activate", (e) => {
       .then((namen) =>
         Promise.all(
           namen
-            .filter((n) => n.startsWith("vitrine-") && n !== SCHALE && n !== BILDER)
+            .filter((n) => n.startsWith("vitrine-") && n !== SCHALE)
             .map((n) => caches.delete(n)),
         ),
       )
@@ -77,33 +66,6 @@ self.addEventListener("message", (e) => {
   if (e.data === "uebernimm") self.skipWaiting();
 });
 
-/** Ältere Einträge wegwerfen, wenn der Bildercache zu groß wird.
- *  Die Cache-API hält die Einfügereihenfolge, also ist der erste der älteste. */
-async function bilderBegrenzen() {
-  const cache = await caches.open(BILDER);
-  const schluessel = await cache.keys();
-  for (let i = 0; i < schluessel.length - BILDER_MAX; i++) {
-    await cache.delete(schluessel[i]);
-  }
-}
-
-/** Vorschaubilder: erst aus dem Cache, sonst holen und ablegen.
- *
- * Ein Bild unter einer festen Adresse ändert sich nie - weder das archivierte
- * noch das von der Quelle geholte. Es gibt also keinen Grund, je erneut zu
- * fragen. */
-async function bild(anfrage) {
-  const cache = await caches.open(BILDER);
-  const treffer = await cache.match(anfrage);
-  if (treffer) return treffer;
-  const antwort = await fetch(anfrage);
-  if (antwort.ok) {
-    await cache.put(anfrage, antwort.clone());
-    void bilderBegrenzen();
-  }
-  return antwort;
-}
-
 /** Die Hülle: erst das Netz, bei Fehlschlag der Cache.
  *
  * Andersherum wäre es schneller, aber dann bekäme man nach einem Update des
@@ -113,13 +75,22 @@ async function huelle(anfrage) {
   const cache = await caches.open(SCHALE);
   try {
     const antwort = await fetch(anfrage);
-    if (antwort.ok) await cache.put(anfrage, antwort.clone());
+    if (speicherbar(antwort) && antwort.headers.get("Content-Type")?.split(";")[0].trim() === "text/html") {
+      await cache.put(anfrage, antwort.clone());
+    }
     return antwort;
   } catch (fehler) {
     const treffer = (await cache.match(anfrage)) || (await cache.match("/"));
     if (treffer) return treffer;
     throw fehler;
   }
+}
+
+/** CacheStorage berücksichtigt HTTP-Cache-Control nicht selbst. Auch eine
+ * kodierte oder mit einem Pfadpräfix versehene API muss no-store behalten. */
+function speicherbar(antwort) {
+  return antwort.ok && !(antwort.headers.get("Cache-Control") || "")
+    .split(",").some((regel) => regel.trim().toLowerCase() === "no-store");
 }
 
 /** Gehashte Bündel von Vite: erst der Cache, sonst holen.
@@ -131,7 +102,7 @@ async function baustein(anfrage) {
   const treffer = await cache.match(anfrage);
   if (treffer) return treffer;
   const antwort = await fetch(anfrage);
-  if (antwort.ok) await cache.put(anfrage, antwort.clone());
+  if (speicherbar(antwort)) await cache.put(anfrage, antwort.clone());
   return antwort;
 }
 
@@ -146,7 +117,7 @@ async function baustein(anfrage) {
  *
  * "durchreichen" heißt: gar nicht anfassen, der Browser macht es selbst.
  *
- * @returns {"durchreichen"|"bild"|"huelle"|"baustein"}
+ * @returns {"durchreichen"|"huelle"|"baustein"}
  */
 function strategie(adresse, methode, modus, eigeneHerkunft) {
   // Ein zwischengespeichertes POST gibt es nicht, und ein abgefangenes DELETE
@@ -163,11 +134,9 @@ function strategie(adresse, methode, modus, eigeneHerkunft) {
     return "durchreichen";
   }
 
-  if (url.pathname.startsWith("/api/thumbs/")) return "bild";
-
   // Übrige API: nie aus dem Cache. Lieber ein ehrlicher Fehler als ein
   // Speicherstand von gestern.
-  if (url.pathname.startsWith("/api/")) return "durchreichen";
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return "durchreichen";
 
   if (modus === "navigate") return "huelle";
 
@@ -182,7 +151,6 @@ self.addEventListener("fetch", (e) => {
   const anfrage = e.request;
   const wahl = strategie(anfrage.url, anfrage.method, anfrage.mode, self.location.origin);
   if (wahl === "durchreichen") return;
-  if (wahl === "bild") e.respondWith(bild(anfrage));
-  else if (wahl === "baustein") e.respondWith(baustein(anfrage));
+  if (wahl === "baustein") e.respondWith(baustein(anfrage));
   else e.respondWith(huelle(anfrage));
 });

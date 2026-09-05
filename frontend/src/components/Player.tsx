@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icons";
 import type { Kapitel } from "../lib/api";
 import { api, streamUrl, untertitelUrl } from "../lib/api";
+import { authFetch } from "../lib/auth";
 import { dauer, prozent } from "../lib/format";
 import {
   istVollbild,
@@ -142,7 +143,7 @@ export function Player({
       try {
         // Nur das erste Byte anfordern: Das reicht, um zu erfahren, ob
         // ausgeliefert wird oder erst vorbereitet werden muss.
-        const antwort = await fetch(streamUrl(videoId), { headers: { Range: "bytes=0-0" }, signal: controller.signal });
+        const antwort = await authFetch(streamUrl(videoId), { headers: { Range: "bytes=0-0" }, signal: controller.signal });
         if (abgebrochen) return;
 
         if (antwort.status === 202) {
@@ -278,14 +279,7 @@ export function Player({
     let merken: number | undefined;
     const fortschrittSpeichern = (beimVerlassen = false) => {
       if (!Number.isFinite(el.currentTime) || el.readyState < 1) return;
-      const anfrage = beimVerlassen
-        ? fetch(`/api/videos/${videoId}/progress`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sekunden: el.currentTime }),
-            keepalive: true,
-          })
-        : api.fortschrittMerken(videoId, el.currentTime);
+      const anfrage = api.fortschrittMerken(videoId, el.currentTime, undefined, beimVerlassen);
       void anfrage.catch(() => { /* Beim nächsten Ereignis erneut speichern. */ });
     };
     const herzschlag = () => {
@@ -333,6 +327,11 @@ export function Player({
       window.removeEventListener("pagehide", beimVerlassen);
       window.removeEventListener("pageshow", beimZurueckkehren);
       beenden(true);
+      // Auch ein noch referenziertes, entferntes Video darf nach einer
+      // Abmeldung weder weiterspielen noch seinen Medienpuffer behalten.
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
     };
   }, [lage.art, videoId]);
 

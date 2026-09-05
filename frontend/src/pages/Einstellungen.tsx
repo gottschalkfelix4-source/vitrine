@@ -8,6 +8,7 @@ import { AppInstallieren } from "../components/AppInstallieren";
 import { CookieAssistent } from "../components/Cookies";
 import { HardwarePruefung } from "../components/Hardware";
 import { VpnTunnelListe } from "../components/Vpn";
+import { PasswortAendern } from "../components/Anmeldung";
 
 const HERKUNFT_TEXT: Record<string, string> = {
   datenbank: "hier geändert",
@@ -95,7 +96,7 @@ export function Einstellungenseite() {
 
       <div className="einstellungen-layout">
       <nav className="einstellungen-nav" aria-label="Einstellungsbereiche">
-        {["Allgemein", "Cookies", "VPN-Tunnel", "Hardware", ...gruppen.map((g) => g.name)].map((name) => (
+        {["Allgemein", "Zugang", "Cookies", "VPN-Tunnel", "Hardware", ...gruppen.map((g) => g.name)].map((name) => (
           <button key={name} data-aktiv={bereich === name} aria-pressed={bereich === name}
             onClick={() => setBereich(name)}>{name}</button>
         ))}
@@ -104,6 +105,7 @@ export function Einstellungenseite() {
       {/* Ganz oben, weil es die einzige Einstellung ist, die nicht am Server
           haengt, sondern am Geraet, auf dem man gerade schaut. */}
       <div hidden={bereich !== "Allgemein"} className="einst-gruppe"><h2>App auf diesem Gerät</h2><AppInstallieren /></div>
+      {bereich === "Zugang" ? <PasswortAendern /> : null}
 
       {neustartNoetig.length > 0 ? (
         <Hinweis art="arbeit">

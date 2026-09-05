@@ -135,8 +135,8 @@ def stream(
     kopf = {
         "Accept-Ranges": "bytes",
         "Content-Type": quelle.mime_type,
-        # Das Archiv ist unveraenderlich - der Browser darf beliebig lange cachen.
-        "Cache-Control": "private, max-age=86400",
+        # Geschuetzte Mediendaten sollen nach Sitzungsende nicht im Cache bleiben.
+        "Cache-Control": "no-store",
         "X-Wiedergabe-Modus": quelle.mode.value,
     }
 

@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
     timezone: str = "Europe/Berlin"
+    # Ausschliesslich fuer ausdruecklichen lokalen HTTP-Betrieb abschalten.
+    auth_cookie_secure: bool = True
+    auth_session_hours: int = Field(default=12, ge=1, le=24)
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173"]
     )
