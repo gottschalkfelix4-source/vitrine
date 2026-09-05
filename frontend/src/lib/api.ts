@@ -56,7 +56,7 @@ export interface KanalDetail {
   /** Zaehler je Videoart, aus der Datenbank - nicht aus der geladenen Seite. */
   zaehler: { videos: number; shorts: number; live: number };
   sammlungen: Sammlung[];
-  regeln: {
+  regeln?: {
     auto_archivieren: boolean;
     shorts: boolean;
     livestreams: boolean;
@@ -479,10 +479,10 @@ export const api = {
       wartend: number;
       /** Wartende Aufträge je Art - ein Video erzeugt im Lauf seines Lebens mehrere. */
       nach_art: Record<string, number>;
-      drosselung: Drosselung;
+      drosselung?: Drosselung;
       pause: WarteschlangenPause;
       /** Wie viele Wege ins Netz es gibt und wie viele davon gerade frei sind. */
-      ausgaenge: { gesamt: number; frei: number };
+      ausgaenge?: { gesamt: number; frei: number };
     }>("/api/jobs/aktiv"),
   warteschlangePausieren: (minuten: number | null) =>
     hole<WarteschlangenPause>("/api/jobs/pause", {

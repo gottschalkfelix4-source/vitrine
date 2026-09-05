@@ -64,7 +64,7 @@ def test_unconfigured_closed_and_health_minimal(environment):
         "eingerichtet": False, "angemeldet": False, "benutzer": None, "csrf_token": None,
     }
     assert sign_in(client).status_code == 503
-    assert client.get("/api/channels").status_code == 401
+    assert client.get("/api/settings").status_code == 401
     response = client.get("/api/health")
     assert response.json() == {"status": "ok"}
     assert response.headers["cache-control"] == "no-store"
@@ -89,11 +89,11 @@ def test_login_cookie_hash_and_logout(environment):
         assert session.token_hash == hashlib.sha256(token.encode()).hexdigest()
         assert session.token_hash != token
         assert db.get(AdminAccount, 1).password_hash != PASSWORD
-    assert client.get("/api/channels").status_code == 200
+    assert client.get("/api/settings").status_code == 200
     assert client.post("/api/auth/logout").status_code == 403
     assert client.post("/api/auth/logout", headers={"X-CSRF-Token": csrf}).status_code == 204
     client.cookies.set(auth.COOKIE_NAME, token)
-    assert client.get("/api/channels").status_code == 401
+    assert client.get("/api/settings").status_code == 401
 
 
 def test_bad_password_and_forged_or_expired_cookie(environment):
@@ -104,11 +104,11 @@ def test_bad_password_and_forged_or_expired_cookie(environment):
     with factory() as db:
         db.scalar(select(AdminSession)).expires_at = auth.now() - timedelta(seconds=1)
         db.commit()
-    assert client.get("/api/channels").status_code == 401
+    assert client.get("/api/settings").status_code == 401
     for forged in ["invalid", "a" * 43, token + "bad"]:
         client.cookies.clear()
         client.cookies.set(auth.COOKIE_NAME, forged)
-        assert client.get("/api/channels").status_code == 401
+        assert client.get("/api/settings").status_code == 401
 
 
 def test_password_change_and_cli_reset_revoke_every_session(environment):
@@ -133,9 +133,9 @@ def test_password_change_and_cli_reset_revoke_every_session(environment):
 
 
 @pytest.mark.parametrize(("method", "path"), [
-    ("GET", "/api/channels"), ("POST", "/api/channels"), ("DELETE", "/api/channels/UCtest"),
-    ("GET", "/api/videos/test/stream"), ("GET", "/api/videos/test/subtitles/de"),
-    ("GET", "/api/thumbs/quelle/dQw4w9WgXcQ"), ("GET", "/api/thumbs/test.jpg"),
+    ("POST", "/api/channels"), ("DELETE", "/api/channels/UCtest"),
+    ("GET", "/api/channels/UCtest/downloadable"), ("GET", "/api/streams"),
+    ("PUT", "/api/videos/test/progress"), ("DELETE", "/api/videos/test"),
     ("GET", "/api/cookies"), ("POST", "/api/cookies"), ("POST", "/api/cookies/test"),
     ("POST", "/api/vpn"), ("POST", "/api/vpn/test-direkt"), ("POST", "/api/hardware/test"),
     ("GET", "/api/settings"), ("PUT", "/api/settings"), ("POST", "/api/search/reindex"),
@@ -165,7 +165,7 @@ def test_csrf_for_json_multipart_and_raw_requests(environment):
     {}, {"X-Vitrine-Request": "1", "Origin": "https://evil.test"},
     {"X-Vitrine-Request": "1", "Origin": "null"},
     {"X-Vitrine-Request": "1", "Origin": "https://testserver.evil.test"},
-    {"X-Vitrine-Request": "1", "Origin": "http://testserver"},
+    {"X-Vitrine-Request": "1", "Origin": "http://testserver:8001"},
     {"X-Vitrine-Request": "1", "Sec-Fetch-Site": "cross-site"},
 ])
 def test_cross_origin_login_denied(environment, headers):
@@ -322,7 +322,7 @@ def test_explicit_local_http_cookie_mode(environment, monkeypatch):
         assert result.status_code == 200
         assert "Secure" not in result.headers["set-cookie"]
         assert "HttpOnly" in result.headers["set-cookie"]
-        assert client.get("/api/channels").status_code == 200
+        assert client.get("/api/settings").status_code == 200
     finally:
         client.close()
 
@@ -353,7 +353,7 @@ def test_legacy_http_cache_purged_once_and_on_logout(environment):
 def test_reverse_proxy_root_path_cannot_bypass_api_guard(environment):
     client = TestClient(main.app, base_url="https://testserver", root_path="/vitrine")
     try:
-        result = client.get("/vitrine/api/channels")
+        result = client.get("/vitrine/api/settings")
         assert result.status_code == 401
         assert result.headers["cache-control"] == "no-store"
         assert client.get("/vitrine/api/health").json() == {"status": "ok"}
@@ -477,24 +477,18 @@ def test_setup_accepts_browser_http_and_https_with_secure_cookie_default(environ
         assert client.get(root_path + "/api/auth/session").json() == {
             "eingerichtet": True, "angemeldet": False, "benutzer": None, "csrf_token": None,
         }
-        assert client.get(root_path + "/api/channels").status_code == 401
+        assert client.get(root_path + "/api/settings").status_code == 401
         assert client.post(root_path + "/api/auth/setup", json=payload, headers=headers).status_code == 409
         with factory() as db:
             assert db.get(AdminBootstrap, 1) is None
             assert db.scalar(select(AdminSession)) is None
-        # Die Ausnahme zur Einrichtung aendert keine bestehenden Login-Regeln.
-        if base_url.startswith("http:"):
-            assert client.post(root_path + "/api/auth/login", json={"benutzer": "admin", "passwort": "A!abcdef"},
-                               headers=headers).status_code == 403
+        # Beide Protokolle funktionieren ohne nachtraegliche Konfiguration.
+        local_login = client.post(root_path + "/api/auth/login", json={"benutzer": "admin", "passwort": "A!abcdef"},
+                                  headers=headers)
+        assert local_login.status_code == 200
+        assert ("Secure" in local_login.headers["set-cookie"]) == base_url.startswith("https:")
         login = sign_in(secure_client, "A!abcdef")
         assert login.status_code == 200 and "Secure" in login.headers["set-cookie"]
-        if base_url.startswith("http:"):
-            # Auch ein absichtlich mitgesendetes Cookie samt CSRF-Token erlaubt
-            # keine HTTP-Schreibzugriffe auf die bestehende HTTPS-Sitzung.
-            guarded = {**headers, "X-CSRF-Token": login.json()["csrf_token"],
-                       "Cookie": f"{auth.COOKIE_NAME}={secure_client.cookies.get(auth.COOKIE_NAME)}"}
-            assert client.post(root_path + "/api/auth/logout", headers=guarded).status_code == 403
-            assert secure_client.get("/api/auth/session").json()["angemeldet"] is True
     finally:
         client.close()
 
@@ -538,10 +532,10 @@ def test_http_setup_and_login_with_explicit_http_cookie_mode(environment, caplog
         assert login.status_code == 200
         assert "Secure" not in login.headers["set-cookie"]
         assert "HttpOnly" in login.headers["set-cookie"] and "SameSite=strict" in login.headers["set-cookie"]
-        assert client.get("/api/channels").status_code == 200
+        assert client.get("/api/settings").status_code == 200
         assert client.post("/api/auth/logout", headers=headers).status_code == 403
         assert client.post("/api/auth/logout", headers={**headers, "X-CSRF-Token": login.json()["csrf_token"]}).status_code == 204
-        assert client.get("/api/channels").status_code == 401
+        assert client.get("/api/settings").status_code == 401
     finally:
         client.close()
 
@@ -607,7 +601,7 @@ def test_setup_limit_and_root_path(environment, caplog):
         response = client.post("/vitrine/api/auth/setup", content=b"x" * (LOGIN_BODY_LIMIT + 1),
                                headers={**SETUP_HEADERS, "Content-Type": "application/json"})
         assert response.status_code == 413
-        assert client.get("/vitrine/api/channels").status_code == 401
+        assert client.get("/vitrine/api/settings").status_code == 401
         invalid = submit_setup(client, code, "short", path="/vitrine/api/auth/setup")
         assert invalid.status_code == 422 and code not in invalid.text
         assert submit_setup(client, code, path="/vitrine/api/auth/setup").status_code == 204

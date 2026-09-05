@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import { AUFTRAG_TEXT, prozent, vorZeit, wartedauer } from "../lib/format";
 import { Icon } from "../components/Icons";
 import { DownloadPause } from "../components/DownloadPause";
+import { useAdmin } from "../components/Anmeldung";
 import type { WarteschlangenPause } from "../lib/api";
 
 /** Laufende Auftraege aendern sich staendig - hier lohnt haeufiges Auffrischen. */
@@ -21,6 +22,7 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 export function Warteschlangeseite() {
+  const admin = useAdmin();
   const { daten, laedt, fehler, neuLaden } = useApi(() => api.auftraege(), [], INTERVALL);
   const { daten: aktiv, fehler: aktivFehler, neuLaden: aktivNeuLaden } = useApi(() => api.aktiveAuftraege(), [], INTERVALL);
   const [pause, setPause] = useState<WarteschlangenPause>();
@@ -30,6 +32,7 @@ export function Warteschlangeseite() {
   const [beschaeftigt, setBeschaeftigt] = useState(false);
 
   async function ausfuehren(aktion: () => Promise<unknown>) {
+    if (!admin) return;
     setBeschaeftigt(true);
     setAktionsFehler(null);
     try { await aktion(); neuLaden(); }
@@ -67,10 +70,10 @@ export function Warteschlangeseite() {
           {gescheitert.length ? ` · ${gescheitert.length} fehlgeschlagen` : ""}
         </span>
       </div>
-      <DownloadPause pause={pause} aufAenderung={(zustand) => {
+      {admin ? <DownloadPause pause={pause} aufAenderung={(zustand) => {
         setPause(zustand);
         aktivNeuLaden();
-      }} />
+      }} /> : aktiv?.pause?.aktiv ? <Hinweis>Downloads sind pausiert.</Hinweis> : null}
       {aktivFehler ? <Fehler text={`Der Pausenstatus konnte nicht aktualisiert werden: ${aktivFehler}`} erneut={aktivNeuLaden} /> : null}
       <div className="chips" aria-label="Aufträge filtern">
         {[["alle", "Alle"], ["aktiv", "In Arbeit"], ["failed", "Fehlgeschlagen"], ["done", "Abgeschlossen"], ["cancelled", "Abgebrochen"]].map(([wert, text]) => (
@@ -120,7 +123,7 @@ export function Warteschlangeseite() {
         </Hinweis>
       ) : null}
 
-      {gescheitert.length > 1 ? (
+      {admin && gescheitert.length > 1 ? (
         <Hinweis art="fehler">
           <strong>
             {gescheitert.length} Aufträge sind fehlgeschlagen.
@@ -175,11 +178,11 @@ export function Warteschlangeseite() {
                   ) : (
                     (a.titel ?? a.ziel ?? "–")
                   )}
-                  {a.fehler ? (
+                  {admin && a.fehler ? (
                     <div style={{ color: "var(--zu-fehler)", fontSize: 12, marginTop: 3 }}>
                       {a.fehler}
                     </div>
-                  ) : a.meldung ? (
+                  ) : admin && a.meldung ? (
                     <div style={{ color: "var(--text-schwach)", fontSize: 12, marginTop: 3 }}>
                       {a.meldung}
                     </div>
@@ -208,11 +211,11 @@ export function Warteschlangeseite() {
                   {vorZeit(a.erstellt)}
                 </td>
                 <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  {a.status === "failed" ? (
+                  {admin && a.status === "failed" ? (
                     <button className="knopf" disabled={beschaeftigt} onClick={() => void wiederholen(a.id)}>
                       Nochmal
                     </button>
-                  ) : a.status === "pending" || a.status === "running" ? (
+                  ) : admin && (a.status === "pending" || a.status === "running") ? (
                     <button className="knopf" disabled={beschaeftigt} onClick={() => void abbrechen(a.id)}>
                       Abbrechen
                     </button>

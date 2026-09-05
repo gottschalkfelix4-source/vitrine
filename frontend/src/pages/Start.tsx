@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { Fehler, Gitter, Leer, Skelettgitter, Videokachel } from "../components/ui";
 import { useVideostapel } from "../hooks/useApi";
+import { useAdmin } from "../components/Anmeldung";
 
 type Sortierung = "neu" | "alt" | "aufrufe" | "titel";
 
@@ -14,10 +15,11 @@ const SORTIERUNGEN: { wert: Sortierung; text: string }[] = [
 ];
 
 export function Startseite() {
+  const admin = useAdmin();
   const [sortierung, setSortierung] = useState<Sortierung>("neu");
   const [nurOffen, setNurOffen] = useState(false);
 
-  const stapel = useVideostapel({ sortierung, nur_archiviert: !nurOffen });
+  const stapel = useVideostapel({ sortierung, nur_archiviert: !admin || !nurOffen });
 
   return (
     <div className="startseite">
@@ -34,10 +36,10 @@ export function Startseite() {
             {s.text}
           </button>
         ))}
-        <span className="chip-trenner" aria-hidden="true" />
+        {admin ? <><span className="chip-trenner" aria-hidden="true" />
         <button className="chip" data-aktiv={nurOffen} aria-pressed={nurOffen} onClick={() => setNurOffen(!nurOffen)}>
           Auch nicht archivierte
-        </button>
+        </button></> : null}
       </div>
       <div className="start-bestand">{stapel.videos.length} Videos{stapel.ende ? "" : " geladen"} · {nurOffen ? "Alle Archivzustände" : "Zum Ansehen bereit"}</div>
 
@@ -63,7 +65,7 @@ export function Startseite() {
       ) : !stapel.fehler ? (
         <Leer
           titel="Noch nichts im Archiv"
-          text="Nimm einen Kanal auf, dann werden dessen Videos im Hintergrund geladen und erscheinen hier."
+          text={admin ? "Nimm einen Kanal auf, dann werden dessen Videos im Hintergrund geladen und erscheinen hier." : "Hier erscheinen die archivierten Videos, sobald sie zum Ansehen bereit sind."}
           kinder={
             <Link className="knopf" data-art="stark" to="/kanaele">
               Zu den Kanälen

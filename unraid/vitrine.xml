@@ -18,7 +18,7 @@ Zwei Pfade, bewusst getrennt: /data (Datenbank, Vorschaubilder, Heissspeicher) g
 
 Ein Container, SQLite, kein Elasticsearch. Bringt ffmpeg, Deno und yt-dlp mit.
 
-Das gesamte Archiv ist durch einen Admin-Login geschuetzt. Beim ersten Oeffnen erscheint ein Einrichtungsdialog. Den einmaligen Code aus dem Container-Protokoll (Zeile "Vitrine-Einrichtungscode:") dort eintragen und das eigene Passwort festlegen. Nach einem Neustart ohne Administrator gilt ein neuer Code. Ein vorhandenes Passwort bleibt bei Updates erhalten. Fuer oeffentlichen Zugriff eine HTTPS-Adresse am Reverse Proxy verwenden; der Container selbst bietet HTTP auf Port 8000. Ohne eingerichteten Administrator bleibt das Archiv gesperrt. Ein vergessenes Passwort laesst sich in der Container-Konsole mit "gosu archiv python -m app.admin" zuruecksetzen.
+Archivierte Kanaele und Videos sind ohne Anmeldung sichtbar. Einstellungen, neue Kanaele und Verwaltungsaktionen sowie das Stream-Dashboard brauchen einen Admin-Login. Einrichtung und Anmeldung funktionieren ueber HTTP und HTTPS. Unter Anmelden erscheint bei fehlendem Admin ein Einrichtungsdialog: Den einmaligen Code aus dem Container-Protokoll (Zeile "Vitrine-Einrichtungscode:") dort eintragen und das eigene Passwort festlegen. Ein vorhandenes Passwort bleibt bei Updates erhalten. Der Container bietet HTTP auf Port 8000 und kann hinter einem HTTPS-Reverse-Proxy laufen. Der Player transkodiert bei Bedarf live; Streams zeigt dem Admin die aktuellen Zuschauerverbindungen. Ein vergessenes Passwort laesst sich in der Container-Konsole mit "gosu archiv python -m app.admin" zuruecksetzen.
 
 Hinweis zu den Variablen unten: Sie sind Startwerte. Wer dieselbe Einstellung spaeter in der Oberflaeche unter "Einstellungen" aendert, ueberschreibt sie dauerhaft - das Feld hier bewirkt dann nichts mehr. Die Oberflaeche zeigt bei jedem Wert an, woher er kommt, und laesst ihn zurueckstellen.
   </Overview>
@@ -42,7 +42,7 @@ Hinweis zu den Variablen unten: Sie sind Startwerte. Wer dieselbe Einstellung sp
 
   <!-- Netz -->
   <Config Name="Web-Oberflaeche" Target="8000" Default="8000" Mode="tcp" Description="Port der Oberflaeche und der API." Type="Port" Display="always" Required="true" Mask="false">8000</Config>
-  <Config Name="Anmeldung nur ueber HTTPS" Target="YTA_AUTH_COOKIE_SECURE" Default="true" Mode="" Description="Fuer oeffentlichen Zugriff true lassen und HTTPS am Reverse Proxy einrichten. false ist ausschliesslich fuer HTTP im privaten Testnetz gedacht. Admin in der Container-Konsole mit gosu archiv python -m app.admin einrichten." Type="Variable" Display="always" Required="true" Mask="false">true</Config>
+  <Config Name="Vertrauenswuerdige Proxy-IP-Adressen" Target="FORWARDED_ALLOW_IPS" Default="127.0.0.1" Mode="" Description="IP des Reverse Proxys, damit das Stream-Dashboard die Zuschauer-IP erkennt. Nur bekannte Proxy-Adressen eintragen, mehrere mit Kommas trennen. Ohne Proxy beim Standard lassen." Type="Variable" Display="advanced" Required="false" Mask="false">127.0.0.1</Config>
 
   <!-- Pfade -->
   <Config Name="Daten (Cache-Pool)" Target="/data" Default="/mnt/user/appdata/vitrine" Mode="rw" Description="Datenbank, Vorschaubilder, Heissspeicher und Arbeitsverzeichnis. Klein, aber staendig in Benutzung - gehoert auf den Cache-Pool (appdata)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/vitrine</Config>

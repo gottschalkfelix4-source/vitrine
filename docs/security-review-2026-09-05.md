@@ -1,5 +1,9 @@
 # Sicherheitspruefung und Korrekturen vom 5. September 2026
 
+Dieser Bericht dokumentiert auch fruehere Zwischenstaende. Der Betreiber hat
+anschliessend ein oeffentliches Archiv mit geschuetzter Verwaltung angefordert.
+Die aktuell geltenden Zugriffsregeln stehen im letzten Abschnitt und in der README.
+
 Ausgangspunkt war Commit `3a846bb73dd93c8b0c246f125a8ab236350620ff` vor dem
 Admin-Login. Geprueft wurden alle 115 versionierten Textdateien: Backend,
 Frontend, Tests, Container, CI und Dokumentation. Sieben statische PNG-Symbole
@@ -146,3 +150,44 @@ Die HTTP-Einrichtung ist fuer das eigene Netz gedacht: Einrichtungscode und
 Passwort werden dabei unverschluesselt uebertragen. Die Containerpruefung
 sendet jetzt auch den HTTP-Origin eines Browsers, damit dieser Unterschied
 zu einem originlosen Konsolenaufruf bei Updates abgedeckt bleibt.
+
+## Aktueller Stand: oeffentliches Archiv und Admin-Verwaltung
+
+Auf ausdruecklichen Wunsch des Betreibers funktionieren Einrichtung,
+Anmeldung und Nutzung jetzt ueber HTTP und HTTPS. Die fruehere Cookie-Variable
+ist nur noch kompatibilitaetshalber vorhanden. HTTPS verwendet ein Secure-Cookie,
+HTTP einen eigenen Cookie-Namen; beide bleiben HttpOnly und SameSite=Strict.
+Ein validierter HTTPS-Origin erkennt TLS am Reverse Proxy, ohne beliebige
+Forwarded-Header als vertrauenswuerdig zu behandeln. Host-/Portpruefung, CSRF
+fuer Admin-Schreibzugriffe, Passwort-Hashing, Loginlimit und Einmalcode bleiben.
+
+Oeffentliche Leserechte gelten explizit fuer archivierte Kanaele, Playlists,
+Videos, Suche, Vorschaubilder und Untertitel sowie bereinigte Warteschlangen-
+und Speicheransichten. Nicht archivierte Inhalte, Admin-Fortschritt, interne
+Dateipfade, Konfiguration, Fehlermeldungen und VPN-Verbindungsdetails werden
+Gaesten nicht ausgegeben. Gastfortschritt bleibt im Browserspeicher. Settings,
+Kanalaufnahme, Download-/Loeschaktionen und das Stream-Dashboard bleiben
+serverseitig durch Admin-Anmeldung und bei Aenderungen durch CSRF geschuetzt.
+
+Wiedergabe-Sitzungen sind ausdruecklich auch fuer Gaeste verfuegbar. Ihre
+oeffentlichen POST-Aufrufe benoetigen einen Anwendungskopf und passende Herkunft;
+ein zufaelliger Sitzungstoken betrifft jeweils nur einen Player. Das Dashboard
+verraet weder diese Tokens noch Admin-Cookies. Zuschauer-IP und Browser werden
+nur dem Administrator angezeigt. Fuer echte IPs hinter einem Reverse Proxy
+muss dessen konkrete Adresse in `FORWARDED_ALLOW_IPS` stehen.
+
+Die Live-Transkodierung fuehrt keine beliebigen externen Quellen oder
+Nutzereingaben als Befehle aus. FFmpeg liest einen validierten Medienbereich
+des Archivbuendels und kodiert nur angeforderte Sechs-Sekunden-Abschnitte.
+64 Sitzungen, 16 je Gegenadresse, zwei Encoderprozesse, eine Laufzeitgrenze,
+maximale Abschnittsgroesse und ein 64-MiB-LRU-Cache begrenzen den Aufwand.
+Abgebrochene Abschnittsabrufe stoppen ihren Prozess; Sitzungsschluss und
+90 Sekunden ohne Lebenszeichen entfernen die jeweilige Sitzung. Diese
+Kapazitaetsgrenzen begrenzen Last, garantieren aber keine Verfuegbarkeit unter
+beliebiger verteilter Ueberlast. HTTP uebertraegt Zugangsdaten unverschluesselt;
+die oeffentliche TLS-Terminierung liegt wie angefordert beim Reverse Proxy.
+
+Gezielte Pruefungen umfassen HTTP-/HTTPS-Cookiewechsel, Admin-/Gasttrennung,
+Suchfilter vor Trefferbegrenzung, gesperrte Mutationen, getrennten Fortschritt,
+echtes FFmpeg-Lesen aus MP4-/MKV-Buendeln, Spulen zu spaeten Abschnitten,
+parallele Zuschauer, Prozessgrenzen, Abbruch und ablaufende Sitzungen.

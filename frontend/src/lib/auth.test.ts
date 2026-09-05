@@ -30,10 +30,43 @@ function anfrage() {
   return { pfad, init: init!, headers: new Headers(init?.headers) };
 }
 
-describe("Geschützte API-Anfragen", () => {
-  it("fragt vor bestätigter Anmeldung keine Archivdaten ab", async () => {
-    await expect(api.kanaele()).rejects.toMatchObject({ status: 401 });
+describe("Öffentliche und geschützte API-Anfragen", () => {
+  it("erlaubt öffentliche Archivdaten bereits während der Sitzungsprüfung", async () => {
+    netz.mockResolvedValueOnce(Response.json([{ id: "archivierter-kanal" }]));
+    await expect(api.kanaele()).resolves.toEqual([{ id: "archivierter-kanal" }]);
+    expect(anfrage().headers.has("X-CSRF-Token")).toBe(false);
+  });
+
+  it("blockiert ohne Administrator sämtliche gewöhnlichen Änderungen vor dem Netzwerk", async () => {
+    await expect(api.videoEntfernen("testvideo")).rejects.toMatchObject({ status: 401 });
+    await expect(api.einstellungenSpeichern({ download_concurrency: 2 })).rejects.toMatchObject({ status: 401 });
     expect(netz).not.toHaveBeenCalled();
+  });
+
+  it("kennzeichnet ausdrücklich öffentliche Wiedergabe-POSTs auch ohne Anmeldung", async () => {
+    netz.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await authFetch("/api/playback/start", { method: "POST", keepalive: true }, true);
+    expect(anfrage().headers.get("X-Vitrine-Request")).toBe("1");
+    expect(anfrage().headers.has("X-CSRF-Token")).toBe(false);
+    expect(anfrage().init).toMatchObject({ credentials: "same-origin", cache: "no-store", keepalive: true });
+  });
+
+  it("erhält laufende Gastantworten während einer gewöhnlichen Sitzungsprüfung", async () => {
+    let antwort!: (r: Response) => void;
+    netz.mockReturnValueOnce(new Promise((resolve) => { antwort = resolve; }));
+    const oeffentlich = api.kanaele();
+    netz.mockResolvedValueOnce(Response.json({ ...sitzung, angemeldet: false, benutzer: null, csrf_token: null }));
+    await auth.pruefen();
+    antwort(Response.json([{ id: "archivierter-kanal" }]));
+    await expect(oeffentlich).resolves.toEqual([{ id: "archivierter-kanal" }]);
+  });
+
+  it("hält das öffentliche Archiv auch nach fehlgeschlagener Sitzungsprüfung erreichbar", async () => {
+    netz.mockRejectedValueOnce(new TypeError("offline"));
+    await auth.pruefen();
+    netz.mockResolvedValueOnce(Response.json([]));
+    await expect(api.kanaele()).resolves.toEqual([]);
+    expect(auth.zustand().art).toBe("fehler");
   });
 
   it("sendet Login mit Browser-Origin-Kennzeichnung und ohne gespeicherte Zugangsdaten", async () => {
@@ -217,7 +250,7 @@ describe("Einmalige Administratoreinrichtung", () => {
     expect(auth.zustand()).toMatchObject({ benutzerVorschlag: "test-admin", sitzung: bereit });
     expect(auth.zustand().meldung).toContain("Administrator eingerichtet");
     expect(speichern).not.toHaveBeenCalled();
-    await expect(api.kanaele()).rejects.toMatchObject({ status: 401 });
+    await expect(api.videoEntfernen("testvideo")).rejects.toMatchObject({ status: 401 });
   });
 
   it("bestätigt weder falsche Codes noch fehlgeschlagene Verbindungen als Einrichtung", async () => {

@@ -38,6 +38,7 @@ def sitzungen(tmp_path):
 def client(sitzungen):
     app = FastAPI()
     app.include_router(library.router)
+    app.dependency_overrides[library.administrator] = lambda: True
 
     def sitzung():
         with sitzungen() as db:

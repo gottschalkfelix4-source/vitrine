@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { Fortschrittsleiste } from "./components/Fortschritt";
-import { Abmelden, AnmeldeSchranke } from "./components/Anmeldung";
+import { Abmelden, Anmeldung, AnmeldeSchranke, Sitzungsverwaltung, useAdmin, useAnmeldung } from "./components/Anmeldung";
 import { Icon, type IconName } from "./components/Icons";
 import { KanalAvatar, KanalKontext } from "./components/KanalAvatar";
 import { api } from "./lib/api";
@@ -15,6 +15,7 @@ import { Kanaeleseite } from "./pages/Kanaele";
 import { Playlistseite } from "./pages/Playlist";
 import { Speicherseite } from "./pages/Speicher";
 import { Startseite } from "./pages/Start";
+import { Streamsseite } from "./pages/Streams";
 import { Suchseite } from "./pages/Suche";
 import { Warteschlangeseite } from "./pages/Warteschlange";
 import { Wiedergabeseite } from "./pages/Wiedergabe";
@@ -26,6 +27,7 @@ function Kopfleiste({ aufLeiste, leisteOffen, aufKanalAnlegen }: {
   leisteOffen: boolean;
   aufKanalAnlegen: () => void;
 }) {
+  const admin = useAdmin();
   const navigate = useNavigate();
   const ort = useLocation();
   const [text, setText] = useState("");
@@ -89,15 +91,17 @@ function Kopfleiste({ aufLeiste, leisteOffen, aufKanalAnlegen }: {
         <button ref={sucheOeffnen} className="symbol-knopf mobile-suche" aria-label="Suche öffnen" onClick={() => setSucheOffen(true)}>
           <Icon name="search" />
         </button>
-        <button className="knopf kanal-hinzufuegen" onClick={aufKanalAnlegen} aria-label="Kanal aufnehmen">
+        {admin ? <button className="knopf kanal-hinzufuegen" onClick={aufKanalAnlegen} aria-label="Kanal aufnehmen">
           <Icon name="plus" /><span>Kanal aufnehmen</span>
-        </button>
+        </button> : null}
         <button className="symbol-knopf thema-knopf" onClick={() => setHell(!hell)}
           aria-label={hell ? "Dunkles Design aktivieren" : "Helles Design aktivieren"}
           title={hell ? "Dunkles Design" : "Helles Design"}>
           <Icon name={hell ? "moon" : "sun"} />
         </button>
-        <Abmelden />
+        {admin ? <Abmelden /> : <Link to="/anmelden" className="knopf abmelden-knopf" aria-label="Als Administrator anmelden" title="Anmelden">
+          <Icon name="login" /><span>Anmelden</span>
+        </Link>}
       </div>
     </header>
   );
@@ -110,6 +114,7 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
   aufSchliessen: () => void;
   dialogOffen: boolean;
 }) {
+  const admin = useAdmin();
   const ort = useLocation();
   const kanaele = useContext(KanalKontext);
   const { daten: auftraege } = useApi(() => api.auftraege(), [], LEISTE_INTERVALL);
@@ -123,6 +128,7 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
     { titel: "Dein Archiv", punkte: [
       { pfad: "/warteschlange", icon: "queue", text: "Warteschlange", zahl: offen || undefined },
       { pfad: "/speicher", icon: "storage", text: "Speicher" },
+      ...(admin ? [{ pfad: "/streams", icon: "play" as const, text: "Streams" }] : []),
     ] },
   ];
 
@@ -167,22 +173,28 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
           <span className="nav-kanalname">{k.name}</span>
         </Link>)}
       </div> : null}
-      <div className="leiste-gruppe">
+      {admin ? <div className="leiste-gruppe">
         <Link to="/einstellungen" onClick={aufSchliessen} className="nav-punkt"
           data-aktiv={ort.pathname === "/einstellungen"} aria-current={ort.pathname === "/einstellungen" ? "page" : undefined}
           title="Einstellungen">
           <Icon name="settings" className="zeichen" /><span>Einstellungen</span>
         </Link>
-      </div>
+      </div> : null}
     </nav>
   );
 }
 
 export default function App() {
-  return <AnmeldeSchranke><Archiv /></AnmeldeSchranke>;
+  return <Sitzungsverwaltung><Archiv /></Sitzungsverwaltung>;
+}
+
+function Anmeldeseite() {
+  const zustand = useAnmeldung();
+  return zustand.sitzung?.angemeldet ? <Navigate to="/" replace /> : <Anmeldung key={zustand.wechsel} zustand={zustand} />;
 }
 
 function Archiv() {
+  const admin = useAdmin();
   const ort = useLocation();
   const aufWiedergabe = ort.pathname.startsWith("/video/");
   const [vonHand, setVonHand] = useState<boolean | null>(null);
@@ -195,6 +207,7 @@ function Archiv() {
   const inhalt = useRef<HTMLElement>(null);
   const dialogAusloeser = useRef<HTMLElement | null>(null);
   function kanalDialogOeffnen() {
+    if (!admin) return;
     dialogAusloeser.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setDialogOffen(true);
   }
@@ -224,7 +237,7 @@ function Archiv() {
         <Seitenleiste schmal={schmal} handbetrieb={handbetrieb} dialogOffen={dialogOffen}
           schubladeOffen={handbetrieb && schubladeOffen} aufSchliessen={() => setSchubladeOffen(false)} />
         <main id="inhalt" className="inhalt" ref={inhalt} tabIndex={-1} inert={schubladeOffen || dialogOffen}>
-          <Fortschrittsleiste />
+          {admin ? <Fortschrittsleiste /> : null}
           <Routes>
             <Route path="/" element={<Startseite />} />
             <Route path="/kanaele" element={<Kanaeleseite aufAnlegen={kanalDialogOeffnen} />} />
@@ -234,11 +247,13 @@ function Archiv() {
             <Route path="/suche" element={<Suchseite />} />
             <Route path="/warteschlange" element={<Warteschlangeseite />} />
             <Route path="/speicher" element={<Speicherseite />} />
-            <Route path="/einstellungen" element={<Einstellungenseite />} />
+            <Route path="/anmelden" element={<Anmeldeseite />} />
+            <Route path="/einstellungen" element={<AnmeldeSchranke><Einstellungenseite /></AnmeldeSchranke>} />
+            <Route path="/streams" element={<AnmeldeSchranke><Streamsseite /></AnmeldeSchranke>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
-        {dialogOffen ? <KanalAnlegenDialog aufSchliessen={kanalDialogSchliessen} /> : null}
+        {admin && dialogOffen ? <KanalAnlegenDialog aufSchliessen={kanalDialogSchliessen} /> : null}
       </div>
     </KanalKontext.Provider>
   );

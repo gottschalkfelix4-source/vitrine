@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { Fehler, Gitter, Hinweis, Leer, Skelettgitter, Videokachel } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { useAdmin } from "../components/Anmeldung";
 import { useApi, useVideostapel } from "../hooks/useApi";
 import type { AlleLadenErgebnis, Sammlung } from "../lib/api";
 import { api, thumbUrl } from "../lib/api";
@@ -46,6 +47,7 @@ const ART_TEXT: Record<Sammlung["art"], string> = {
 type Tab = "videos" | "shorts" | "live" | "playlists";
 
 export function Kanalseite() {
+  const admin = useAdmin();
   const { kanalId = "" } = useParams();
   const navigate = useNavigate();
   const [suchparameter, setSuchparameter] = useSearchParams();
@@ -65,7 +67,7 @@ export function Kanalseite() {
   const [aktionsFehler, setAktionsFehler] = useState<string | null>(null);
 
   const kanal = useApi(() => api.kanal(kanalId), [kanalId]);
-  const offene = useApi(() => api.kanalOffene(kanalId), [kanalId]);
+  const offene = useApi(() => admin ? api.kanalOffene(kanalId) : Promise.resolve(null), [kanalId, admin]);
 
   // Die Videos kommen serverseitig gefiltert und seitenweise. Der Filter
   // MUSS auf dem Server liegen: Wer Seite fuer Seite laedt und erst im Browser
@@ -73,7 +75,7 @@ export function Kanalseite() {
   const stapel = useVideostapel({
     kanal: kanalId,
     art: tab === "playlists" ? "videos" : tab,
-    nur_archiviert: false,
+    nur_archiviert: !admin,
     sortierung,
   });
 
@@ -92,6 +94,7 @@ export function Kanalseite() {
           : d.zaehler.videos;
 
   async function abgleichen() {
+    if (!admin) return;
     setAbgleichLaeuft(true);
     setAktionsFehler(null);
     try {
@@ -155,7 +158,7 @@ export function Kanalseite() {
                 </button>
               </div>
             ) : null}
-          <div className="aktionen kanal-aktionen">
+          {admin ? <div className="aktionen kanal-aktionen">
             {offene.daten && offene.daten.anzahl > 0 ? (
               ladenNachfrage ? (
                 <>
@@ -202,7 +205,7 @@ export function Kanalseite() {
             <button className="knopf" data-art="gefahr" onClick={() => setEntfernenOffen(true)}>
               Entfernen
             </button>
-          </div>
+          </div> : null}
           </div>
         </div>
       </div>
@@ -293,13 +296,13 @@ export function Kanalseite() {
           ) : !stapel.fehler ? (
             <Leer
               titel="Hier ist noch nichts"
-              text="Sobald der Abgleich durch ist, erscheinen die Videos dieses Kanals hier."
+              text={admin ? "Sobald der Abgleich durch ist, erscheinen die Videos dieses Kanals hier." : "In dieser Ansicht gibt es noch keine archivierten Videos."}
             />
           ) : null}
         </div>
       )}
 
-      {entfernenOffen ? (
+      {admin && entfernenOffen ? (
         <KanalEntfernenDialog
           kanalId={kanalId}
           name={d.kanal.name}

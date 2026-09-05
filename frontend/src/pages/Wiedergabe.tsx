@@ -4,13 +4,16 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Icon } from "../components/Icons";
 import { KanalAvatar } from "../components/KanalAvatar";
 import { Player } from "../components/Player";
+import { useAdmin } from "../components/Anmeldung";
 import { Fehler, Gitter, Skelettgitter, Videokachel, Zustand } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
+import { lokalFortschrittLesen } from "../lib/wiedergabeFortschritt";
 import { aufrufe, bytes, dauer, datum, istHochaufloesend, prozent, qualitaet } from "../lib/format";
 import "../styles/watch.css";
 
 export function Wiedergabeseite() {
+  const admin = useAdmin();
   const { videoId = "" } = useParams();
   const [parameter] = useSearchParams();
   const sprungparameter = parameter.get("t");
@@ -50,6 +53,7 @@ export function Wiedergabeseite() {
   }
 
   const { video: v, technik, kapitel, untertitel, beschreibung, in_playlists, statusmeldung } = detail.daten;
+  const lokal = admin ? null : lokalFortschrittLesen(videoId);
   const guete = qualitaet(technik.breite, technik.hoehe, technik.fps);
   const ersparnis = technik.quelle_bytes && technik.buendel_bytes
     ? 1 - technik.buendel_bytes / technik.quelle_bytes : null;
@@ -66,6 +70,7 @@ export function Wiedergabeseite() {
   }
 
   async function entfernen() {
+    if (!admin) return;
     setEntfernenLaeuft(true);
     setEntfernenFehler(null);
     try {
@@ -84,7 +89,7 @@ export function Wiedergabeseite() {
         <Player
           key={videoId}
           videoId={videoId}
-          startSekunde={v.fortschritt_s}
+          startSekunde={admin ? v.fortschritt_s : lokal?.sekunden ?? 0}
           sprungSekunde={sprungSekunde}
           dauerS={v.dauer_s}
           poster={v.bild ?? undefined}
@@ -107,11 +112,11 @@ export function Wiedergabeseite() {
             </Link>
           ) : null}
           <div className="watch-aktionen">
-            {v.gesehen ? <span className="watch-gesehen"><Icon name="check" size={20} />Gesehen</span> : null}
+            {(admin ? v.gesehen : lokal?.gesehen) ? <span className="watch-gesehen"><Icon name="check" size={20} />Gesehen</span> : null}
             <button className="knopf" onClick={() => setTechnikOffen(!technikOffen)} aria-expanded={technikOffen} aria-controls="watch-technik">
               <Icon name="info" size={20} />Technik
             </button>
-            {v.status === "archived" ? (
+            {admin && v.status === "archived" ? (
               <button className="knopf" onClick={() => setEntfernenNachfrage(!entfernenNachfrage)} aria-label="Aus dem Archiv entfernen" aria-expanded={entfernenNachfrage} aria-controls="watch-entfernen">
                 <Icon name="trash" size={20} />Entfernen
               </button>
@@ -119,7 +124,7 @@ export function Wiedergabeseite() {
           </div>
         </div>
 
-        {entfernenNachfrage ? (
+        {admin && entfernenNachfrage ? (
           <div className="watch-entfernen" id="watch-entfernen">
             <p><strong>Video aus dem Archiv entfernen?</strong><br />Die Dateien werden gelöscht. Der Eintrag bleibt beim Kanal.</p>
             {entfernenFehler ? <div role="alert" className="watch-fehler">{entfernenFehler}</div> : null}
@@ -148,7 +153,7 @@ export function Wiedergabeseite() {
             {beschreibung || "Keine Beschreibung vorhanden."}
           </div>
           {beschreibung ? <button className="watch-mehr" onClick={() => setBeschreibungOffen(!beschreibungOffen)} aria-expanded={beschreibungOffen} aria-controls="watch-beschreibung-text">{beschreibungOffen ? "Weniger anzeigen" : "Mehr anzeigen"}</button> : null}
-          {statusmeldung ? <p className="watch-statusmeldung">{statusmeldung}</p> : null}
+          {admin && statusmeldung ? <p className="watch-statusmeldung">{statusmeldung}</p> : null}
         </section>
 
         {technikOffen ? (

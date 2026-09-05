@@ -19,11 +19,13 @@ export class ApiFehler extends Error {
 
 let zustand: Anmeldezustand = { art: "pruefen", sitzung: null, meldung: null, wechsel: 0 };
 let generation = 0;
+let rollenGeneration = 0;
 let einrichtungLaeuft = false;
 const horcher = new Set<() => void>();
 const ABMELDE_EREIGNIS = "vitrine-abmeldung";
 
 function setzen(neu: Anmeldezustand) {
+  if ((zustand.sitzung?.csrf_token ?? null) !== (neu.sitzung?.csrf_token ?? null)) rollenGeneration++;
   zustand = neu;
   horcher.forEach((h) => h());
 }
@@ -47,17 +49,19 @@ function verwerfen(meldung: string | null, verbreiten = false) {
 
 /** Alle API-Aufrufe, auch multipart, Range und keepalive, gehen hier durch. */
 export async function authFetch(pfad: string, init: RequestInit = {}, oeffentlich = false): Promise<Response> {
-  const lauf = generation;
+  const rolle = rollenGeneration;
   const token = zustand.sitzung?.csrf_token;
-  if (!oeffentlich && !token) throw new ApiFehler(401, "Bitte melde dich erneut an.");
+  const veraendert = !["GET", "HEAD", "OPTIONS"].includes((init.method ?? "GET").toUpperCase());
+  if (!oeffentlich && veraendert && !token) throw new ApiFehler(401, "Bitte melde dich erneut an.");
   const headers = new Headers(init.headers);
-  if (!oeffentlich && !["GET", "HEAD", "OPTIONS"].includes((init.method ?? "GET").toUpperCase())) {
-    headers.set("X-CSRF-Token", token!);
+  if (veraendert) {
+    if (oeffentlich) headers.set("X-Vitrine-Request", "1");
+    else headers.set("X-CSRF-Token", token!);
   }
   const antwort = await fetch(pfad, { ...init, headers, credentials: "same-origin", cache: "no-store" });
-  if (!oeffentlich && lauf !== generation) throw new ApiFehler(401, "Die Sitzung wurde beendet.");
+  if (!oeffentlich && rolle !== rollenGeneration) throw new ApiFehler(401, "Die Sitzung wurde geändert.");
   if (!oeffentlich && antwort.status === 401) {
-    verwerfen("Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.", true);
+    if (token) verwerfen("Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.", true);
     throw new ApiFehler(401, "Bitte melde dich erneut an.");
   }
   return antwort;
@@ -86,7 +90,8 @@ function uebernehmen(sitzung: Sitzung) {
       meldung: zustand.sitzung?.angemeldet ? "Deine Sitzung ist abgelaufen. Bitte melde dich erneut an." : zustand.meldung,
       wechsel: zustand.wechsel + (wechsel ? 1 : 0), benutzerVorschlag: zustand.benutzerVorschlag });
   } else {
-    setzen({ art: "bereit", sitzung, meldung: null, wechsel: zustand.wechsel });
+    const wechsel = zustand.sitzung?.csrf_token !== sitzung.csrf_token;
+    setzen({ art: "bereit", sitzung, meldung: null, wechsel: zustand.wechsel + (wechsel ? 1 : 0) });
   }
 }
 

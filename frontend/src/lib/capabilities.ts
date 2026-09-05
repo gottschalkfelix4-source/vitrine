@@ -7,11 +7,7 @@
  *
  * Das Ergebnis geht als `support`-Parameter an den Stream-Endpunkt. Kann der
  * Client den Archivcodec, kommen die Bytes direkt aus dem Buendel; sonst wird
- * eine Heisskopie vorbereitet.
- *
- * Groessenordnung: Rund 91 % der Sitzungen koennen AV1. Der Umweg ueber die
- * Heisskopie ist also die Ausnahme - im Wesentlichen aeltere Apple-Geraete und
- * alte Fernseher.
+ * die Wiedergabe in kurzen Abschnitten live transkodiert.
  */
 
 /** Pruefstrings: Merkmal -> die MIME-Typen, mit denen wir es abklopfen. */

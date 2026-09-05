@@ -25,7 +25,7 @@ from app.api import auth, cookies, hardware, library, stream, vpn
 from app.config import settings
 from app.db import init_db, session_scope
 from app.security import SecurityMiddleware
-from app.services import abbruch, cache, einstellungen, jobs
+from app.services import abbruch, cache, einstellungen, jobs, live_streams
 from app.services import auth as auth_dienst
 from app.services import vpn as vpn_dienst
 from app.workers.runner import werk
@@ -123,6 +123,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     abbruch.zuruecksetzen()
     init_db()
     auth_dienst.prepare_bootstrap()
+    live_streams.manager.start()
     with session_scope() as db:
         # Muss VOR allem anderen laufen: Was in der Oberflaeche eingestellt
         # wurde, gewinnt ueber Umgebung und Standard - und die Arbeiter lesen
@@ -158,6 +159,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # waere die Wartezeit sicher vergeblich.
     abbruch.anfordern()
     _stop.set()
+    live_streams.manager.close()
     werk.stop()
     # Erst nach den Arbeitern: Ein Strang, der gerade noch einen Download
     # sauber abschliesst, braucht seinen Tunnel bis zuletzt.
@@ -201,6 +203,7 @@ async def validation_error(request: Request, error: RequestValidationError) -> R
 
 app.include_router(auth.router)
 app.include_router(stream.router)
+app.include_router(stream.playback_router)
 app.include_router(cookies.router)
 app.include_router(vpn.router)
 app.include_router(hardware.router)

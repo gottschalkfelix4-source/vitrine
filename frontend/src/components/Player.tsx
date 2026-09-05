@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icon } from "./Icons";
 import type { Kapitel } from "../lib/api";
-import { api, streamUrl, untertitelUrl } from "../lib/api";
-import { authFetch } from "../lib/auth";
-import { dauer, prozent } from "../lib/format";
+import { api, untertitelUrl } from "../lib/api";
+import { useAdmin } from "./Anmeldung";
+import { ApiFehler } from "../lib/auth";
+import { dauer } from "../lib/format";
+import { lokalFortschrittMerken } from "../lib/wiedergabeFortschritt";
+import { wiedergabeStarten, wiedergabeMelden, wiedergabeBeenden, type Wiedergabesitzung } from "../lib/wiedergabe";
 import {
   istVollbild,
   vollbildUmschalten as umschaltenVollbild,
@@ -22,15 +25,13 @@ import {
  * sich an der Bildschirmhoehe orientiert.
  *
  * Die Quelle ist nicht immer sofort da: Kann der Browser den Archivcodec, kommt
- * das Video direkt aus dem Buendel. Sonst antwortet der Server mit 202 und
- * bereitet im Hintergrund eine Heisskopie vor - dann zeigen wir den
- * Fortschritt, statt den Nutzer vor einem schwarzen Bild sitzen zu lassen.
+ * das Video direkt aus dem Buendel. Andernfalls liefert der Server kurze
+ * HLS-Abschnitte, die erst beim Abruf live transkodiert werden.
  */
 
 type Lage =
   | { art: "pruefen" }
-  | { art: "bereit"; quelle: string; modus: string | null }
-  | { art: "vorbereitung"; grund: string; anteil: number }
+  | { art: "bereit"; quelle: string; modus: "direct" | "transcode"; sitzung: Wiedergabesitzung }
   | { art: "fehler"; text: string };
 
 interface Props {
@@ -50,7 +51,7 @@ interface Props {
 /** Wie oft der Player meldet, dass noch geschaut wird. Deutlich haeufiger als
  *  die serverseitige Lease lang ist, damit ein verlorener Herzschlag nicht
  *  gleich zum Abraeumen fuehrt. */
-const HERZSCHLAG_MS = 30_000;
+const HERZSCHLAG_MS = 15_000;
 const FORTSCHRITT_MS = 5_000;
 /** Nach so viel Ruhe verschwindet die Steuerung waehrend der Wiedergabe. */
 const AUSBLENDEN_MS = 2600;
@@ -107,8 +108,13 @@ export function Player({
   theater = false,
   aufTheater,
 }: Props) {
+  const admin = useAdmin();
+  const adminRef = useRef(admin);
+  adminRef.current = admin;
   const [lage, setLage] = useState<Lage>({ art: "pruefen" });
   const [ladeVersuch, setLadeVersuch] = useState(0);
+  const [transkodieren, setTranskodieren] = useState(false);
+  const wiederaufnahme = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const huelleRef = useRef<HTMLDivElement>(null);
   const leisteRef = useRef<HTMLDivElement>(null);
@@ -133,55 +139,70 @@ export function Player({
   // ---- Quelle beschaffen -------------------------------------------------
   useEffect(() => {
     let abgebrochen = false;
-    let versuch = 0;
-    let zeitgeber: number | undefined;
-    const controller = new AbortController();
+    let sitzung: Wiedergabesitzung | null = null;
     gesprungen.current = false;
     setLage({ art: "pruefen" });
 
-    async function antasten(): Promise<void> {
+    async function oeffnen(): Promise<void> {
       try {
-        // Nur das erste Byte anfordern: Das reicht, um zu erfahren, ob
-        // ausgeliefert wird oder erst vorbereitet werden muss.
-        const antwort = await authFetch(streamUrl(videoId), { headers: { Range: "bytes=0-0" }, signal: controller.signal });
-        if (abgebrochen) return;
-
-        if (antwort.status === 202) {
-          const koerper = await antwort.json();
-          if (abgebrochen) return;
-          setLage({
-            art: "vorbereitung",
-            grund: koerper.grund ?? "wird vorbereitet",
-            anteil: koerper.fortschritt ?? 0,
-          });
-          const wartezeit = Math.min(5000, 1000 + versuch * 500);
-          versuch += 1;
-          zeitgeber = window.setTimeout(() => void antasten(), wartezeit);
+        sitzung = await wiedergabeStarten(videoId, transkodieren);
+        if (abgebrochen) {
+          void wiedergabeBeenden(sitzung.token).catch(() => {});
           return;
         }
-        if (!antwort.ok && antwort.status !== 206) {
-          const koerper = await antwort.json().catch(() => ({}));
-          if (abgebrochen) return;
-          setLage({ art: "fehler", text: koerper.detail ?? `Fehler ${antwort.status}` });
-          return;
-        }
-        setLage({
-          art: "bereit",
-          quelle: streamUrl(videoId),
-          modus: antwort.headers.get("X-Wiedergabe-Modus"),
-        });
+        setLage({ art: "bereit", quelle: sitzung.url, modus: sitzung.mode, sitzung });
       } catch (e) {
         if (!abgebrochen) setLage({ art: "fehler", text: e instanceof Error ? e.message : String(e) });
       }
     }
 
-    void antasten();
+    void oeffnen();
     return () => {
       abgebrochen = true;
-      controller.abort();
-      window.clearTimeout(zeitgeber);
+      if (sitzung) void wiedergabeBeenden(sitzung.token).catch(() => {});
     };
-  }, [videoId, ladeVersuch]);
+  }, [videoId, ladeVersuch, transkodieren]);
+
+  // Bei Bedarf werden nur angeforderte Abschnitte umgewandelt. Der Browser
+  // kann deshalb sofort beginnen und später auch weit nach vorne springen.
+  useEffect(() => {
+    if (lage.art !== "bereit") return;
+    const el = videoRef.current;
+    if (!el) return;
+    let geschlossen = false;
+    let entfernen: (() => void) | undefined;
+    if (lage.modus === "direct") {
+      el.src = lage.quelle;
+    } else if (el.canPlayType("application/vnd.apple.mpegurl")) {
+      el.src = lage.quelle;
+    } else {
+      void import("hls.js").then(({ default: Hls }) => {
+        if (geschlossen) return;
+        if (!Hls.isSupported()) {
+          setLage({ art: "fehler", text: "Dieser Browser unterstützt die Live-Wiedergabe nicht. Bitte verwende einen aktuellen Browser." });
+          return;
+        }
+        const hls = new Hls({ enableWorker: false, maxBufferLength: 12, maxMaxBufferLength: 18,
+          backBufferLength: 12, startPosition: wiederaufnahme.current ?? sprungSekunde ?? startSekunde,
+          fragLoadPolicy: { default: { ...Hls.DefaultConfig.fragLoadPolicy.default,
+            maxTimeToFirstByteMs: 90_000, maxLoadTimeMs: 120_000 } },
+        });
+        entfernen = () => hls.destroy();
+        hls.on(Hls.Events.ERROR, (_ereignis, daten) => {
+          if (geschlossen || !daten.fatal) return;
+          wiederaufnahme.current = el.currentTime || null;
+          setLage({ art: "fehler", text: "Die Live-Wiedergabe wurde unterbrochen. Bitte versuche es erneut." });
+        });
+        hls.attachMedia(el);
+        hls.loadSource(lage.quelle);
+      }).catch(() => {
+        if (!geschlossen) setLage({ art: "fehler", text: "Der Player konnte nicht geladen werden. Bitte versuche es erneut." });
+      });
+    }
+    return () => { geschlossen = true; entfernen?.(); el.pause(); el.removeAttribute("src"); el.load(); };
+    // Ein Kapitelwechsel spult die bestehende Sitzung, statt sie neu aufzubauen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lage]);
 
   // ---- Medienereignisse --------------------------------------------------
   useEffect(() => {
@@ -198,12 +219,13 @@ export function Player({
       setHochkant(el.videoHeight > el.videoWidth);
       // Nur einmal an die gemerkte Stelle springen, nicht bei jedem
       // erneuten Puffern - sonst zieht es den Nutzer beim Spulen zurueck.
-      const start = sprungSekunde ?? startSekunde;
+      const start = wiederaufnahme.current ?? sprungSekunde ?? startSekunde;
       if (!gesprungen.current && Number.isFinite(start) && start > 0) {
         el.currentTime = Number.isFinite(el.duration) ? Math.min(start, el.duration) : start;
         setZeit(el.currentTime);
       }
       gesprungen.current = true;
+      wiederaufnahme.current = null;
     };
     const beiZeit = () => {
       if (!zieht.current) setZeit(el.currentTime);
@@ -275,65 +297,73 @@ export function Player({
     const el = videoRef.current;
     if (!el) return;
 
-    let herz: number | undefined;
-    let merken: number | undefined;
+    const token = lage.sitzung.token;
+    let beendet = false;
+    let erneuert = false;
+    const erneuern = () => {
+      if (erneuert) return;
+      erneuert = true;
+      wiederaufnahme.current = el.currentTime;
+      setLadeVersuch((n) => n + 1);
+    };
     const fortschrittSpeichern = (beimVerlassen = false) => {
       if (!Number.isFinite(el.currentTime) || el.readyState < 1) return;
-      const anfrage = api.fortschrittMerken(videoId, el.currentTime, undefined, beimVerlassen);
-      void anfrage.catch(() => { /* Beim nächsten Ereignis erneut speichern. */ });
+      if (adminRef.current) {
+        void api.fortschrittMerken(videoId, el.currentTime, el.ended || undefined, beimVerlassen).catch(() => {});
+      } else lokalFortschrittMerken(videoId, el.currentTime, el.ended || undefined);
     };
     const herzschlag = () => {
-      void api.herzschlag(videoId).catch(() => { /* Nächster Herzschlag folgt. */ });
+      if (beendet) return;
+      const status = el.paused ? "paused" : el.readyState < 3 ? "buffering" : "playing";
+      void wiedergabeMelden(token, el.currentTime, status).catch((e) => {
+        // Ein lange angehaltener Hintergrundtab kann seine Server-Lease
+        // verlieren. Seine Wiedergabe wird an derselben Position erneuert.
+        if (!beendet && e instanceof ApiFehler && e.status === 404) erneuern();
+      });
     };
     const starten = () => {
-      if (herz === undefined) {
-        herzschlag();
-        herz = window.setInterval(herzschlag, HERZSCHLAG_MS);
-      }
-      if (merken === undefined) {
-        merken = window.setInterval(fortschrittSpeichern, FORTSCHRITT_MS);
-      }
-    };
-    const anhalten = () => {
-      if (herz !== undefined) window.clearInterval(herz);
-      if (merken !== undefined) window.clearInterval(merken);
-      herz = merken = undefined;
+      if (beendet) { erneuern(); return; }
+      herzschlag();
     };
     const pausieren = () => {
-      anhalten();
       fortschrittSpeichern();
+      herzschlag();
     };
     const beenden = (beimVerlassen = false) => {
-      anhalten();
+      if (beendet) return;
+      beendet = true;
       fortschrittSpeichern(beimVerlassen);
-      void api.wiedergabeBeendet(videoId).catch(() => { /* Lease läuft serverseitig ab. */ });
+      void wiedergabeBeenden(token).catch(() => { /* Sitzung läuft auch ohne Abschlussmeldung ab. */ });
     };
     const amEnde = () => beenden();
     const beimVerlassen = () => beenden(true);
-    const beimZurueckkehren = () => { if (!el.paused && !el.ended) starten(); };
-    const nachSprung = () => { if (el.paused) fortschrittSpeichern(); };
+    const beimZurueckkehren = (e: PageTransitionEvent) => { if (e.persisted) setLadeVersuch((n) => n + 1); };
+    const nachSprung = () => { fortschrittSpeichern(); if (beendet) erneuern(); else herzschlag(); };
+    const herz = window.setInterval(herzschlag, HERZSCHLAG_MS);
+    const merken = window.setInterval(() => { if (!el.paused) fortschrittSpeichern(); }, FORTSCHRITT_MS);
     el.addEventListener("play", starten);
     el.addEventListener("pause", pausieren);
+    el.addEventListener("waiting", herzschlag);
+    el.addEventListener("playing", herzschlag);
     el.addEventListener("seeked", nachSprung);
     el.addEventListener("ended", amEnde);
     window.addEventListener("pagehide", beimVerlassen);
     window.addEventListener("pageshow", beimZurueckkehren);
-    if (!el.paused) starten();
+    herzschlag();
     return () => {
+      window.clearInterval(herz);
+      window.clearInterval(merken);
       el.removeEventListener("play", starten);
       el.removeEventListener("pause", pausieren);
+      el.removeEventListener("waiting", herzschlag);
+      el.removeEventListener("playing", herzschlag);
       el.removeEventListener("seeked", nachSprung);
       el.removeEventListener("ended", amEnde);
       window.removeEventListener("pagehide", beimVerlassen);
       window.removeEventListener("pageshow", beimZurueckkehren);
       beenden(true);
-      // Auch ein noch referenziertes, entferntes Video darf nach einer
-      // Abmeldung weder weiterspielen noch seinen Medienpuffer behalten.
-      el.pause();
-      el.removeAttribute("src");
-      el.load();
     };
-  }, [lage.art, videoId]);
+  }, [lage, videoId]);
 
   // ---- Kapitel mitverfolgen ---------------------------------------------
   useEffect(() => {
@@ -554,26 +584,6 @@ export function Player({
     );
   }
 
-  if (lage.art === "vorbereitung") {
-    return (
-      <div className="buehne">
-        <div className="buehne-meldung" role="status">
-          <Icon name="play" className="player-meldung-icon" size={36} />
-          <h2>Video wird vorbereitet</h2>
-          <p>
-            {lage.grund}. Das passiert nur beim ersten Abspielen auf diesem Gerät.
-          </p>
-          <div className="balken" style={{ margin: "0 auto", maxWidth: 240 }}>
-            <span style={{ width: `${Math.max(4, lage.anteil * 100)}%` }} />
-          </div>
-          <div style={{ color: "#aaa", fontSize: 12, marginTop: 8 }}>
-            {prozent(lage.anteil)}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (lage.art === "fehler") {
     return (
       <div className="buehne">
@@ -582,6 +592,7 @@ export function Player({
           <h2>Wiedergabe nicht möglich</h2>
           <p>{lage.text}</p>
           <button className="knopf player-erneut" onClick={() => setLadeVersuch((n) => n + 1)}>Erneut versuchen</button>
+          {!transkodieren ? <button className="knopf player-erneut" onClick={() => setTranskodieren(true)}>Mit Live-Transkodierung versuchen</button> : null}
         </div>
       </div>
     );
@@ -608,7 +619,6 @@ export function Player({
     >
       <video
         ref={videoRef}
-        src={lage.quelle}
         poster={poster}
         aria-label={titel ?? "Video"}
         autoPlay
@@ -620,7 +630,9 @@ export function Player({
         onError={(e) => {
           const fehler = e.currentTarget.error;
           if (fehler && fehler.code !== MediaError.MEDIA_ERR_ABORTED) {
-            setLage({ art: "fehler", text: "Das Video konnte nicht abgespielt werden. Bitte versuche es erneut." });
+            wiederaufnahme.current = e.currentTarget.currentTime || null;
+            if (lage.modus === "direct" && !transkodieren) setTranskodieren(true);
+            else setLage({ art: "fehler", text: "Das Video konnte nicht abgespielt werden. Bitte versuche es erneut." });
           }
         }}
       >

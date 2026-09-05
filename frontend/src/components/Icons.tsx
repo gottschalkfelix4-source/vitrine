@@ -11,6 +11,7 @@ const paths = {
   plus: "M12 4v16M4 12h16",
   close: "m6 6 12 12M6 18 18 6",
   logout: "M9 4H4v16h5M13 8l4 4-4 4M8 12h13",
+  login: "M15 4h5v16h-5M8 8l4 4-4 4M3 12h9",
   arrowLeft: "m11 4-8 8 8 8M3 12h18",
   chevronRight: "m9 5 7 7-7 7",
   chevronDown: "m5 9 7 7 7-7",

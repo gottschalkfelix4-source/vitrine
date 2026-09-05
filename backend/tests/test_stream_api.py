@@ -14,12 +14,13 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api import stream
 from app.config import settings
 from app.db import get_db
-from app.models import Channel, Video, VideoStatus
+from app.models import Channel, HotCopy, HotCopyStatus, Job, Video, VideoStatus
 from app.services.bundle import BundleManifest, write_bundle
 from tests.conftest import neue_sitzung
 
@@ -161,33 +162,42 @@ def test_h264_mp4_laeuft_auch_ohne_faehigkeitsmeldung_direkt(umgebung, rohdaten)
 # ------------------------------------------------------------ Transkodierpfad
 
 
-def test_alter_client_bekommt_202_und_einen_auftrag(umgebung, rohdaten):
-    """AV1-Archiv, Client kann nur H.264: Es darf kein kaputter Stream
-    zurueckkommen, sondern die Ansage, dass vorbereitet wird."""
+def test_alter_client_braucht_begrenzte_wiedergabesitzung(umgebung, rohdaten):
+    """Ein oeffentlicher GET darf keinen Hintergrundauftrag erzeugen."""
     client, db, tmp = umgebung
     _archiviere(db, tmp, rohdaten)
 
     r = client.get("/api/videos/vid1/stream", params={"support": "mp4,h264,aac"})
-    assert r.status_code == 202
+    assert r.status_code == 409
     daten = r.json()
-    assert daten["status"] == "wird_vorbereitet"
-    assert isinstance(daten["job_id"], int)
-    # Die Begruendung soll benennen, woran es lag - welcher Pruefschritt zuerst
-    # anschlaegt (hier der Container webm), ist dabei nicht festgeschrieben.
-    assert daten["grund"] and "nicht" in daten["grund"]
+    assert daten["status"] == "wiedergabesitzung_erforderlich"
+    assert db.scalars(select(Job)).all() == []
 
 
-def test_wiederholtes_nachfragen_erzeugt_nur_einen_auftrag(umgebung, rohdaten):
-    """Der wartende Player fragt im Sekundentakt nach - daraus duerfen nicht
-    hunderte Auftraege werden."""
+def test_wiederholtes_nachfragen_erzeugt_keinen_auftrag(umgebung, rohdaten):
     client, db, tmp = umgebung
     _archiviere(db, tmp, rohdaten)
 
-    ids = {
-        client.get("/api/videos/vid1/stream", params={"support": "mp4,h264,aac"}).json()["job_id"]
-        for _ in range(5)
-    }
-    assert len(ids) == 1
+    for _ in range(5):
+        assert client.get("/api/videos/vid1/stream", params={"support": "mp4,h264,aac"}).status_code == 409
+    assert db.scalars(select(Job)).all() == []
+
+
+@pytest.mark.parametrize("inside", [True, False])
+def test_vorhandene_heisskopie_muss_im_cache_liegen(umgebung, rohdaten, inside):
+    client, db, tmp = umgebung
+    _archiviere(db, tmp, rohdaten)
+    hot_path = (settings.cache_dir if inside else tmp) / "hot.mp4"
+    hot_path.write_bytes(b"hot video bytes")
+    db.add(HotCopy(video_id="vid1", variant="h264", path=str(hot_path),
+                   status=HotCopyStatus.READY, mime_type="video/mp4"))
+    db.commit()
+    response = client.get("/api/videos/vid1/stream", params={"support": "mp4,h264,aac"})
+    if inside:
+        assert response.status_code == 200 and response.content == hot_path.read_bytes()
+    else:
+        assert response.status_code == 410
+        assert str(hot_path) not in response.text
 
 
 # ---------------------------------------------------------------- Fehlerfaelle
@@ -203,8 +213,7 @@ def test_noch_nicht_archiviertes_video(umgebung):
     db.add(Video(id="v2", channel_id="UCtest", title="wartet", status=VideoStatus.QUEUED))
     db.commit()
     r = client.get("/api/videos/v2/stream")
-    assert r.status_code == 409
-    assert "nicht archiviert" in r.json()["detail"]
+    assert r.status_code == 404
 
 
 def test_verschwundenes_buendel(umgebung, rohdaten):

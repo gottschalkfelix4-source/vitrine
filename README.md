@@ -11,18 +11,20 @@ Elasticsearch.
 
 ## Was es kann
 
-- **Admin-Login** fuer das gesamte Archiv, einschliesslich API, Videos,
-  Untertiteln und Vorschaubildern. Die erste Einrichtung erscheint als Dialog
-  im Browser, abgesichert mit einem einmaligen Code aus dem Container-Protokoll.
-  Es gibt kein Standardpasswort und keine oeffentliche Registrierung.
+- **Oeffentliches Archiv, geschuetzte Verwaltung.** Gaeste koennen archivierte
+  Kanaele, Playlists und Videos ansehen und durchsuchen. Einstellungen, neue
+  Kanaele und Verwaltungsaktionen brauchen einen Admin-Login. Einrichtung und
+  Anmeldung funktionieren ueber HTTP und HTTPS. Es gibt kein Standardpasswort.
 - **Ganze Kanaele** aufnehmen - Videos, Shorts, Livestreams und die vom Kanal
   angelegten Playlists, in der Gliederung des Kanals. Ein Video, das in drei
   Playlists steht, liegt trotzdem genau einmal auf der Platte.
 - **Playlists zeigen alles**, auch nicht archivierte Positionen, mit
   Zustandskennzeichnung. Wer sehen will, was fehlt, kann es sehen.
-- **Kalt/Heiss-Speicher.** Jedes Video ist ein Buendel im Kaltspeicher, aus dem
-  der Player direkt streamt - ohne Entpacken. Eine Heisskopie entsteht nur,
-  wenn ein Browser den Archivcodec nicht kann, und raeumt sich selbst wieder auf.
+- **Direktwiedergabe und Live-Transkodierung.** Passende Videos kommen direkt
+  aus dem Archivbuendel. Andernfalls werden nur angeforderte Abschnitte fuer
+  den Browser umgewandelt, auch beim Spulen weit nach vorne.
+- **Stream-Dashboard fuer den Admin** mit laufendem Video, Browser, IP-Adresse,
+  Position, Pause und Transkodierungsstatus.
 - **Eigener Player** mit Kapitelmarken, Puffer-Anzeige, Tempo, Untertiteln,
   Kinomodus, Bild-im-Bild, Vollbild und den gewohnten Tastenkuerzeln.
 - **Volltextsuche** ueber Titel, Beschreibungen und das gesprochene Wort. Ein
@@ -55,21 +57,18 @@ Elasticsearch.
 docker compose up -d --build
 ```
 
-Die Daten liegen unter `./data`. Beim ersten Oeffnen der HTTP- oder HTTPS-Adresse erscheint
-der Dialog **Administrator einrichten**. Den Einrichtungscode aus dem
+Die Daten liegen unter `./data`. Das Archiv ist unter `http://localhost:8000`
+erreichbar. Unter **Anmelden** erscheint beim ersten Aufruf der Dialog
+**Administrator einrichten**. Den Einrichtungscode aus dem
 Container-Protokoll kopieren und im Dialog Benutzername und Passwort festlegen:
 
 ```bash
 docker compose logs vitrine
 ```
 
-Die Einrichtung funktioniert auch direkt ueber `http://localhost:8000`, ohne
-die Cookie-Einstellung zu aendern. Danach ueber die HTTPS-Adresse mit dem selbst
-gewaehlten Passwort anmelden. Fuer einen
-ausdruecklich lokalen HTTP-Test kann `AUTH_COOKIE_SECURE=false` in der
-Compose-`.env` gesetzt werden; den Container danach neu erstellen. Dann ist
-`http://localhost:8000` nutzbar. Vor oeffentlicher Freigabe wieder `true`
-setzen. Siehe [Admin-Zugang und oeffentlicher Betrieb](#admin-zugang-und-oeffentlicher-betrieb).
+Danach direkt mit dem selbst gewaehlten Passwort anmelden. HTTP und HTTPS
+funktionieren ohne Umschalten einer Cookie-Einstellung, auch nach Updates.
+Siehe [Admin-Zugang und oeffentlicher Betrieb](#admin-zugang-und-oeffentlicher-betrieb).
 
 ### Unraid
 
@@ -104,22 +103,27 @@ werden, muss das Paket von Hand auf *public* gestellt werden (Repo →
 
 ### Admin-Zugang und oeffentlicher Betrieb
 
-Auch nach einem Update eines bestehenden Archivs bleibt der Zugriff zunaechst
-gesperrt, bis der Administrator eingerichtet ist. Videos, Einstellungen und
-Warteschlange bleiben erhalten; Hintergrundauftraege laufen weiter.
+Das Archiv ist ohne Anmeldung sichtbar: Gaeste koennen archivierte Kanaele,
+Playlists, Videos, Vorschaubilder und Untertitel ansehen und durchsuchen.
+Warteschlange und Speicher sind lesbar; interne Pfade und Fehlermeldungen
+werden dort fuer Gaeste ausgeblendet. Nicht archivierte Inhalte und globale
+Wiedergabedaten werden nicht an Gaeste ausgegeben. Deren Fortschritt bleibt
+im jeweiligen Browser. Einstellungen, Kanalaufnahme, Archivierungs- und
+Loeschaktionen sowie das Stream-Dashboard sind dem Admin vorbehalten.
 
-Nach dem Update die Seite oeffnen: Solange noch kein Administrator existiert,
-erscheint automatisch der Dialog **Administrator einrichten**. Dort den
+Nach dem Update **Anmelden** oeffnen: Solange noch kein Administrator existiert,
+erscheint dort automatisch der Dialog **Administrator einrichten**. Dort den
 Einrichtungscode, Benutzername (Vorschlag `admin`) und das neue Passwort mit
 Wiederholung eingeben. Mindestens 8 Zeichen, einen Grossbuchstaben und ein
 Sonderzeichen verwenden. Nach dem Speichern
 erscheint die normale Anmeldung. Ein geschlossenes Einrichtungsfenster laesst
 sich ueber **Administrator einrichten** erneut oeffnen.
 
-Die Ersteinrichtung funktioniert auch ohne HTTPS ueber die direkte
-HTTP-Adresse des Containers, etwa den WebUI-Knopf in Unraid. Dafuer ist keine
-Aenderung an `YTA_AUTH_COOKIE_SECURE` erforderlich. Die Einrichtung legt den
-Zugang an und meldet dich noch nicht an.
+Einrichtung und anschliessende Anmeldung funktionieren ueber die direkte
+HTTP-Adresse des Containers (WebUI in Unraid) und ueber HTTPS am Reverse Proxy.
+Die fruehere Variable `YTA_AUTH_COOKIE_SECURE` wird fuer bestehende Templates
+weiter akzeptiert, hat aber keine Wirkung mehr. HTTP und HTTPS verwenden
+getrennte Sitzungs-Cookies; bei HTTPS traegt das Cookie das Secure-Merkmal.
 
 In Unraid findest du den Code im Docker-Tab beim Vitrine-Container unter
 **Protokoll / Logs**. Die Zeile beginnt mit `Vitrine-Einrichtungscode:`.
@@ -152,21 +156,22 @@ verfuegbar. Er fragt das Passwort verdeckt ab und meldet bei einem Reset alle
 bestehenden Sitzungen ab. Zugangsdaten gehoeren weder ins Repository noch in
 einen Chat oder in Startargumente.
 
-Fuer den Internetzugriff eine eigene **HTTPS-Adresse** am Reverse Proxy
-einrichten. Die Anmeldung erwartet standardmaessig ein sicheres Cookie
-(`YTA_AUTH_COOKIE_SECURE=true`). Der Proxy muss den urspruenglichen `Host`
+Der Reverse Proxy kann HTTPS nach aussen anbieten und intern per HTTP mit
+Vitrine sprechen. Er muss den urspruenglichen `Host` einschliesslich Port
 weiterreichen und **alle Pfade**, einschliesslich `/api/`, an denselben
 Vitrine-Container schicken. Den Container-Port nur fuer das eigene Netz bzw.
 den Proxy erreichbar machen; keine zusaetzliche oeffentliche HTTP-Freigabe.
 Am Proxy ein Upload-Limit von 2 MiB setzen und Zwischenspeicherung fuer
 `/api/` abschalten. Die Anwendung prueft Upload-Groessen zusaetzlich selbst.
 
-Die HTTP-Adresse hinter Unraids WebUI-Knopf ist die direkte Container-Adresse.
-Dort ist die Ersteinrichtung auch bei aktivem HTTPS-Cookie moeglich. Fuer die
-anschliessende Anmeldung dann die HTTPS-Adresse des Proxys oeffnen.
-`YTA_AUTH_COOKIE_SECURE=false` ist nur fuer bewusste Tests ueber HTTP im
-privaten Netz vorgesehen; bei HTTP werden Anmeldedaten unverschluesselt
-uebertragen.
+Damit im Stream-Dashboard die Zuschaueradresse statt der Proxyadresse
+erscheint, `FORWARDED_ALLOW_IPS` auf die konkrete IP-Adresse des Reverse Proxys
+setzen (Unraid: **Vertrauenswuerdige Proxy-IP-Adressen**; Compose-`.env`:
+`TRUSTED_PROXY_IPS`). Mehrere bekannte Proxys lassen sich mit Kommas trennen.
+Der Proxy muss `X-Forwarded-For` und `X-Forwarded-Proto` korrekt weitergeben;
+nur Angaben von eingetragenen Proxys werden uebernommen. Ohne diese Angabe
+zeigt das Dashboard den direkt verbundenen Gegenueber. Siehe
+[Uvicorn-Proxyeinstellungen](https://www.uvicorn.org/settings/#http).
 
 Im angemeldeten Archiv gibt es **Abmelden** und unter **Einstellungen** die
 Passwortaenderung. Eine Passwortaenderung beendet alle Sitzungen. Geschuetzte
@@ -174,6 +179,29 @@ API-Antworten und Mediendaten werden nicht im Browser-Cache gespeichert;
 beim Update entfernt der Service Worker seinen bisherigen Vorschaubild-Cache.
 Bereits heruntergeladene oder vom Nutzer gespeicherte Dateien lassen sich
 durch Abmelden nicht zurueckholen.
+
+### Streams und Live-Transkodierung
+
+Unter **Streams** sieht der Admin alle vom Player geoeffneten Verbindungen,
+einschliesslich Gastzuschauern: Video und Kanal, Browser/Geraet, IP-Adresse,
+Position, Zustand und direkte oder transkodierte Auslieferung. Pausen werden
+sofort gemeldet; die Ansicht aktualisiert sich alle fuenf Sekunden. Geschlossene
+Player melden sich ab, verlorene Verbindungen verfallen nach 90 Sekunden.
+
+Der Player meldet seine Codec-Faehigkeiten. Kann er das Original nicht
+abspielen, liefert Vitrine HLS mit H.264/AAC, maximal 1080p und 30 Bildern pro
+Sekunde. Sechs-Sekunden-Abschnitte werden beim Abruf direkt aus dem Buendel
+gelesen und umgewandelt; ein Sprung an eine spaete Stelle braucht keinen
+vollstaendigen Encode. Bei einem unerwarteten Decoderfehler versucht der
+Player automatisch die Live-Transkodierung. Browser ohne native HLS-Unterstuetzung
+verwenden das lokal mitgelieferte [hls.js](https://github.com/video-dev/hls.js).
+
+Die Live-Umwandlung verwendet den Software-Encoder mit maximal zwei parallelen
+Prozessen und zwei Encoder-Threads je Prozess. Der Abschnittscache ist auf
+64 MiB Arbeitsspeicher begrenzt; es entsteht keine zweite vollstaendige
+Videodatei. Maximal 64 Player, davon 16 je Verbindungsadresse, koennen offen
+sein. Weitere Anfragen erhalten eine verstaendliche Auslastungsmeldung.
+Die Sitzungen gelten fuer einen Serverprozess (Standard des Containers).
 
 Sitzungen enden standardmaessig nach 12 Stunden. Hoechstens zehn Sitzungen
 bleiben gleichzeitig aktiv. Zehn fehlgeschlagene Anmeldungen innerhalb von
@@ -230,7 +258,7 @@ Oberflaeche. Die wichtigsten Variablen:
 | Variable | Standard | Bedeutung |
 |---|---|---|
 | `PUID` / `PGID` | 1000 / 1000 | Nutzer, unter dem geschrieben wird (Unraid: 99/100) |
-| `YTA_AUTH_COOKIE_SECURE` | true | Anmeldung nur mit HTTPS-Cookie; false ausschliesslich fuer lokale HTTP-Tests. Compose: `AUTH_COOKIE_SECURE` |
+| `YTA_AUTH_COOKIE_SECURE` | ignoriert | Kompatibilitaet mit alten Templates; HTTP/HTTPS werden automatisch erkannt. |
 | `YTA_ARCHIVE_MIN_HEIGHT` | 1080 | Untergrenze, kein Deckel. Bietet die Quelle weniger, wird das Beste genommen |
 | `YTA_ARCHIVE_MAX_HEIGHT` | 0 (offen) | Obergrenze, z. B. 1440 |
 | `YTA_ARCHIVE_CODEC` | av1 | `av1`, `hevc` oder `copy` (nichts umkodieren) |
@@ -294,13 +322,11 @@ meiden - das liest bis zur Zielposition durch.
 Der Offset ergibt sich aus `header_offset + 30 + len(name) + len(extra)` und
 gilt auch bei ZIP64.
 
-### Heissspeicher: nur wenn noetig
+### Heissspeicher und Live-Abschnitte
 
-Eine entpackte oder transkodierte Datei entsteht ausschliesslich dann, wenn der
-Client den Archivcodec nicht abspielen kann - rund 91 % der Browsersitzungen
-koennen AV1, der Rest sind im Wesentlichen aeltere Apple-Geraete und alte
-Fernseher. Welcher Browser was kann, meldet der Client selbst
-(`MediaSource.isTypeSupported`); der Server raet nicht am User-Agent herum.
+Der aktuelle Player verwendet fuer inkompatible Codecs die oben beschriebene
+Live-Transkodierung mit begrenztem Abschnittscache. Die bestehende
+Heissspeicherverwaltung bleibt fuer bereits vorbereitete Dateien erhalten.
 
 Eine Heisskopie verschwindet nach drei Regeln:
 
@@ -651,8 +677,8 @@ Beim Export drei Dinge beachten:
 
 Die Datei liegt als `cookies.txt` im Datenverzeichnis, mit Rechten 0600. Sie
 laesst sich ueber die API nicht wieder herunterladen - wer die Oberflaeche
-erreicht, haette sonst das Konto. Die Oberflaeche und die API sind durch den
-separaten Admin-Login geschuetzt. Die YouTube-Cookies ersetzen diesen Login
+erreicht, haette sonst das Konto. Die Cookie-Verwaltung und ihre API sind durch
+den Admin-Login geschuetzt. Die YouTube-Cookies ersetzen diesen Login
 nicht. Datenverzeichnis und Backups enthalten vertrauliche Zugangsdaten und
 duerfen nicht als oeffentliche Freigabe erreichbar sein.
 
@@ -805,8 +831,8 @@ Das ist der Haken, an dem es im Heimnetz ueblicherweise scheitert. Ein Service
 Worker laeuft nur in einem *sicheren Kontext* - also ueber HTTPS oder auf
 `localhost`. Der uebliche Zugriff `http://192.168.1.50:8000` erfuellt das
 **nicht**: Dann fehlt der Menuepunkt "Zum Startbildschirm hinzufuegen", und es
-gibt keine installierbare App. Fuer den Admin-Login ist ebenfalls HTTPS
-vorgesehen; die Ausnahme fuer lokale HTTP-Tests ist oben beschrieben.
+gibt keine installierbare App. Archiv, Player und Admin-Login funktionieren
+auch ohne installierbare App ganz normal ueber HTTP.
 
 Das Archiv sagt das auch selbst: Unter *Einstellungen > Allgemein* steht, ob sich
 die App ablegen laesst - und wenn nicht, warum. Ein fehlender Menuepunkt ohne
@@ -848,15 +874,12 @@ python -m venv .venv
 # Linux/macOS: .venv/bin/python   Windows: .venv/Scripts/python.exe
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
-# Nur fuer lokale HTTP-Entwicklung (Bash):
-export YTA_AUTH_COOKIE_SECURE=false
 .venv/bin/python -m app.admin
 .venv/bin/python -m uvicorn app.main:app --reload
 ```
 
-In PowerShell entspricht die lokale HTTP-Einstellung
-`$env:YTA_AUTH_COOKIE_SECURE = "false"`; die Python-Aufrufe verwenden dort
-`.venv/Scripts/python.exe`. `YTA_DATA_DIR` vor dem Einrichten des Administrators
+In PowerShell verwenden die Python-Aufrufe `.venv/Scripts/python.exe`.
+`YTA_DATA_DIR` vor dem Einrichten des Administrators
 und vor dem Start auf denselben Entwicklungsordner setzen.
 
 Ausserhalb des Containers braucht es ffmpeg im Pfad und eine

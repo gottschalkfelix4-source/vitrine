@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { ApiFehler, auth, type Anmeldezustand } from "../lib/auth";
@@ -6,7 +6,17 @@ import { neuesPasswortFehler } from "../lib/passwort";
 import { Icon } from "./Icons";
 import { Dialog } from "./Dialog";
 
-export function AnmeldeSchranke({ children }: { children: ReactNode }) {
+export function useAnmeldung() {
+  return useSyncExternalStore(auth.abonnieren, auth.zustand, auth.zustand);
+}
+
+export function useAdmin(): boolean {
+  const zustand = useAnmeldung();
+  return zustand.art === "bereit" && zustand.sitzung?.angemeldet === true;
+}
+
+/** Prüft die Sitzung, ohne den öffentlichen Archivzugang zu sperren. */
+export function Sitzungsverwaltung({ children }: { children: ReactNode }) {
   const zustand = useSyncExternalStore(auth.abonnieren, auth.zustand, auth.zustand);
   useEffect(() => {
     void auth.pruefen();
@@ -32,6 +42,12 @@ export function AnmeldeSchranke({ children }: { children: ReactNode }) {
       window.clearInterval(intervall);
     };
   }, []);
+  // Nach einem Rollenwechsel dürfen keine zuvor geladenen Admin-Daten bleiben.
+  return <Fragment key={zustand.sitzung?.angemeldet ? `admin-${zustand.wechsel}` : "gast"}>{children}</Fragment>;
+}
+
+export function AnmeldeSchranke({ children }: { children: ReactNode }) {
+  const zustand = useAnmeldung();
   if (zustand.art !== "bereit" || !zustand.sitzung?.angemeldet) return <Anmeldung key={zustand.wechsel} zustand={zustand} />;
   return <div className="angemeldete-app" key={zustand.wechsel}>{children}</div>;
 }
@@ -47,7 +63,7 @@ export function Anmeldung({ zustand }: { zustand: Anmeldezustand }) {
     setEinrichtungOffen(false);
     window.requestAnimationFrame(() => document.getElementById("administrator-einrichten")?.focus());
   }
-  return <main className="anmeldung">
+  return <section className="anmeldung" aria-label="Administratorzugang">
     <div className="anmeldung-inhalt">
       <div className="marke" aria-label="Vitrine">
         <svg className="marke-zeichen" viewBox="0 0 32 24" aria-hidden="true">
@@ -92,7 +108,7 @@ export function Anmeldung({ zustand }: { zustand: Anmeldezustand }) {
           </form>}
     </div>
     {kannEinrichten && einrichtungOffen ? <EinrichtungsDialog aufSchliessen={einrichtungSchliessen} /> : null}
-  </main>;
+  </section>;
 }
 
 export function einrichtungsFehler(e: unknown): string {

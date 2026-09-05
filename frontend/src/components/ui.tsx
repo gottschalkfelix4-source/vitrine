@@ -6,6 +6,8 @@ import { api } from "../lib/api";
 import { aufrufe, dauer, istHochaufloesend, qualitaet, vorZeit, zustandText } from "../lib/format";
 import { Icon } from "./Icons";
 import { KanalAvatar } from "./KanalAvatar";
+import { useAdmin } from "./Anmeldung";
+import { lokalFortschrittLesen } from "../lib/wiedergabeFortschritt";
 
 /** Zustandsmarke - im Archiv-Kontext das wichtigste Zusatzelement gegenueber
  *  YouTube: Man muss auf einen Blick sehen, was da ist und was fehlt. */
@@ -28,6 +30,9 @@ interface KachelProps {
 const HOLBAR = new Set(["new", "failed", "skipped"]);
 
 export function Videokachel({ video, ohneKanal, position }: KachelProps) {
+  const admin = useAdmin();
+  const lokal = admin ? null : lokalFortschrittLesen(video.id);
+  const anteil = admin ? video.fortschritt_anteil : lokal && video.dauer_s ? lokal.sekunden / video.dauer_s : null;
   // Nach dem Klick auf "Laden" zeigt die Kachel sofort "wartet", ohne dass
   // die ganze Liste neu geholt werden muss.
   const [neuerStatus, setNeuerStatus] = useState<string | null>(null);
@@ -44,7 +49,7 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
   async function holen(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (holt) return;
+    if (!admin || holt) return;
     setHolt(true);
     setHolFehler(null);
     try {
@@ -72,9 +77,9 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
           </span>
         ) : null}
         {video.dauer_s ? <span className="dauer">{dauer(video.dauer_s)}</span> : null}
-        {video.fortschritt_anteil ? (
+        {anteil ? (
           <div className="fortschritt">
-            <span style={{ width: `${Math.min(100, video.fortschritt_anteil * 100)}%` }} />
+            <span style={{ width: `${Math.min(100, anteil * 100)}%` }} />
           </div>
         ) : null}
         {spielbar ? <span className="kachel-abspielen"><Icon name="play" size={28} /></span> : null}
@@ -116,7 +121,7 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
           </div>
           <div className="kachel-zeile kachel-archiv">
             {!spielbar ? <Zustand status={status} /> : null}
-            {HOLBAR.has(status) ? (
+            {admin && HOLBAR.has(status) ? (
               <button className="kachel-laden" onClick={holen} disabled={holt} title="Dieses Video ins Archiv holen">
                 <Icon name="download" size={16} />{holt ? "Wird eingereiht …" : "Laden"}
               </button>

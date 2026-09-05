@@ -248,7 +248,8 @@ def _als_phrase(anfrage: str) -> str:
     return '"' + normalisieren(anfrage).replace('"', '""') + '"'
 
 
-def video_treffer(db: Session, anfrage: str, limit: int = 60, offset: int = 0) -> list[str]:
+def video_treffer(db: Session, anfrage: str, limit: int = 60, offset: int = 0,
+                  *, archived_only: bool = False) -> list[str]:
     """Video-IDs, nach Relevanz sortiert.
 
     Die Gewichtung stellt den Titel voran: Ein Wort im Titel sagt mehr ueber
@@ -260,15 +261,17 @@ def video_treffer(db: Session, anfrage: str, limit: int = 60, offset: int = 0) -
         text(
             "SELECT video_id FROM video_suche "
             "WHERE video_suche MATCH :q "
+            "AND (:archived = 0 OR video_id IN (SELECT id FROM videos WHERE status = 'archived')) "
             "ORDER BY bm25(video_suche, 0.0, 10.0, 1.0, 3.0) "
             "LIMIT :l OFFSET :o"
         ),
-        {"q": _als_phrase(anfrage), "l": limit, "o": offset},
+        {"q": _als_phrase(anfrage), "l": limit, "o": offset, "archived": int(archived_only)},
     ).fetchall()
     return [z[0] for z in zeilen]
 
 
-def untertitel_treffer(db: Session, anfrage: str, limit: int = 40) -> list[Untertitelfund]:
+def untertitel_treffer(db: Session, anfrage: str, limit: int = 40,
+                      *, archived_only: bool = False) -> list[Untertitelfund]:
     """Fundstellen in gesprochenem Text, mit Zeitangabe.
 
     Je Video hoechstens eine Fundstelle: Wer ein Wort sucht, das in einem Vortrag
@@ -281,10 +284,11 @@ def untertitel_treffer(db: Session, anfrage: str, limit: int = 40) -> list[Unter
             "SELECT video_id, start_s, sprache, zeile, MIN(rang) FROM ("
             "  SELECT video_id, start_s, sprache, zeile, bm25(untertitel_suche) AS rang"
             "  FROM untertitel_suche WHERE untertitel_suche MATCH :q"
+            "  AND (:archived = 0 OR video_id IN (SELECT id FROM videos WHERE status = 'archived'))"
             "  ORDER BY rang LIMIT 500"
             ") GROUP BY video_id ORDER BY MIN(rang) LIMIT :l"
         ),
-        {"q": _als_phrase(anfrage), "l": limit},
+        {"q": _als_phrase(anfrage), "l": limit, "archived": int(archived_only)},
     ).fetchall()
     return [Untertitelfund(z[0], float(z[1]), z[2], z[3]) for z in zeilen]
 

@@ -21,6 +21,7 @@ from app.config import settings
 from app.models import AdminAccount, AdminBootstrap, AdminLoginLimit, AdminSession
 
 COOKIE_NAME = "vitrine_session"
+HTTP_COOKIE_NAME = "vitrine_session_http"
 MIN_PASSWORD = 8
 MAX_PASSWORD = 256
 LOGIN_ATTEMPTS = 10

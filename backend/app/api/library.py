@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
@@ -41,6 +41,19 @@ from app.services import suche as volltext
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["bibliothek"])
+
+
+def administrator(request: Request) -> bool:
+    return getattr(request.state, "admin_session", None) is not None
+
+
+def _archivierter_kanal():
+    return select(Video.id).where(Video.channel_id == Channel.id, Video.status == VideoStatus.ARCHIVED).exists()
+
+
+def _archivierte_playlist():
+    return (select(PlaylistItem.video_id).join(Video, Video.id == PlaylistItem.video_id)
+            .where(PlaylistItem.playlist_id == Playlist.id, Video.status == VideoStatus.ARCHIVED).exists())
 
 
 def _safe_path(root: Path, target: Path) -> Path:
@@ -121,9 +134,9 @@ class VideoKurz(BaseModel):
     recodiert: bool = False
 
     @classmethod
-    def aus(cls, v: Video) -> VideoKurz:
+    def aus(cls, v: Video, *, admin: bool = True) -> VideoKurz:
         anteil = None
-        if v.duration_s and v.progress_s:
+        if admin and v.duration_s and v.progress_s:
             anteil = min(1.0, v.progress_s / v.duration_s)
         return cls(
             id=v.id,
@@ -140,8 +153,8 @@ class VideoKurz(BaseModel):
             status=v.status,
             ist_short=v.is_short,
             war_live=v.was_live,
-            gesehen=v.watched,
-            fortschritt_s=v.progress_s,
+            gesehen=v.watched if admin else False,
+            fortschritt_s=v.progress_s if admin else 0,
             fortschritt_anteil=anteil,
             buendel_bytes=v.bundle_bytes,
             recodiert=v.recoded,
@@ -184,7 +197,7 @@ class PlaylistPosition(BaseModel):
 # --------------------------------------------------------------------- Kanaele
 
 
-def _kanal_kurz(db: Session, k: Channel) -> KanalKurz:
+def _kanal_kurz(db: Session, k: Channel, *, admin: bool = True) -> KanalKurz:
     gesamt, archiviert, bytes_ = db.execute(
         select(
             # Verschwundene zaehlen nicht mit: "2 von 3363" waere irrefuehrend,
@@ -192,16 +205,16 @@ def _kanal_kurz(db: Session, k: Channel) -> KanalKurz:
             func.count(Video.id).filter(Video.status != VideoStatus.UNAVAILABLE),
             func.count(Video.id).filter(Video.status == VideoStatus.ARCHIVED),
             func.coalesce(func.sum(Video.bundle_bytes), 0),
-        ).where(Video.channel_id == k.id)
+        ).where(Video.channel_id == k.id, True if admin else Video.status == VideoStatus.ARCHIVED)
     ).one()
     return KanalKurz(
         id=k.id,
         name=k.name,
         handle=k.handle,
         avatar=k.avatar_file,
-        abonniert=k.subscribed,
-        abgleich_aktiv=k.sync_enabled,
-        zuletzt_abgeglichen=k.last_synced_at.isoformat() if k.last_synced_at else None,
+        abonniert=k.subscribed if admin else False,
+        abgleich_aktiv=k.sync_enabled if admin else False,
+        zuletzt_abgeglichen=k.last_synced_at.isoformat() if admin and k.last_synced_at else None,
         videos_gesamt=gesamt,
         videos_archiviert=archiviert,
         belegung_bytes=int(bytes_ or 0),
@@ -209,8 +222,11 @@ def _kanal_kurz(db: Session, k: Channel) -> KanalKurz:
 
 
 @router.get("/channels", response_model=list[KanalKurz])
-def kanaele(db: Session = Depends(get_db)) -> list[KanalKurz]:
-    return [_kanal_kurz(db, k) for k in db.scalars(select(Channel).order_by(Channel.name))]
+def kanaele(db: Session = Depends(get_db), admin: bool = Depends(administrator)) -> list[KanalKurz]:
+    query = select(Channel).order_by(Channel.name)
+    if not admin:
+        query = query.where(_archivierter_kanal())
+    return [_kanal_kurz(db, k, admin=admin) for k in db.scalars(query)]
 
 
 @router.post("/channels", response_model=KanalKurz, status_code=status.HTTP_201_CREATED)
@@ -250,13 +266,15 @@ def kanal_anlegen(daten: KanalAnlegen, db: Session = Depends(get_db)) -> KanalKu
 
 
 @router.get("/channels/{kanal_id}")
-def kanal(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def kanal(kanal_id: str, db: Session = Depends(get_db), admin: bool = Depends(administrator)) -> dict[str, Any]:
     k = db.get(Channel, kanal_id)
-    if k is None:
+    if k is None or (not admin and not db.scalar(select(Video.id).where(
+            Video.channel_id == kanal_id, Video.status == VideoStatus.ARCHIVED).limit(1))):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Kanal unbekannt")
 
     listen = db.scalars(
-        select(Playlist).where(Playlist.channel_id == kanal_id).order_by(Playlist.kind, Playlist.title)
+        select(Playlist).where(Playlist.channel_id == kanal_id,
+                               True if admin else _archivierte_playlist()).order_by(Playlist.kind, Playlist.title)
     )
 
     # Die Tab-Zaehler kommen aus der Datenbank, nicht aus der gerade geladenen
@@ -269,16 +287,23 @@ def kanal(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
             func.count(Video.id).filter(Video.is_short.is_(True)),
             func.count(Video.id).filter(Video.was_live.is_(True)),
             func.count(Video.id).filter(Video.status == VideoStatus.UNAVAILABLE),
-        ).where(Video.channel_id == kanal_id, Video.status != VideoStatus.UNAVAILABLE)
+        ).where(Video.channel_id == kanal_id, Video.status != VideoStatus.UNAVAILABLE,
+                True if admin else Video.status == VideoStatus.ARCHIVED)
     ).one()
-    verschwunden = db.scalar(
+    verschwunden = (db.scalar(
         select(func.count(Video.id)).where(
             Video.channel_id == kanal_id, Video.status == VideoStatus.UNAVAILABLE
         )
-    ) or 0
+    ) or 0) if admin else 0
+
+    playlist_counts = dict(db.execute(
+        select(PlaylistItem.playlist_id, func.count(PlaylistItem.video_id))
+        .join(Video, Video.id == PlaylistItem.video_id)
+        .where(Video.status == VideoStatus.ARCHIVED).group_by(PlaylistItem.playlist_id)
+    ).all()) if not admin else {}
 
     return {
-        "kanal": _kanal_kurz(db, k),
+        "kanal": _kanal_kurz(db, k, admin=admin),
         "beschreibung": k.description,
         "banner": k.banner_file,
         "zaehler": {"videos": lang, "shorts": shorts, "live": live, "verschwunden": verschwunden},
@@ -289,18 +314,18 @@ def kanal(kanal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
                 "id": p.id,
                 "titel": p.title,
                 "art": p.kind,
-                "anzahl": p.item_count,
+                "anzahl": p.item_count if admin else playlist_counts.get(p.id, 0),
                 "thumb": p.thumb_file,
             }
             for p in listen
         ],
-        "regeln": {
+        **({"regeln": {
             "auto_archivieren": k.auto_archive,
             "shorts": k.archive_shorts,
             "livestreams": k.archive_live,
             "codec": k.archive_codec or settings.archive_codec,
             "abgleich_stunden": k.sync_interval_hours or settings.default_sync_interval_hours,
-        },
+        }} if admin else {}),
     }
 
 
@@ -562,19 +587,22 @@ def kanal_abgleichen(
 
 
 @router.get("/playlists/{playlist_id}")
-def playlist(playlist_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def playlist(playlist_id: str, db: Session = Depends(get_db), admin: bool = Depends(administrator)) -> dict[str, Any]:
     p = db.get(Playlist, playlist_id)
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Playlist unbekannt")
 
     positionen = db.scalars(
         select(PlaylistItem)
-        .where(PlaylistItem.playlist_id == playlist_id)
+        .join(Video, Video.id == PlaylistItem.video_id)
+        .where(PlaylistItem.playlist_id == playlist_id, True if admin else Video.status == VideoStatus.ARCHIVED)
         .order_by(PlaylistItem.position)
     )
     eintraege = [
-        PlaylistPosition(position=e.position, video=VideoKurz.aus(e.video)) for e in positionen
+        PlaylistPosition(position=e.position, video=VideoKurz.aus(e.video, admin=admin)) for e in positionen
     ]
+    if not admin and not eintraege:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Playlist unbekannt")
     archiviert = sum(1 for e in eintraege if e.video.status == VideoStatus.ARCHIVED)
     return {
         "id": p.id,
@@ -582,7 +610,7 @@ def playlist(playlist_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
         "art": p.kind,
         "kanal_id": p.channel_id,
         "beschreibung": p.description,
-        "anzahl_quelle": p.item_count,
+        "anzahl_quelle": p.item_count if admin else archiviert,
         "anzahl_archiviert": archiviert,
         "positionen": eintraege,
     }
@@ -594,6 +622,7 @@ def playlist(playlist_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
 @router.get("/videos", response_model=list[VideoKurz])
 def videos(
     db: Session = Depends(get_db),
+    admin: bool = Depends(administrator),
     kanal: str | None = None,
     status_filter: str | None = Query(None, alias="status"),
     suche: str | None = None,
@@ -607,6 +636,8 @@ def videos(
     offset: int = Query(0, ge=0),
 ) -> list[VideoKurz]:
     anfrage = select(Video)
+    if not admin:
+        anfrage = anfrage.where(Video.status == VideoStatus.ARCHIVED)
     if kanal:
         anfrage = anfrage.where(Video.channel_id == kanal)
     if status_filter:
@@ -640,7 +671,7 @@ def videos(
             muster = f"%{suche}%"
             anfrage = anfrage.where(Video.title.ilike(muster) | Video.description.ilike(muster))
         else:
-            treffer = volltext.video_treffer(db, suche, limit=limit, offset=offset)
+            treffer = volltext.video_treffer(db, suche, limit=limit, offset=offset, archived_only=not admin)
             if not treffer:
                 return []
             anfrage = anfrage.where(Video.id.in_(treffer))
@@ -664,7 +695,7 @@ def videos(
             "titel": (Video.title.asc(),),
         }[sortierung]
     )
-    return [VideoKurz.aus(v) for v in db.scalars(anfrage.limit(limit).offset(offset))]
+    return [VideoKurz.aus(v, admin=admin) for v in db.scalars(anfrage.limit(limit).offset(offset))]
 
 
 class Untertitelfund(BaseModel):
@@ -687,6 +718,7 @@ def volltextsuche(
     q: str = Query(description="Suchbegriff"),
     limit: int = Query(40, ge=1, le=100),
     db: Session = Depends(get_db),
+    admin: bool = Depends(administrator),
 ) -> Suchergebnis:
     """Sucht in Titeln, Beschreibungen und im gesprochenen Wort.
 
@@ -697,19 +729,20 @@ def volltextsuche(
     if len(volltext.normalisieren(q).strip()) < volltext.MIN_LAENGE:
         return Suchergebnis(anfrage=q, videos=[], im_gesprochenen=[], zu_kurz=True)
 
-    ids = volltext.video_treffer(db, q, limit=limit)
-    gefunden = {v.id: v for v in db.scalars(select(Video).where(Video.id.in_(ids)))} if ids else {}
+    ids = volltext.video_treffer(db, q, limit=limit, archived_only=not admin)
+    gefunden = {v.id: v for v in db.scalars(select(Video).where(
+        Video.id.in_(ids), True if admin else Video.status == VideoStatus.ARCHIVED))} if ids else {}
     # Reihenfolge des Index beibehalten - sie ist die Relevanzsortierung.
-    videos = [VideoKurz.aus(gefunden[i]) for i in ids if i in gefunden]
+    videos = [VideoKurz.aus(gefunden[i], admin=admin) for i in ids if i in gefunden]
 
     funde: list[Untertitelfund] = []
-    for f in volltext.untertitel_treffer(db, q, limit=limit):
+    for f in volltext.untertitel_treffer(db, q, limit=limit, archived_only=not admin):
         v = db.get(Video, f.video_id)
-        if v is None:
+        if v is None or (not admin and v.status != VideoStatus.ARCHIVED):
             continue
         funde.append(
             Untertitelfund(
-                video=VideoKurz.aus(v), start_s=f.start_s, sprache=f.sprache, zeile=f.zeile
+                video=VideoKurz.aus(v, admin=admin), start_s=f.start_s, sprache=f.sprache, zeile=f.zeile
             )
         )
 
@@ -729,9 +762,9 @@ def suchindex_neu_aufbauen(db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @router.get("/videos/{video_id}")
-def video(video_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def video(video_id: str, db: Session = Depends(get_db), admin: bool = Depends(administrator)) -> dict[str, Any]:
     v = db.get(Video, video_id)
-    if v is None:
+    if v is None or (not admin and v.status != VideoStatus.ARCHIVED):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video unbekannt")
 
     in_listen = db.scalars(
@@ -740,7 +773,7 @@ def video(video_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
         .where(PlaylistItem.video_id == video_id, Playlist.kind == PlaylistKind.PLAYLIST)
     )
     return {
-        "video": VideoKurz.aus(v),
+        "video": VideoKurz.aus(v, admin=admin),
         "beschreibung": v.description,
         "kapitel": [
             {"titel": k.title, "start_s": k.start_s, "ende_s": k.end_s} for k in v.chapters
@@ -760,7 +793,7 @@ def video(video_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
             "gespart_bytes": v.saved_bytes,
         },
         "in_playlists": [{"id": p.id, "titel": p.title} for p in in_listen],
-        "statusmeldung": v.status_message,
+        "statusmeldung": v.status_message if admin else None,
     }
 
 
@@ -873,6 +906,7 @@ def video_archivieren(video_id: str, db: Session = Depends(get_db)) -> dict[str,
 @router.get("/jobs")
 def warteschlange(
     db: Session = Depends(get_db),
+    admin: bool = Depends(administrator),
     status_filter: str | None = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=200),
 ) -> list[dict[str, Any]]:
@@ -896,19 +930,19 @@ def warteschlange(
         ergebnis.append({
             "id": j.id,
             "art": j.type,
-            "ziel": j.target_id,
+            "ziel": j.target_id if admin or titel is not None else None,
             "titel": titel,
             "status": j.status,
             "fortschritt": j.progress,
-            "meldung": j.message,
-            "fehler": j.error,
+            "meldung": j.message if admin else None,
+            "fehler": j.error if admin else None,
             "erstellt": j.created_at.isoformat() if j.created_at else None,
         })
     return ergebnis
 
 
 @router.get("/jobs/aktiv")
-def laufende_auftraege(db: Session = Depends(get_db)) -> dict[str, Any]:
+def laufende_auftraege(db: Session = Depends(get_db), admin: bool = Depends(administrator)) -> dict[str, Any]:
     """Knappe Auskunft fuer die Fortschrittsanzeige.
 
     Bewusst schmal gehalten, weil die Oberflaeche das im Sekundentakt abfragt -
@@ -934,10 +968,10 @@ def laufende_auftraege(db: Session = Depends(get_db)) -> dict[str, Any]:
         eintraege.append({
             "id": j.id,
             "art": j.type,
-            "ziel": j.target_id,
+            "ziel": j.target_id if admin or titel is not None else None,
             "titel": titel,
             "fortschritt": j.progress,
-            "meldung": j.message,
+            "meldung": j.message if admin else None,
         })
     # Ohne diese Auskunft ist eine Drosselpause von einem haengenden Dienst
     # nicht zu unterscheiden: In beiden Faellen stehen tausend Auftraege auf
@@ -959,12 +993,17 @@ def laufende_auftraege(db: Session = Depends(get_db)) -> dict[str, Any]:
     # wird deshalb nach allen Ausgaengen zusammen: Pausiert ist erst, wenn
     # keiner mehr frei ist. Sonst behauptete die Leiste Stillstand, waehrend
     # nebenan ueber den naechsten Tunnel weitergeladen wird.
-    ids = vpn.ausgang_ids()
-    return {
+    result = {
         "laufend": eintraege,
         "wartend": wartend,
         "nach_art": nach_art,
         "pause": pause.zustand(db, laufend=sum(j.type in pause.NETZ_TYPEN for j in laufend)),
+    }
+    if not admin:
+        return result
+    ids = vpn.ausgang_ids()
+    return {
+        **result,
         "drosselung": drosselung.zustand(ids),
         "ausgaenge": {
             "gesamt": len(ids),
@@ -1057,7 +1096,7 @@ def gescheiterte_wiederholen(db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @router.get("/storage")
-def speicher(db: Session = Depends(get_db)) -> dict[str, Any]:
+def speicher(db: Session = Depends(get_db), admin: bool = Depends(administrator)) -> dict[str, Any]:
     """Der Blick, den YouTube nicht hat und ein Archiv braucht.
 
     Beantwortet drei Fragen auf einmal: Was liegt da? Was hat die Recodierung
@@ -1144,6 +1183,10 @@ def speicher(db: Session = Depends(get_db)) -> dict[str, Any]:
     # Gleicher Datentraeger? Dann nur einmal zeigen.
     if len(traeger) == 2 and traeger[0]["gesamt"] == traeger[1]["gesamt"]:
         traeger = [traeger[0] | {"pfad": "Daten und Videos"}]
+    if not admin:
+        for index, item in enumerate(traeger):
+            item["pfad"] = "Daten und Videos" if len(traeger) == 1 else ("Archiv" if index == 0 else "Wiedergabe")
+        je_kanal = [item for item in je_kanal if item["videos"]]
 
     return {
         "kaltspeicher": {
@@ -1381,7 +1424,8 @@ _ohne_bild: set[str] = set()
 
 
 @router.get("/thumbs/quelle/{video_id}")
-def thumbnail_quelle(video_id: str) -> FileResponse:
+def thumbnail_quelle(video_id: str, db: Session = Depends(get_db),
+                     admin: bool = Depends(administrator)) -> FileResponse:
     """Vorschaubild eines noch nicht archivierten Videos.
 
     Holt das Bild beim ersten Abruf von YouTube und legt es ab; jeder weitere
@@ -1401,6 +1445,10 @@ def thumbnail_quelle(video_id: str) -> FileResponse:
 
     if not _VIDEO_ID.match(video_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "keine gueltige Video-ID")
+    if not admin:
+        v = db.get(Video, video_id)
+        if v is None or v.status != VideoStatus.ARCHIVED:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Vorschaubild unbekannt")
 
     # Eigener Unterordner: Die archivierten Bilder heissen ebenfalls nach der
     # Video-ID und koennten je nach Endung genau gleich heissen.
@@ -1408,6 +1456,10 @@ def thumbnail_quelle(video_id: str) -> FileResponse:
     ziel = ordner / f"{video_id}.jpg"
     if ziel.is_file():
         return FileResponse(ziel, headers={"Cache-Control": "no-store"})
+    # Oeffentliche Ansichten lesen nur vorhandene Archivdaten. Ein beliebiger
+    # Gast darf mit Bild-URLs keine externen Downloads ausloesen.
+    if not admin:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "kein Vorschaubild verfuegbar")
     if video_id in _ohne_bild:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "kein Vorschaubild verfuegbar")
 
@@ -1437,13 +1489,22 @@ def thumbnail_quelle(video_id: str) -> FileResponse:
 
 
 @router.get("/thumbs/{datei}")
-def thumbnail(datei: str) -> FileResponse:
+def thumbnail(datei: str, db: Session = Depends(get_db), admin: bool = Depends(administrator)) -> FileResponse:
     """Liefert ein Vorschaubild.
 
     Die Bilder liegen bewusst ausserhalb der Buendel - ein Grid mit hunderten
     Kacheln wuerde sonst ebenso viele ZIP-Dateien oeffnen und auf einem Array
     mit schlafenden Platten jedes Mal die Platten wecken.
     """
+    if not admin:
+        video_image = db.scalar(select(Video.id).where(
+            Video.thumb_file == datei, Video.status == VideoStatus.ARCHIVED).limit(1))
+        channel_image = db.scalar(select(Channel.id).where(
+            (Channel.avatar_file == datei) | (Channel.banner_file == datei), _archivierter_kanal()).limit(1))
+        playlist_image = db.scalar(select(Playlist.id).where(
+            Playlist.thumb_file == datei, _archivierte_playlist()).limit(1))
+        if not (video_image or channel_image or playlist_image):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Vorschaubild unbekannt")
     try:
         pfad = paths.child(settings.thumb_dir, datei)
     except paths.UnsafePath as e:
@@ -1454,7 +1515,8 @@ def thumbnail(datei: str) -> FileResponse:
 
 
 @router.get("/videos/{video_id}/subtitles/{sprache}")
-def untertitel(video_id: str, sprache: str, db: Session = Depends(get_db)) -> Any:
+def untertitel(video_id: str, sprache: str, db: Session = Depends(get_db),
+               admin: bool = Depends(administrator)) -> Any:
     """Holt eine Untertitelspur aus dem Buendel.
 
     Anders als Vorschaubilder werden Untertitel nur beim tatsaechlichen
@@ -1465,7 +1527,7 @@ def untertitel(video_id: str, sprache: str, db: Session = Depends(get_db)) -> An
     from app.services.bundle import BundleError, BundleReader
 
     v = db.get(Video, video_id)
-    if v is None or not v.bundle_file:
+    if v is None or not v.bundle_file or (not admin and v.status != VideoStatus.ARCHIVED):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video unbekannt")
 
     passend = next((u for u in v.subtitles if u.language == sprache), None)
@@ -1478,7 +1540,8 @@ def untertitel(video_id: str, sprache: str, db: Session = Depends(get_db)) -> An
         with BundleReader(Path(v.bundle_file)) as r:
             inhalt = r.read(passend.name_in_bundle)
     except (BundleError, KeyError) as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Untertitel nicht im Buendel: {e}") from e
+        detail = f"Untertitel nicht im Buendel: {e}" if admin else "Untertitel nicht verfuegbar"
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail) from e
 
     return Response(
         content=inhalt,

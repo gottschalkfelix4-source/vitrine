@@ -1,0 +1,25 @@
+.streams-seite { max-width: 1440px; margin: 0 auto; }
+.streams-kopf { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.streams-kopf h1 { margin: 0 0 6px; font-size: 26px; }
+.streams-kopf p, .streams-hinweis, .streams-leer p { color: var(--text-gedaempft); }
+.streams-kopf p { margin: 0; }
+.streams-ueberblick { margin: 0 0 20px; }
+.streams-tabelle { overflow-x: auto; }
+.streams-tabelle table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+.streams-tabelle th { padding: 12px; color: var(--text-gedaempft); font-weight: 500; border-bottom: 1px solid var(--rand); }
+.streams-tabelle td { padding: 18px 12px; vertical-align: top; border-bottom: 1px solid var(--rand-zart); }
+.streams-tabelle td:first-child { width: 30%; }
+.streams-tabelle td strong, .streams-tabelle td a { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.streams-tabelle td span { display: block; margin-top: 5px; color: var(--text-gedaempft); overflow-wrap: anywhere; }
+.streams-hinweis { font-size: 13px; margin-top: 20px; line-height: 1.6; }
+.streams-leer { padding: 36px 0; border-block: 1px solid var(--rand-zart); }
+.streams-leer h2 { font-size: 20px; margin: 0 0 12px; }
+.streams-leer p { margin: 0; max-width: 620px; line-height: 1.6; }
+@media (max-width: 760px) {
+  .streams-kopf { align-items: flex-start; }
+  .streams-tabelle thead { display: none; }
+  .streams-tabelle table, .streams-tabelle tbody, .streams-tabelle tr, .streams-tabelle td { display: block; width: 100%; }
+  .streams-tabelle tr { padding: 14px 0; border-top: 1px solid var(--rand); }
+  .streams-tabelle td, .streams-tabelle td:first-child { width: auto; padding: 8px 0; border: 0; }
+  .streams-tabelle td::before { content: attr(data-label); display: block; color: var(--text-schwach); font-size: 12px; margin-bottom: 4px; }
+}

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
+from app.security import cookie_secure
 from app.services import auth
 
 router = APIRouter(prefix="/api/auth", tags=["anmeldung"])
@@ -30,7 +31,9 @@ class Setup(BaseModel):
 
 def clear_cookie(response: Response) -> None:
     response.headers["Clear-Site-Data"] = '"cache"'
-    response.delete_cookie(auth.COOKIE_NAME, path="/", secure=settings.auth_cookie_secure,
+    response.delete_cookie(auth.COOKIE_NAME, path="/", secure=True,
+                           httponly=True, samesite="strict")
+    response.delete_cookie(auth.HTTP_COOKIE_NAME, path="/", secure=False,
                            httponly=True, samesite="strict")
 
 
@@ -38,22 +41,29 @@ def clear_cookie(response: Response) -> None:
 def session(request: Request, response: Response) -> dict[str, object]:
     # Alte Versionen lieferten Bilder mit public/max-age. Neue no-store-Antworten
     # entfernen diese vorhandenen HTTP-Cache-Eintraege nicht rueckwirkend.
-    if request.cookies.get("vitrine_cache_policy") != "v2":
+    secure = cookie_secure(request)
+    marker = "vitrine_cache_policy" if secure else "vitrine_cache_policy_http"
+    if request.cookies.get(marker) != "v2":
         response.headers["Clear-Site-Data"] = '"cache"'
-        response.set_cookie("vitrine_cache_policy", "v2", max_age=31536000, path="/",
-                            secure=settings.auth_cookie_secure, httponly=True, samesite="strict")
+        response.set_cookie(marker, "v2", max_age=31536000, path="/",
+                            secure=secure, httponly=True, samesite="strict")
     return auth.status(request.state.admin_session)
 
 
 @router.post("/login")
-def login(daten: Login, response: Response) -> dict[str, object]:
+def login(daten: Login, request: Request, response: Response) -> dict[str, object]:
     try:
         token, identity = auth.login(daten.benutzer, daten.passwort)
     except auth.AuthError as error:
         raise HTTPException(error.status, str(error)) from error
+    # Ein Protokollwechsel darf kein aelteres Cookie mit einem anderen CSRF-
+    # Token bevorzugen (insbesondere localhost akzeptiert teils Secure auf HTTP).
+    for previous in request.state.admin_sessions:
+        auth.logout(previous)
+    secure = cookie_secure(request)
     response.set_cookie(
-        auth.COOKIE_NAME, token, max_age=settings.auth_session_hours * 3600,
-        expires=identity.expires_at, path="/", secure=settings.auth_cookie_secure,
+        auth.COOKIE_NAME if secure else auth.HTTP_COOKIE_NAME, token, max_age=settings.auth_session_hours * 3600,
+        expires=identity.expires_at, path="/", secure=secure,
         httponly=True, samesite="strict",
     )
     return auth.status(identity)
@@ -69,7 +79,8 @@ def setup(daten: Setup) -> None:
 
 @router.post("/logout", status_code=204)
 def logout(request: Request, response: Response) -> None:
-    auth.logout(request.state.admin_session)
+    for identity in request.state.admin_sessions:
+        auth.logout(identity)
     clear_cookie(response)
 
 

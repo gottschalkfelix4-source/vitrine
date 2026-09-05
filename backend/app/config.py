@@ -56,7 +56,8 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
     timezone: str = "Europe/Berlin"
-    # Ausschliesslich fuer ausdruecklichen lokalen HTTP-Betrieb abschalten.
+    # Altinstallationen duerfen die Variable weiter setzen. Sitzungscookies
+    # folgen jetzt automatisch HTTP/HTTPS; dieser Wert bleibt nur kompatibel.
     auth_cookie_secure: bool = True
     auth_session_hours: int = Field(default=12, ge=1, le=24)
     cors_origins: Annotated[list[str], NoDecode] = Field(

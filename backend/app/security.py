@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re
 from urllib.parse import urlsplit
 
 from starlette._utils import get_route_path
@@ -13,7 +14,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.config import settings
 from app.services import auth
 
 BODY_LIMIT = 2 * 1024 * 1024
@@ -22,6 +22,14 @@ _SAFE = {"GET", "HEAD", "OPTIONS"}
 _PUBLIC = {("GET", "/api/health"), ("GET", "/api/auth/session"),
            ("POST", "/api/auth/login"), ("POST", "/api/auth/setup")}
 _CREDENTIAL_PATHS = {"/api/auth/login", "/api/auth/setup"}
+_PUBLIC_READ = re.compile(
+    r"/api/(?:channels(?:/[^/]+)?|playlists/[^/]+|videos(?:/[^/]+(?:/(?:stream|playback-state|subtitles/[^/]+))?)?"
+    r"|search|thumbs/(?:quelle/)?[^/]+|jobs(?:/aktiv)?|storage"
+    r"|playback/[A-Za-z0-9_-]{43}/(?:index\.m3u8|segments/[0-9]+\.ts))"
+)
+_PUBLIC_PLAYBACK = re.compile(
+    r"/api/(?:videos/[^/]+/playback|playback/[A-Za-z0-9_-]{43}/(?:heartbeat|ended))"
+)
 _CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
@@ -31,7 +39,7 @@ _CSP = (
 log = logging.getLogger(__name__)
 
 
-def same_origin(headers: Headers, *, allow_http: bool = False) -> bool:
+def same_origin(headers: Headers) -> bool:
     if headers.get("sec-fetch-site", "").lower() == "cross-site":
         return False
     origin = headers.get("origin")
@@ -42,9 +50,8 @@ def same_origin(headers: Headers, *, allow_http: bool = False) -> bool:
     try:
         parsed = urlsplit(origin)
         expected = urlsplit("//" + headers.get("host", ""))
-        allowed_schemes = {"http", "https"} if allow_http or not settings.auth_cookie_secure else {"https"}
         return (
-            parsed.scheme in allowed_schemes and not parsed.username and not parsed.password
+            parsed.scheme in {"http", "https"} and not parsed.username and not parsed.password
             and parsed.path in ("", "/") and not parsed.query and not parsed.fragment
             and parsed.hostname is not None and parsed.hostname == expected.hostname
             and (parsed.port or (443 if parsed.scheme == "https" else 80))
@@ -52,6 +59,14 @@ def same_origin(headers: Headers, *, allow_http: bool = False) -> bool:
         )
     except ValueError:
         return False
+
+
+def cookie_secure(request: Request) -> bool:
+    """Browser-Origin erkennt TLS-Terminierung ohne rohe Proxyheader zu vertrauen."""
+    origin = request.headers.get("origin")
+    if origin is not None and same_origin(request.headers):
+        return urlsplit(origin).scheme == "https"
+    return request.url.scheme == "https"
 
 
 class SecurityMiddleware:
@@ -87,11 +102,9 @@ class SecurityMiddleware:
         headers = Headers(scope=scope)
         if api:
             credential_request = method == "POST" and path in _CREDENTIAL_PATHS
-            # Die Ersteinrichtung setzt nur mit dem lokalen Einmalcode ein
-            # Passwort und stellt keine Sitzung aus. Sie darf auch direkt an
-            # Unraids HTTP-Adresse erfolgen, unabhaengig vom HTTPS-Login-Cookie.
-            setup_request = method == "POST" and path == "/api/auth/setup"
-            if method not in _SAFE and not same_origin(headers, allow_http=setup_request):
+            public_playback = method == "POST" and _PUBLIC_PLAYBACK.fullmatch(path) is not None
+            public_read = method in {"GET", "HEAD"} and _PUBLIC_READ.fullmatch(path) is not None
+            if method not in _SAFE and not same_origin(headers):
                 await reject(403, "Anfragen von einer fremden Herkunft sind nicht erlaubt.")
                 return
             if credential_request and (headers.get("x-vitrine-request") != "1"
@@ -99,10 +112,23 @@ class SecurityMiddleware:
                           != "application/json"):
                 await reject(403, "Die Anmeldung muss aus der Anwendung erfolgen.")
                 return
+            if public_playback and (headers.get("x-vitrine-request") != "1"
+                    or (not path.endswith("/ended") and
+                        headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json")):
+                await reject(403, "Die Wiedergabe muss aus der Anwendung erfolgen.")
+                return
             request = Request(scope)
-            identity = await run_in_threadpool(auth.session_for, request.cookies.get(auth.COOKIE_NAME))
+            # Secure-Cookies koennen auf HTTP nicht ueberschrieben werden. Beide
+            # Protokolle erhalten daher eigene Namen; HTTPS hat bei beiden Vorrang.
+            identities = []
+            for name in (auth.COOKIE_NAME, auth.HTTP_COOKIE_NAME):
+                candidate = await run_in_threadpool(auth.session_for, request.cookies.get(name))
+                if candidate is not None:
+                    identities.append(candidate)
+            identity = identities[0] if identities else None
             scope.setdefault("state", {})["admin_session"] = identity
-            if (method, path) not in _PUBLIC:
+            scope["state"]["admin_sessions"] = identities
+            if (method, path) not in _PUBLIC and not public_read and not public_playback:
                 if identity is None:
                     await reject(401, "Bitte als Administrator anmelden.")
                     return

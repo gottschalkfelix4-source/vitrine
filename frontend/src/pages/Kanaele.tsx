@@ -3,12 +3,14 @@ import { Link } from "react-router-dom";
 
 import { Fehler, Leer, Skelettgitter } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { useAdmin } from "../components/Anmeldung";
 import { useApi } from "../hooks/useApi";
 import { api, thumbUrl } from "../lib/api";
 import { bytes, prozent, vorZeit } from "../lib/format";
 import "../styles/browse.css";
 
 export function Kanaeleseite({ aufAnlegen }: { aufAnlegen: () => void }) {
+  const admin = useAdmin();
   const { daten, laedt, fehler, neuLaden } = useApi(() => api.kanaele(), []);
   const [filter, setFilter] = useState("");
   const [sortierung, setSortierung] = useState("name");
@@ -21,11 +23,11 @@ export function Kanaeleseite({ aufAnlegen }: { aufAnlegen: () => void }) {
       <Leer
         zeichen="◎"
         titel="Noch keine Kanäle"
-        text="Nimm einen Kanal auf. Vitrine liest dann dessen Videos und Playlists und lädt sie im Hintergrund."
+        text={admin ? "Nimm einen Kanal auf. Vitrine liest dann dessen Videos und Playlists und lädt sie im Hintergrund." : "Hier erscheinen die Kanäle mit archivierten Videos."}
         kinder={
-          <button className="knopf" data-art="stark" onClick={aufAnlegen}>
+          admin ? <button className="knopf" data-art="stark" onClick={aufAnlegen}>
             Kanal aufnehmen
-          </button>
+          </button> : null
         }
       />
     );
@@ -44,9 +46,9 @@ export function Kanaeleseite({ aufAnlegen }: { aufAnlegen: () => void }) {
           <h1>Deine Kanäle</h1>
           <p className="browse-meta">{daten.length} {daten.length === 1 ? "Kanal" : "Kanäle"} im Archiv</p>
         </div>
-        <button className="knopf" data-art="stark" onClick={aufAnlegen}>
+        {admin ? <button className="knopf" data-art="stark" onClick={aufAnlegen}>
           <Icon name="plus" size={20} /> Kanal aufnehmen
-        </button>
+        </button> : null}
       </div>
 
       <div className="kanal-filter">

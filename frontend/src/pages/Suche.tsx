@@ -2,12 +2,14 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { Fehler, Gitter, Leer, Skelettgitter, Videokachel } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { useAdmin } from "../components/Anmeldung";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
 import { dauer } from "../lib/format";
 import "../styles/browse.css";
 
 export function Suchseite() {
+  const admin = useAdmin();
   const [parameter, setParameter] = useSearchParams();
   const anfrage = parameter.get("q") ?? "";
   const filter = parameter.get("bereich") ?? "alle";
@@ -35,8 +37,8 @@ export function Suchseite() {
     );
   }
 
-  const videos = daten?.videos ?? [];
-  const gesprochen = daten?.im_gesprochenen ?? [];
+  const videos = (daten?.videos ?? []).filter((v) => admin || v.status === "archived");
+  const gesprochen = (daten?.im_gesprochenen ?? []).filter((f) => admin || f.video.status === "archived");
   // Videos, die schon oben stehen, unten nicht wiederholen - es sei denn, der
   // Untertitelfund fuegt etwas hinzu, naemlich die Fundstelle.
   const gesamt = videos.length + gesprochen.length;

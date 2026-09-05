@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it } from "vitest";
-import { Anmeldung, AnmeldeSchranke, einrichtungsFehler } from "./Anmeldung";
+import { Anmeldung, AnmeldeSchranke, Sitzungsverwaltung, einrichtungsFehler } from "./Anmeldung";
 import { ApiFehler, auth } from "../lib/auth";
 
 beforeEach(() => auth.sperren());
@@ -9,6 +9,13 @@ it("rendert vor der Sitzungsprüfung keinerlei geschützte Komponenten", () => {
   function Archiv() { throw new Error("Geschütztes Archiv wurde gerendert"); return null; }
   const html = renderToStaticMarkup(<AnmeldeSchranke><Archiv /></AnmeldeSchranke>);
   expect(html).toContain("Anmeldung wird geprüft");
+});
+
+it("lässt das öffentliche Archiv während der Sitzungsprüfung offen, ohne Einrichtung aufzuzwingen", () => {
+  const html = renderToStaticMarkup(<Sitzungsverwaltung><p>Öffentliches Videoarchiv</p></Sitzungsverwaltung>);
+  expect(html).toContain("Öffentliches Videoarchiv");
+  expect(html).not.toContain("Anmeldung wird geprüft");
+  expect(html).not.toContain("<dialog");
 });
 
 it("öffnet bei fehlendem Administrator den zugänglichen Einrichtungsdialog", () => {

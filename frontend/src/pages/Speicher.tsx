@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 
 import { Hochstufen } from "../components/Hochstufen";
+import { useAdmin } from "../components/Anmeldung";
 import { Fehler, Skelettgitter } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
@@ -44,6 +45,7 @@ function stunden(sekunden: number): string {
 }
 
 export function Speicherseite() {
+  const admin = useAdmin();
   const { daten, laedt, fehler, neuLaden } = useApi(() => api.speicher(), [], 10_000);
 
   if (fehler) return <Fehler text={fehler} erneut={neuLaden} />;
@@ -127,12 +129,12 @@ export function Speicherseite() {
       {daten.traeger.length > 0 ? (
         <section className="sp-block">
           <h2>Datenträger</h2>
-          {daten.traeger.map((t) => {
+          {daten.traeger.map((t, index) => {
             const belegtAnteil = t.gesamt > 0 ? t.belegt / t.gesamt : 0;
             return (
               <div key={t.pfad} className="sp-traeger">
                 <div className="sp-zeile-kopf">
-                  <span className="sp-pfad">{t.pfad}</span>
+                  <span className="sp-pfad">{admin ? t.pfad : `Datenträger ${index + 1}`}</span>
                   <span>
                     {bytes(t.frei)} frei von {bytes(t.gesamt)}
                   </span>
@@ -170,7 +172,7 @@ export function Speicherseite() {
                   Sobald die ersten Videos liegen, rechnet die Schätzung mit deinen echten Werten.
                 </>
               )}
-              {daten.traeger.length > 0 && hr.bytes_geschaetzt > daten.traeger[0].frei ? (
+              {admin && daten.traeger.length > 0 && hr.bytes_geschaetzt > daten.traeger[0].frei ? (
                 <>
                   {" "}
                   <strong style={{ color: "var(--zu-fehler)" }}>
@@ -190,7 +192,7 @@ export function Speicherseite() {
 
       {/* ---- Nachtraeglich hoeher: gehoert hierher, weil man genau hier
               merkt, dass Platz da ist. */}
-      <Hochstufen />
+      {admin ? <Hochstufen /> : null}
 
       {/* ---- Aufteilung nach Kanal */}
       {daten.je_kanal.some((x) => x.bytes > 0) ? (

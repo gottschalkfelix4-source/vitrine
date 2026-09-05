@@ -58,6 +58,8 @@ def umgebung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     app = FastAPI()
     app.include_router(library.router)
+    # Diese Routertests pruefen die vollstaendige Administratoransicht.
+    app.dependency_overrides[library.administrator] = lambda: True
     app.dependency_overrides[get_db] = lambda: db
     return TestClient(app), db
 
