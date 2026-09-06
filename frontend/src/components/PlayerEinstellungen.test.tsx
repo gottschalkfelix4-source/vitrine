@@ -79,3 +79,29 @@ it("schließt Einstellungen über denselben Knopf und außerhalb, ohne sich wied
   await act(() => button("Außerhalb").dispatchEvent(new Event("pointerdown", { bubbles: true })));
   expect(host.querySelector('[role="menu"]')).toBeNull();
 });
+
+it("zeigt das Touch-Menü außerhalb des kleinen Videos und behält die Auswahl beim Drehen im Vollbild", async () => {
+  const waehlen = vi.fn();
+  function Beispiel({ vollbild }: { vollbild: boolean }) {
+    const bereich = useRef<HTMLDivElement>(null);
+    const [offen, setOffen] = useState(false);
+    return <div ref={bereich}><PlayerEinstellungen offen={offen} aufOffen={setOffen} bereich={bereich}
+      touch vollbild={vollbild} angebote={[{ value: "auto", label: "Automatisch" }]} qualitaet="auto"
+      bezeichnung="Automatisch" aufQualitaet={() => {}} tempo={1} aufTempo={waehlen} /></div>;
+  }
+  await act(() => root.render(<Beispiel vollbild={false} />));
+  await click(button("Wiedergabeeinstellungen"));
+  expect(host.querySelector('[role="menu"]')).toBeNull();
+  const blatt = document.body.querySelector('.player-menue-blatt')!;
+  expect(blatt.parentElement).toBe(document.body);
+  const tempo = [...blatt.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent?.startsWith("Geschwindigkeit"))!;
+  await click(tempo);
+  expect(document.activeElement?.textContent).toBe("Normal");
+  await act(() => root.render(<Beispiel vollbild />));
+  expect(document.body.querySelector('.player-menue-blatt')).toBeNull();
+  expect(host.querySelector('[role="menu"]')?.getAttribute("aria-label")).toBe("Wiedergabegeschwindigkeit");
+  await click(button("1.5×"));
+  expect(waehlen).toHaveBeenCalledExactlyOnceWith(1.5);
+  expect(host.querySelector('[role="menu"]')).toBeNull();
+  expect(document.activeElement).toBe(button("Wiedergabeeinstellungen"));
+});

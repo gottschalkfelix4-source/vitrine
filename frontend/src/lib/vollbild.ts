@@ -1,25 +1,7 @@
 /**
- * Vollbild über die drei Wege, die es in freier Wildbahn gibt.
- *
- * Der Anlass: Auf dem Telefon passierte beim Tippen auf das Vollbild-Symbol
- * schlicht nichts. Der Player rief nur `element.requestFullscreen?.()` auf -
- * die Standard-API. Die gibt es auf dem iPhone für beliebige Elemente aber
- * **nicht**, und das Fragezeichen im Aufruf hat den Fehlschlag verschluckt.
- *
- * Was die Browser tatsächlich können:
- *
- * | Browser                | Weg                                    |
- * | ---------------------- | -------------------------------------- |
- * | Chrome, Firefox, Edge  | `element.requestFullscreen()`          |
- * | Safari macOS, ältere   | `element.webkitRequestFullscreen()`    |
- * | **Safari iOS/iPadOS**  | nur `video.webkitEnterFullscreen()`    |
- *
- * Der iOS-Fall ist der unangenehme: Dort lässt sich ausschließlich das
- * Videoelement selbst ins Vollbild schicken, und zwar in Apples eigenen
- * Player. Unsere Zeitleiste, die Kapitelmarken und die Tastenkürzel sind
- * darin nicht zu sehen - man bekommt die Systembedienung. Das ist keine
- * Entscheidung, die sich anders treffen ließe; Apple bietet nichts anderes an.
- * Besser als ein Knopf, der gar nichts tut, ist es allemal.
+ * Browser-Vollbild über Standard-API und WebKit-Ergänzungen.
+ * Der Player verwendet auf Touch-Geräten stattdessen App-Vollbild, damit
+ * automatische Drehung und eigene Bedienelemente auch ohne native API gehen.
  */
 
 /** Die Hersteller-Ergänzungen stehen in keiner Typdefinition. */

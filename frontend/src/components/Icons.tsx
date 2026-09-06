@@ -10,6 +10,7 @@ const paths = {
   search: "M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0Zm-1.5 4.5L21 21",
   plus: "M12 4v16M4 12h16",
   close: "m6 6 12 12M6 18 18 6",
+  expand: "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5",
   logout: "M9 4H4v16h5M13 8l4 4-4 4M8 12h13",
   login: "M15 4h5v16h-5M8 8l4 4-4 4M3 12h9",
   arrowLeft: "m11 4-8 8 8 8M3 12h18",

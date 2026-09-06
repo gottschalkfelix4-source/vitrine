@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icon } from "./Icons";
 import { PlayerEinstellungen, PlayerUntertitel } from "./PlayerEinstellungen";
+import { usePlayerAusrichtung } from "../hooks/usePlayerAusrichtung";
 import type { Kapitel } from "../lib/api";
 import { api, untertitelUrl } from "../lib/api";
 import { useAdmin } from "./Anmeldung";
@@ -47,6 +48,10 @@ interface Props {
   aufKapitel?: (index: number | null) => void;
   theater?: boolean;
   aufTheater?: (an: boolean) => void;
+  minimiert?: boolean;
+  aufMinimieren?: () => void;
+  aufVergroessern?: () => void;
+  aufSchliessen?: () => void;
 }
 
 /** Wie oft der Player meldet, dass noch geschaut wird. Deutlich haeufiger als
@@ -107,6 +112,10 @@ export function Player({
   aufKapitel,
   theater = false,
   aufTheater,
+  minimiert = false,
+  aufMinimieren,
+  aufVergroessern,
+  aufSchliessen,
 }: Props) {
   const admin = useAdmin();
   const adminRef = useRef(admin);
@@ -134,7 +143,10 @@ export function Player({
   const [gemerkt, setGemerkt] = useState<Gemerkt>(gemerktLesen);
   const gemerktRef = useRef(gemerkt);
   gemerktRef.current = gemerkt;
-  const [vollbild, setVollbild] = useState(false);
+  const [nativesVollbild, setNativesVollbild] = useState(false);
+  const [appVollbild, setAppVollbild] = useState(false);
+  const vollbild = nativesVollbild || appVollbild;
+  const ausrichtung = usePlayerAusrichtung();
   const [sichtbar, setSichtbar] = useState(true);
   const [menue, setMenue] = useState<"einstellungen" | "untertitel" | null>(null);
   const [spur, setSpur] = useState(-1); // -1 = aus
@@ -145,6 +157,8 @@ export function Player({
   const [hinweis, setHinweis] = useState<string | null>(null);
   const zieht = useRef(false);
   const ausblender = useRef<number | undefined>(undefined);
+  const wischStart = useRef<{ x: number; y: number } | null>(null);
+  const gewischt = useRef(false);
 
   // Vor src/load/Effect-Cleanup lesen: Danach setzt der Browser Zeit und Pause zurück.
   const wiedergabeMerken = useCallback(() => {
@@ -446,7 +460,7 @@ export function Player({
   // stehen, obwohl das Video bildfuellend lief.
   useEffect(() => {
     const el = videoRef.current;
-    const beim = () => setVollbild(istVollbild(videoRef.current));
+    const beim = () => setNativesVollbild(istVollbild(videoRef.current));
     document.addEventListener("fullscreenchange", beim);
     document.addEventListener("webkitfullscreenchange", beim);
     el?.addEventListener("webkitbeginfullscreen", beim);
@@ -459,12 +473,47 @@ export function Player({
     };
   }, [lage.art]);
 
-  // Kann dieses Geraet ueberhaupt Vollbild? Wird erst nach dem ersten Rendern
-  // bestimmt, weil dafuer die Elemente stehen muessen.
-  const [vollbildMoeglich, setVollbildMoeglich] = useState(true);
+  // Beim Drehen fehlt die von iOS für natives Vollbild verlangte Klick-Geste.
+  // App-Vollbild behält das Videoelement und unsere Steuerung unverändert.
   useEffect(() => {
-    setVollbildMoeglich(wegErmitteln(huelleRef.current, videoRef.current) !== "keiner");
-  }, [lage.art]);
+    if (ausrichtung.touch) setAppVollbild(ausrichtung.quer && !minimiert);
+  }, [ausrichtung.touch, ausrichtung.quer, minimiert]);
+
+  useEffect(() => {
+    if (!minimiert) return;
+    setAppVollbild(false);
+    setMenue(null);
+    if (istVollbild(videoRef.current)) void umschaltenVollbild(huelleRef.current, videoRef.current).catch(() => {});
+  }, [minimiert]);
+
+  useEffect(() => {
+    if (!appVollbild) return;
+    const el = huelleRef.current;
+    if (!el) return;
+    const vorher = document.activeElement as HTMLElement | null;
+    const hintergrund = [...document.querySelectorAll<HTMLElement>(".kopf, .leiste, .mobile-navigation, .watch-information, .watch-neben")];
+    const gesperrt = hintergrund.map((h) => h.inert);
+    hintergrund.forEach((h) => { h.inert = true; });
+    el.focus({ preventScroll: true });
+    const fokusHalten = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const knoepfe = [...el.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]')]
+        .filter((k) => k.getClientRects().length > 0);
+      const erster = knoepfe[0];
+      const letzter = knoepfe.at(-1);
+      if (e.shiftKey && (document.activeElement === erster || document.activeElement === el)) {
+        e.preventDefault(); letzter?.focus();
+      } else if (!e.shiftKey && (document.activeElement === letzter || document.activeElement === el)) {
+        e.preventDefault(); erster?.focus();
+      }
+    };
+    el.addEventListener("keydown", fokusHalten);
+    return () => {
+      el.removeEventListener("keydown", fokusHalten);
+      hintergrund.forEach((h, i) => { h.inert = gesperrt[i]; });
+      if (vorher?.isConnected) vorher.focus({ preventScroll: true });
+    };
+  }, [appVollbild]);
 
   // ---- Steuerung ein-/ausblenden ----------------------------------------
   const zeigen = useCallback(() => {
@@ -515,12 +564,16 @@ export function Player({
   );
 
   const vollbildUmschalten = useCallback(() => {
-    // Absichtlich ohne await: Safari auf iOS knuepft die Erlaubnis an den
-    // laufenden Klick. Wer vorher noch etwas abwartet, verliert sie.
+    if (appVollbild) { setAppVollbild(false); return; }
+    const weg = wegErmitteln(huelleRef.current, videoRef.current);
+    if (!istVollbild(videoRef.current) && (ausrichtung.touch || weg === "webkit-video" || weg === "keiner")) {
+      setAppVollbild(true);
+      return;
+    }
     void umschaltenVollbild(huelleRef.current, videoRef.current).catch(() => {
-      setHinweis("Vollbild ist in diesem Browser gerade nicht verfügbar.");
+      setAppVollbild(true);
     });
-  }, []);
+  }, [appVollbild, ausrichtung.touch]);
 
   const bildImBild = useCallback(() => {
     const el = videoRef.current;
@@ -568,7 +621,7 @@ export function Player({
 
   // ---- Tastatur ----------------------------------------------------------
   useEffect(() => {
-    if (lage.art !== "bereit") return;
+    if (lage.art !== "bereit" || minimiert) return;
     const beim = (e: KeyboardEvent) => {
       const ziel = e.target as HTMLElement | null;
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || document.querySelector("dialog[open]") || huelleRef.current?.closest("[inert]") || ziel?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox]"))
@@ -586,7 +639,8 @@ export function Player({
       // Die Belegung, die YouTube-Nutzer im Muskelgedaechtnis haben.
       switch (e.key.toLowerCase()) {
         case "escape":
-          setMenue(null);
+          if (menue !== null) setMenue(null);
+          else setAppVollbild(false);
           break;
         case " ":
         case "k":
@@ -654,7 +708,7 @@ export function Player({
     return () => window.removeEventListener("keydown", beim);
   }, [
     lage.art, gesamt, umschalten, springe, vollbildUmschalten, aufTheater, theater,
-    spurWaehlen, spur, untertitel.length, bildImBild, zeigen, tonUmschalten,
+    spurWaehlen, spur, untertitel.length, bildImBild, zeigen, tonUmschalten, menue, minimiert,
   ]);
 
   // ---- Leiste: Zeiger und Ziehen ----------------------------------------
@@ -673,7 +727,7 @@ export function Player({
 
   // ---- Darstellung -------------------------------------------------------
   const gespielt = gesamt > 0 ? Math.max(0, Math.min(100, (zeit / gesamt) * 100)) : 0;
-  const steuerungSichtbar = lage.art !== "bereit" || sichtbar || !laeuft || menue !== null;
+  const steuerungSichtbar = minimiert || lage.art !== "bereit" || sichtbar || !laeuft || menue !== null;
   const zeigerKapitel = zeiger ? kapitelBei(zeiger.zeit) : null;
 
   return (
@@ -682,10 +736,13 @@ export function Player({
       className="buehne player"
       data-hochkant={hochkant}
       data-vollbild={vollbild}
+      data-app-vollbild={appVollbild}
+      data-mini={minimiert}
       data-theater={theater}
       data-steuerung={steuerungSichtbar}
       data-laeuft={laeuft}
       data-status={lage.art}
+      tabIndex={-1}
       onPointerMove={(e) => { if (e.pointerType === "mouse") zeigen(); }}
       onFocus={zeigen}
       onPointerLeave={(e) => {
@@ -699,8 +756,23 @@ export function Player({
         playsInline
         preload="metadata"
         data-modus={lage.art === "bereit" ? lage.modus : undefined}
-        onPointerDown={(e) => setTouchBedienung(e.pointerType !== "mouse")}
+        onPointerDown={(e) => {
+          setTouchBedienung(e.pointerType !== "mouse");
+          gewischt.current = false;
+          wischStart.current = e.pointerType === "touch" ? { x: e.clientX, y: e.clientY } : null;
+        }}
+        onPointerUp={(e) => {
+          const start = wischStart.current;
+          wischStart.current = null;
+          if (!start || minimiert || e.clientY - start.y < 70 || Math.abs(e.clientX - start.x) > 60) return;
+          gewischt.current = true;
+          if (vollbild) vollbildUmschalten();
+          else aufMinimieren?.();
+        }}
+        onPointerCancel={() => { wischStart.current = null; }}
         onClick={() => {
+          if (gewischt.current) { gewischt.current = false; return; }
+          if (minimiert) { aufVergroessern?.(); return; }
           if (!touchBedienung) { umschalten(); return; }
           if (!sichtbar) zeigen();
           else if (laeuft) setSichtbar(false);
@@ -726,6 +798,21 @@ export function Player({
         ))}
       </video>
 
+      <div className="player-kopf" onClick={(e) => e.stopPropagation()}>
+        {minimiert ? <>
+          <button className="steuer-knopf" onClick={aufVergroessern} aria-label="Video vergrößern" title="Video vergrößern"><Icon name="expand" /></button>
+          <span className="player-kopf-titel">{titel}</span>
+          <button className="steuer-knopf" onClick={aufSchliessen} aria-label="Video schließen" title="Video schließen"><Icon name="close" /></button>
+        </> : <>
+          {aufMinimieren ? <button className="steuer-knopf" onClick={aufMinimieren} aria-label="Video minimieren" title="Weitersehen und stöbern"><Icon name="chevronDown" /></button> : null}
+          <span className="player-kopf-titel">{vollbild ? titel : ""}</span>
+          <PlayerEinstellungen offen={menue === "einstellungen"} aufOffen={(offen) => setMenue(offen ? "einstellungen" : null)}
+            bereich={huelleRef} vollbild={vollbild} touch={ausrichtung.touch} angebote={angebote} qualitaet={qualitaet}
+            bezeichnung={lage.art === "bereit" ? lage.sitzung.quality_label || "Automatisch" : angebote.find((q) => q.value === qualitaet)?.label || "Automatisch"}
+            aufQualitaet={qualitaetWaehlen} tempo={gemerkt.tempo} aufTempo={tempoSetzen} />
+        </>}
+      </div>
+
       {lage.art === "pruefen" ? <div className="buehne-meldung player-status" role="status">Video wird geöffnet …</div> : null}
       {lage.art === "fehler" ? <div className="buehne-meldung player-status" role="alert">
         <Icon name="info" className="player-meldung-icon" size={36} />
@@ -736,7 +823,7 @@ export function Player({
       {lage.art === "bereit" && wartet && laeuft ? <div className="player-lader" aria-hidden="true" /> : null}
       {hinweis ? <div className="player-hinweis" role="status">{hinweis}</div> : null}
 
-      {lage.art === "bereit" && (!laeuft || (touchBedienung && steuerungSichtbar && menue === null)) ? (
+      {lage.art === "bereit" && (minimiert || !laeuft || ((touchBedienung || ausrichtung.touch) && steuerungSichtbar && menue === null)) ? (
         <button className="player-gross" onClick={() => { umschalten(); zeigen(); }} aria-label={laeuft ? "Pause" : "Abspielen"}>
           <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
             <path d={laeuft ? "M6 5h4v14H6zm8 0h4v14h-4z" : "M8 5v14l11-7z"} fill="currentColor" />
@@ -878,14 +965,9 @@ export function Player({
 
           <div className="steuer-luecke" />
 
-          <PlayerEinstellungen offen={menue === "einstellungen"} aufOffen={(offen) => setMenue(offen ? "einstellungen" : null)}
-            bereich={huelleRef} angebote={angebote} qualitaet={qualitaet}
-            bezeichnung={lage.art === "bereit" ? lage.sitzung.quality_label || "Automatisch" : angebote.find((q) => q.value === qualitaet)?.label || "Automatisch"}
-            aufQualitaet={qualitaetWaehlen} tempo={gemerkt.tempo} aufTempo={tempoSetzen} />
-
           {/* Untertitel */}
           {untertitel.length > 0 ? <PlayerUntertitel offen={menue === "untertitel"}
-            aufOffen={(offen) => setMenue(offen ? "untertitel" : null)} bereich={huelleRef}
+            aufOffen={(offen) => setMenue(offen ? "untertitel" : null)} bereich={huelleRef} vollbild={vollbild} touch={ausrichtung.touch}
             untertitel={untertitel} spur={spur} aufSpur={spurWaehlen} /> : null}
 
           {/* Bild-im-Bild */}
@@ -917,13 +999,10 @@ export function Player({
             </button>
           ) : null}
 
-          {/* Vollbild. Der Knopf verschwindet, wenn das Geraet nachweislich
-              keinen der drei Wege kennt - ein Knopf, der nichts tut, ist
-              schlimmer als keiner. */}
+          {/* Auf Touch-Geräten bleiben unsere Bedienelemente im App-Vollbild. */}
           <button
             className="steuer-knopf"
             onClick={vollbildUmschalten}
-            hidden={!vollbildMoeglich}
             aria-label={vollbild ? "Vollbild beenden" : "Vollbild"}
             title={vollbild ? "Vollbild beenden (f)" : "Vollbild (f)"}
           >

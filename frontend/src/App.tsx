@@ -6,6 +6,7 @@ import { Abmelden, Anmeldung, AnmeldeSchranke, Sitzungsverwaltung, useAdmin, use
 import { Icon, type IconName } from "./components/Icons";
 import { KanalAvatar, KanalKontext } from "./components/KanalAvatar";
 import { SeitenFehlergrenze } from "./components/SeitenFehlergrenze";
+import { Weitersehen } from "./components/Weitersehen";
 import { Leer, Skelettgitter } from "./components/ui";
 import { api } from "./lib/api";
 import { useApi } from "./hooks/useApi";
@@ -20,7 +21,6 @@ import { Suchseite } from "./pages/Suche";
 import { Warteschlangeseite } from "./pages/Warteschlange";
 
 // Player und Weltkarte erst laden, wenn sie tatsächlich gebraucht werden.
-const Wiedergabeseite = lazy(() => import("./pages/Wiedergabe").then((m) => ({ default: m.Wiedergabeseite })));
 const Streamsseite = lazy(() => import("./pages/Streams").then((m) => ({ default: m.Streamsseite })));
 const Einstellungenseite = lazy(() => import("./pages/Einstellungen").then((m) => ({ default: m.Einstellungenseite })));
 
@@ -253,6 +253,7 @@ function Archiv() {
   const schmal = handbetrieb ? false : (vonHand ?? (aufWiedergabe || kompakt));
   const kanaele = useApi(() => api.kanaele(), [], LEISTE_INTERVALL);
   const inhalt = useRef<HTMLElement>(null);
+  const scrollPositionen = useRef(new Map<string, number>());
   const dialogAusloeser = useRef<HTMLElement | null>(null);
   function kanalDialogOeffnen() {
     if (!admin) return;
@@ -269,8 +270,14 @@ function Archiv() {
 
   useEffect(() => {
     setSchubladeOffen(false);
-    inhalt.current?.scrollTo({ top: 0 });
-  }, [ort.pathname, ort.search, ort.key]);
+    const el = inhalt.current;
+    if (!el) return;
+    const schluessel = ort.pathname + ort.search;
+    el.scrollTo({ top: ort.state?.weitersehen ? scrollPositionen.current.get(schluessel) ?? 0 : 0 });
+    const merken = () => scrollPositionen.current.set(schluessel, el.scrollTop);
+    el.addEventListener("scroll", merken);
+    return () => el.removeEventListener("scroll", merken);
+  }, [ort.pathname, ort.search, ort.key, ort.state]);
   useEffect(() => { if (!handbetrieb) setSchubladeOffen(false); }, [handbetrieb]);
 
   useEffect(() => {
@@ -293,6 +300,7 @@ function Archiv() {
           schubladeOffen={handbetrieb && schubladeOffen} aufSchliessen={() => setSchubladeOffen(false)} />
         <main id="inhalt" className="inhalt" ref={inhalt} tabIndex={-1} inert={schubladeOffen || dialogOffen}>
           {admin ? <Fortschrittsleiste /> : null}
+          <Weitersehen>
           <SeitenFehlergrenze key={ort.pathname + (ort.pathname === "/suche" ? new URLSearchParams(ort.search).get("q") ?? "" : "")}>
           <Suspense fallback={<Skelettgitter anzahl={6} />}>
           <Routes>
@@ -300,7 +308,7 @@ function Archiv() {
             <Route path="/kanaele" element={<Kanaeleseite aufAnlegen={kanalDialogOeffnen} />} />
             <Route path="/kanal/:kanalId" element={<Kanalseite key={ort.pathname} />} />
             <Route path="/playlist/:playlistId" element={<Playlistseite key={ort.pathname} />} />
-            <Route path="/video/:videoId" element={<Wiedergabeseite key={ort.pathname} />} />
+            <Route path="/video/:videoId" element={null} />
             <Route path="/suche" element={<Suchseite />} />
             <Route path="/warteschlange" element={<AnmeldeSchranke><Warteschlangeseite /></AnmeldeSchranke>} />
             <Route path="/speicher" element={<AnmeldeSchranke><Speicherseite /></AnmeldeSchranke>} />
@@ -312,6 +320,7 @@ function Archiv() {
           </Routes>
           </Suspense>
           </SeitenFehlergrenze>
+          </Weitersehen>
         </main>
         <MobileNavigation gesperrt={schubladeOffen || dialogOffen} />
         {admin && dialogOffen ? <KanalAnlegenDialog aufSchliessen={kanalDialogSchliessen} /> : null}

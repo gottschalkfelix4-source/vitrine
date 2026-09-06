@@ -9,19 +9,28 @@ interface MenueProps {
   offen: boolean;
   aufOffen: (offen: boolean) => void;
   bereich: RefObject<HTMLDivElement | null>;
+  touch?: boolean;
+  vollbild?: boolean;
 }
 
-/** Beide Menüs bleiben im Vollbildelement und teilen ihre Tastaturbedienung. */
-function PlayerMenue({ offen, aufOffen, bereich, name, titel = name, inhaltName = name, symbol, aktiv, seite, zurueck, children }: MenueProps & {
+/** Auf Touch außerhalb des Vollbilds als Blatt, sonst innerhalb des Players. */
+function PlayerMenue({ offen, aufOffen, bereich, touch, vollbild, name, titel = name, inhaltName = name, symbol, aktiv, seite, zurueck, children }: MenueProps & {
   name: string; titel?: string; inhaltName?: string; symbol: ReactNode; aktiv?: boolean;
   seite?: string; zurueck?: () => void; children: (schliessen: () => void) => ReactNode;
 }) {
   const knopf = useRef<HTMLButtonElement>(null);
   const menue = useRef<HTMLDivElement>(null);
   const id = useId();
+  const blatt = touch && !vollbild;
   function schliessen(fokus = true) {
     aufOffen(false);
     if (fokus) knopf.current?.focus();
+  }
+  function darstellen(knoten: ReactNode) {
+    return blatt ? <div className="watch-seite player-menue-blatt">
+      <button className="player-menue-hintergrund" aria-label="Menü schließen" tabIndex={-1} onClick={() => schliessen()} />
+      {knoten}
+    </div> : knoten;
   }
   useEffect(() => {
     if (!offen) return;
@@ -47,7 +56,7 @@ function PlayerMenue({ offen, aufOffen, bereich, name, titel = name, inhaltName 
     <button ref={knopf} className={`steuer-knopf${typeof symbol === "string" ? " steuer-text" : ""}`}
       aria-label={name} title={titel} data-aktiv={aktiv} aria-haspopup="menu" aria-expanded={offen}
       aria-controls={offen ? id : undefined} onClick={() => aufOffen(!offen)}>{symbol}</button>
-    {offen && bereich.current ? createPortal(<div ref={menue} id={id} className="steuer-menue player-einstellungen"
+    {offen && bereich.current ? createPortal(darstellen(<div ref={menue} id={id} className="steuer-menue player-einstellungen"
       role="menu" aria-label={inhaltName} onBlur={(e) => {
         if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget) && !knopf.current?.contains(e.relatedTarget)) aufOffen(false);
       }} onKeyDown={(e) => {
@@ -64,18 +73,21 @@ function PlayerMenue({ offen, aufOffen, bereich, name, titel = name, inhaltName 
         if (e.key === "End") ziel = knoepfe.length - 1;
         if (e.key === "ArrowLeft" && zurueck) { e.preventDefault(); zurueck(); }
         if (ziel !== null) { e.preventDefault(); knoepfe[ziel]?.focus(); }
-      }}>{children(() => schliessen())}</div>, bereich.current) : null}
+      }}>
+        {blatt ? <button role="menuitem" className="player-menue-schliessen" onClick={() => schliessen()}><span>{inhaltName}</span><Icon name="close" size={20} /></button> : null}
+        {children(() => schliessen())}
+      </div>), blatt ? document.body : bereich.current) : null}
   </>;
 }
 
-export function PlayerEinstellungen({ offen, aufOffen, bereich, angebote, qualitaet, bezeichnung, aufQualitaet, tempo, aufTempo }: MenueProps & {
+export function PlayerEinstellungen({ offen, aufOffen, bereich, touch, vollbild, angebote, qualitaet, bezeichnung, aufQualitaet, tempo, aufTempo }: MenueProps & {
   angebote: Qualitaetsangebot[]; qualitaet: WiedergabeQualitaet; bezeichnung: string;
   aufQualitaet: (q: WiedergabeQualitaet) => void; tempo: number; aufTempo: (t: number) => void;
 }) {
   const [seite, setSeite] = useState<"haupt" | "qualitaet" | "tempo">("haupt");
   useEffect(() => { if (!offen) setSeite("haupt"); }, [offen]);
   const tempi = [...new Set([...TEMPI, tempo])].sort((a, b) => a - b);
-  return <PlayerMenue offen={offen} aufOffen={aufOffen} bereich={bereich} name="Wiedergabeeinstellungen"
+  return <PlayerMenue offen={offen} aufOffen={aufOffen} bereich={bereich} touch={touch} vollbild={vollbild} name="Wiedergabeeinstellungen"
     inhaltName={seite === "qualitaet" ? "Qualität" : seite === "tempo" ? "Wiedergabegeschwindigkeit" : "Wiedergabeeinstellungen"}
     symbol={<Icon name="settings" />} seite={seite} zurueck={seite === "haupt" ? undefined : () => setSeite("haupt")}>
     {(schliessen) => seite === "haupt" ? <>
@@ -91,10 +103,10 @@ export function PlayerEinstellungen({ offen, aufOffen, bereich, angebote, qualit
   </PlayerMenue>;
 }
 
-export function PlayerUntertitel({ offen, aufOffen, bereich, untertitel, spur, aufSpur }: MenueProps & {
+export function PlayerUntertitel({ offen, aufOffen, bereich, touch, vollbild, untertitel, spur, aufSpur }: MenueProps & {
   untertitel: { sprache: string; automatisch: boolean }[]; spur: number; aufSpur: (spur: number) => void;
 }) {
-  return <PlayerMenue offen={offen} aufOffen={aufOffen} bereich={bereich} name="Untertitel" titel="Untertitel (c)" symbol="CC" aktiv={spur >= 0}>
+  return <PlayerMenue offen={offen} aufOffen={aufOffen} bereich={bereich} touch={touch} vollbild={vollbild} name="Untertitel" titel="Untertitel (c)" symbol="CC" aktiv={spur >= 0}>
     {(schliessen) => <>
       <button role="menuitemradio" aria-checked={spur === -1} data-aktiv={spur === -1} onClick={() => { aufSpur(-1); schliessen(); }}>Aus</button>
       {untertitel.map((u, i) => <button key={`${u.sprache}-${u.automatisch}`} role="menuitemradio" aria-checked={spur === i}

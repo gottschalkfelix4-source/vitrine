@@ -874,6 +874,17 @@ Wartende Auftraege erscheinen als lesbare Zeilen ohne breite Tabelle;
 Einstellungsbereiche lassen sich horizontal durchblaettern. Der Balken am
 unteren Rand wird ueber `env(safe-area-inset-bottom)` freigehalten.
 
+Beim Drehen ins Querformat fuellt ein geoeffnetes Video den App-Bereich;
+hochkant erscheint wieder die vorherige Videoansicht. Die eigenen
+Bedienelemente bleiben dabei erreichbar. Das Zahnrad sitzt oben rechts;
+im Hochformat oeffnet es ein grosses, scrollbar bedienbares Einstellungsmenue.
+
+Der Pfeil oben links oder ein Wisch nach unten minimiert das Video. Es laeuft
+dann unten rechts weiter, waehrend du im Archiv stoeberst. Antippen oder das
+Vergroessern-Symbol oeffnet dieselbe Wiedergabe wieder; Pause und Schliessen
+sind direkt im kleinen Player erreichbar. Beim Wechsel zwischen den Ansichten
+bleiben Position, Tempo und die aktive Wiedergabesitzung erhalten.
+
 Zusaetzlich ist das Archiv eine Progressive Web App: Mit Manifest, Symbolen und
 einem Service Worker laesst es sich auf den Startbildschirm legen und startet
 dann ohne Browserleiste. Der Worker speichert die Oberflaeche und die

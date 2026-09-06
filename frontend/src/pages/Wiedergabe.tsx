@@ -13,7 +13,12 @@ import { lokalFortschrittLesen } from "../lib/wiedergabeFortschritt";
 import { aufrufe, bytes, dauer, datum, istHochaufloesend, prozent, qualitaet } from "../lib/format";
 import "../styles/watch.css";
 
-export function Wiedergabeseite() {
+export function Wiedergabeseite({ minimiert = false, aufMinimieren, aufVergroessern, aufSchliessen }: {
+  minimiert?: boolean;
+  aufMinimieren?: () => void;
+  aufVergroessern?: () => void;
+  aufSchliessen?: () => void;
+} = {}) {
   const admin = useAdmin();
   const { videoId = "" } = useParams();
   const [parameter] = useSearchParams();
@@ -41,10 +46,20 @@ export function Wiedergabeseite() {
 
   const beiKapitel = useCallback((i: number | null) => setAktivesKapitel(i), []);
 
-  if (detail.fehler) return <Fehler text={detail.fehler} erneut={detail.neuLaden} />;
   // useApi behält Daten während des Nachladens. Beim Video-Wechsel darf der
   // neue Player nicht mit Titel und Fortschritt des vorherigen Videos starten.
-  if (!detail.daten || detail.daten.video.id !== videoId) {
+  if (detail.fehler || !detail.daten || detail.daten.video.id !== videoId) {
+    if (minimiert) return <div className="watch watch-seite" data-mini="true">
+      <div className="watch-player"><div className="buehne player" data-mini="true">
+        <div className="player-kopf">
+          <button className="steuer-knopf" onClick={aufVergroessern} aria-label="Video vergrößern"><Icon name="expand" /></button>
+          <span className="player-kopf-titel">{detail.fehler ? "Video nicht verfügbar" : "Video wird geladen …"}</span>
+          <button className="steuer-knopf" onClick={aufSchliessen} aria-label="Video schließen"><Icon name="close" /></button>
+        </div>
+        <span className="buehne-meldung" role={detail.fehler ? "alert" : "status"}>{detail.fehler ? "Zum Wiederholen öffnen" : "Wird geladen …"}</span>
+      </div></div>
+    </div>;
+    if (detail.fehler) return <Fehler text={detail.fehler} erneut={detail.neuLaden} />;
     return <div className="watch-laden" aria-label="Video wird geladen"><div className="skelett watch-laden-bild" /><Skelettgitter anzahl={3} /></div>;
   }
 
@@ -70,6 +85,7 @@ export function Wiedergabeseite() {
     setEntfernenFehler(null);
     try {
       await api.videoEntfernen(videoId);
+      aufSchliessen?.();
       navigate(v.kanal_id ? `/kanal/${v.kanal_id}` : "/");
     } catch (e) {
       setEntfernenFehler(e instanceof Error ? e.message : String(e));
@@ -79,7 +95,7 @@ export function Wiedergabeseite() {
   }
 
   return (
-    <div className="watch watch-seite" data-theater={theater}>
+    <div className="watch watch-seite" data-theater={theater} data-mini={minimiert}>
       <div className="watch-player" ref={playerBereich}>
         <Player
           key={videoId}
@@ -94,6 +110,10 @@ export function Wiedergabeseite() {
           aufKapitel={beiKapitel}
           theater={theater}
           aufTheater={setTheater}
+          minimiert={minimiert}
+          aufMinimieren={aufMinimieren}
+          aufVergroessern={aufVergroessern}
+          aufSchliessen={aufSchliessen}
         />
       </div>
 
