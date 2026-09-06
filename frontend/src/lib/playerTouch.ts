@@ -12,6 +12,7 @@ export function playerTouchAbschliessen() {
   const entfernen = () => {
     document.removeEventListener("click", klick, true);
     document.removeEventListener("pointerdown", entfernen, true);
+    document.removeEventListener("touchstart", entfernen, true);
     clearTimeout(timer);
     aufraeumen = undefined;
   };
@@ -19,5 +20,6 @@ export function playerTouchAbschliessen() {
   document.addEventListener("click", klick, true);
   // Ein neuer Druck ist eine neue Absicht und darf sofort wieder auslösen.
   document.addEventListener("pointerdown", entfernen, true);
+  document.addEventListener("touchstart", entfernen, { capture: true, passive: true });
   aufraeumen = entfernen;
 }

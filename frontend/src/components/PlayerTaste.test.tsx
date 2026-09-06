@@ -64,3 +64,45 @@ it("lässt den nachgereichten Klick nicht auf einen neuen Menühintergrund durch
   expect(schliessen).toHaveBeenCalledTimes(1);
   hintergrund.remove();
 });
+
+it("verwirft einen normalen Klick nicht, wenn Safari den vorherigen Pointer-Start ausgelassen hat", async () => {
+  const aktion = await starten();
+  await zeiger("pointerup");
+  await act(() => host.querySelector('button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+  expect(aktion).toHaveBeenCalledTimes(1);
+});
+
+async function touch(typ: string, x = 20) {
+  const punkt = { identifier: 7, clientX: x, clientY: 20 };
+  const e = Object.assign(new Event(typ, { bubbles: true, cancelable: true }), {
+    changedTouches: [punkt], touches: typ === "touchend" || typ === "touchcancel" ? [] : [punkt],
+  });
+  await act(() => host.querySelector('button')!.dispatchEvent(e));
+}
+
+it("lässt den Klick auch bei einem Touch-Ende ohne Start als Rückfallweg zu", async () => {
+  const aktion = await starten();
+  await touch("touchend");
+  await act(() => host.querySelector('button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+  expect(aktion).toHaveBeenCalledTimes(1);
+});
+
+it("bedient die Taste auch ausschließlich über Touch-Events", async () => {
+  const aktion = await starten();
+  await touch("touchstart"); await touch("touchend");
+  expect(aktion).toHaveBeenCalledTimes(1);
+  await act(() => host.querySelector('button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+  expect(aktion).toHaveBeenCalledTimes(1);
+  await touch("touchstart"); await touch("touchend");
+  expect(aktion).toHaveBeenCalledTimes(2);
+});
+
+it("führt bei Pointer- und Touch-Events genau eine Aktion aus und lässt Scrollen zu", async () => {
+  const aktion = await starten();
+  await zeiger("pointerdown"); await touch("touchstart");
+  await zeiger("pointerup"); await touch("touchend");
+  expect(aktion).toHaveBeenCalledTimes(1);
+  await touch("touchstart"); await touch("touchmove", 50); await touch("touchend", 50);
+  await act(() => host.querySelector('button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+  expect(aktion).toHaveBeenCalledTimes(1);
+});

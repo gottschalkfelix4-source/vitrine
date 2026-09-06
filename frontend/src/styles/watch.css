@@ -113,7 +113,7 @@
 .watch-seite .zeitleiste:focus-visible .leiste-griff { transform: translateY(-50%) scale(1); }
 .watch-seite .player-meldung-icon { display: block; margin: 0 auto 14px; width: 36px; height: 36px; }
 .watch-seite .buehne-meldung { color: #ddd; max-width: none; }
-.watch-seite .player-status { display: flex; flex-direction: column; align-items: center; justify-content: safe center; }
+.watch-seite .player-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: safe center; }
 .watch-seite .player-status .player-erneut { flex-shrink: 0; margin-top: 8px; min-height: 40px; }
 .watch-seite .buehne-meldung h2 { color: #fff; font-size: 16px; margin-bottom: 6px; }
 .watch-seite .buehne-meldung p { color: #aaa; margin: 0 0 16px; }
@@ -189,6 +189,8 @@
 /* Das decodierte Video nimmt keine Taps vor den HTML-Bedienelementen an. */
 .watch-seite .player { isolation: isolate; }
 .watch-seite .player video { z-index: 0; pointer-events: none; }
+/* Eigene zusammengesetzte HTML-Ebene über der nativen iOS-Videofläche. */
+.player-oberflaeche { position: absolute; inset: 0; z-index: 1; transform: translateZ(0); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .player-gesten { position: absolute; inset: 0; z-index: 1; touch-action: none; }
 .watch-seite .player-gross[hidden] { display: none; }
 .watch-seite .player-kopf svg, .watch-seite .player-steuerung svg, .player-einstellungen svg { pointer-events: none; }

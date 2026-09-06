@@ -32,6 +32,12 @@ export function usePlayerSteuerung({ laeuft, bereit, minimiert, menueOffen, voll
   }, [festhalten, vollbild, zeigen]);
 
   const ereignisse: HTMLAttributes<HTMLDivElement> = {
+    onTouchStartCapture: () => {
+      letzterTouch.current = Date.now(); gedrueckt.current = true;
+      setTastaturFokus(false); clearTimeout(timer.current);
+    },
+    onTouchEndCapture: () => { gedrueckt.current = false; planen(); },
+    onTouchCancelCapture: () => { gedrueckt.current = false; planen(); },
     onPointerDownCapture: (e) => {
       if (e.pointerType !== "mouse") letzterTouch.current = Date.now();
       gedrueckt.current = true;

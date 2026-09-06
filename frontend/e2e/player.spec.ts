@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { clip } from "./clip";
 
-async function archiv(page: Page, ohneKlick = false, maus = false) {
+async function archiv(page: Page, ohneKlick = false, maus = false, ohnePointer = false) {
   const sitzungen = { gestartet: 0, beendet: 0 };
-  await page.addInitScript((ohneKlick) => {
+  await page.addInitScript(({ ohneKlick, ohnePointer }) => {
     Object.defineProperty(navigator, "standalone", { value: true });
     const ausrichtung = Object.assign(new EventTarget(), { type: "portrait-primary" });
     Object.defineProperty(screen, "orientation", { get: () => ausrichtung });
@@ -15,7 +15,13 @@ async function archiv(page: Page, ohneKlick = false, maus = false) {
     if (ohneKlick) document.addEventListener("click", (e) => {
       if (e.detail > 0 && (e.target as Element).closest(".player, .player-menue-blatt")) e.stopImmediatePropagation();
     }, true);
-  }, ohneKlick);
+    // iOS-Touch muss unabhängig von Pointer-Events und deren Metadaten funktionieren.
+    if (ohnePointer) for (const name of ["pointerdown", "pointerup", "pointermove", "pointercancel"]) {
+      document.addEventListener(name, (e) => {
+        if ((e.target as Element).closest(".player, .player-menue-blatt")) e.stopImmediatePropagation();
+      }, true);
+    }
+  }, { ohneKlick, ohnePointer });
   const angebote = [{ value: "auto", label: "Automatisch" }, { value: "original", label: "Original" }, { value: "720p", label: "720p" }];
   const video = (id: string) => ({ id, titel: `Testvideo ${id}`, kanal_id: "kanal", kanal_name: "Testkanal", dauer_s: 60,
     status: "archived", hoehe: 72, breite: 128, fps: 1, bild: null, ist_short: false, war_live: false, gesehen: false, fortschritt_s: 0 });
@@ -69,10 +75,39 @@ async function gleicheWiedergabe(page: Page) {
   await expect.poll(() => page.locator('video').evaluate(v => v.currentTime)).toBeGreaterThanOrEqual(12);
 }
 
-for (const ohneKlick of [false, true]) {
-  test(`Menüs und Miniplayer mit Touch${ohneKlick ? " ohne Klickereignis" : ""}`, async ({ page }) => {
-    const sitzungen = await archiv(page, ohneKlick);
+for (const modus of ["normal", "ohne Klickereignis", "ohne Pointer-Events"]) {
+  test(`Alle Bedienelemente mit Touch ${modus}`, async ({ page }, info) => {
+    const sitzungen = await archiv(page, modus === "ohne Klickereignis", false, modus === "ohne Pointer-Events");
     const taste = (name: string) => page.getByRole("button", { name, exact: true });
+    await bildAntippen(page);
+    await expect(page.locator('.player')).toHaveAttribute("data-steuerung", "false");
+    await bildAntippen(page);
+    await expect(page.locator('.player')).toHaveAttribute("data-steuerung", "true");
+    // Prüft die tatsächliche Trefferfläche, nicht nur Sichtbarkeit oder Handler.
+    const verdeckt = await page.locator('.player button').evaluateAll(tasten => tasten.filter(taste => {
+      const r = taste.getBoundingClientRect();
+      if (!r.width || !r.height || getComputedStyle(taste).visibility === "hidden") return false;
+      const ziel = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !ziel || !taste.contains(ziel);
+    }).map(taste => taste.getAttribute("aria-label")));
+    expect(verdeckt).toEqual([]);
+    await page.locator('.player-gross').tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(true);
+    await page.locator('.steuer-zeile').getByRole("button", { name: "Abspielen", exact: true }).tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(false);
+    await page.locator('.steuer-zeile').getByRole("button", { name: "Pause", exact: true }).tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(true);
+    await taste("Ton an").tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.muted)).toBe(false);
+    await taste("Stumm").tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.muted)).toBe(true);
+    const zeitleiste = page.getByRole("slider", { name: "Position" });
+    const breite = await zeitleiste.evaluate(el => el.getBoundingClientRect().width);
+    await zeitleiste.tap({ position: { x: breite / 3, y: 12 } });
+    await expect.poll(() => page.locator('video').evaluate(v => Math.round(v.currentTime))).toBe(20);
+    if (modus === "normal") await page.screenshot({ path: info.outputPath("portrait.png") });
+    await page.locator('.player-gross').tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(false);
     await taste("Wiedergabeeinstellungen").tap();
     await page.getByRole("menuitem", { name: /Geschwindigkeit/ }).tap();
     await page.getByRole("menuitemradio", { name: "2.5×", exact: true }).tap();
@@ -87,12 +122,14 @@ for (const ohneKlick of [false, true]) {
     await expect.poll(() => page.locator('video').evaluate(v => v.textTracks[0].mode)).toBe("showing");
     await drehen(page, true);
     await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "true");
+    if (modus === "normal") await page.screenshot({ path: info.outputPath("quer.png") });
     const vorher = sitzungen.gestartet;
     await taste("Video minimieren").tap();
     await expect(page.locator('.player')).toHaveAttribute("data-mini", "true");
     await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "false");
     await drehen(page, false);
     await page.locator('.mobile-navigation a[href="/kanaele"]').tap();
+    if (modus === "normal") await page.screenshot({ path: info.outputPath("mini.png") });
     await gleicheWiedergabe(page);
     await taste("Pause").tap();
     await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(true);

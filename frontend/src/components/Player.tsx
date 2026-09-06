@@ -157,6 +157,7 @@ export function Player({
   const [hinweis, setHinweis] = useState<string | null>(null);
   const zieht = useRef(false);
   const wischStart = useRef<{ x: number; y: number } | null>(null);
+  const gesteMitTouch = useRef(false);
   const { sichtbar: steuerungSichtbar, zeigen, ausblenden, ereignisse } = usePlayerSteuerung({
     laeuft, bereit: lage.art === "bereit", minimiert, menueOffen: menue !== null, vollbild,
   });
@@ -563,6 +564,21 @@ export function Player({
     aufMinimieren?.();
   };
 
+  const gesteBeenden = (x: number, y: number) => {
+    const start = wischStart.current;
+    wischStart.current = null;
+    if (!start) return;
+    const dx = x - start.x, dy = y - start.y;
+    if (dy >= 70 && Math.abs(dx) <= 60 && !minimiert && aufMinimieren) {
+      playerTouchAbschliessen(); minimieren();
+    } else if (Math.hypot(dx, dy) <= 12) {
+      playerTouchAbschliessen();
+      if (minimiert) aufVergroessern?.();
+      else if (steuerungSichtbar) ausblenden();
+      else zeigen();
+    }
+  };
+
   const bildImBild = useCallback(() => {
     const el = videoRef.current;
     if (!el || el.readyState < 1 || !document.pictureInPictureEnabled || typeof el.requestPictureInPicture !== "function") return;
@@ -758,26 +774,25 @@ export function Player({
           />
         ))}
       </video>
+      <div className="player-oberflaeche">
       <div className="player-gesten" aria-hidden="true"
         onPointerDown={(e) => {
+          gesteMitTouch.current = false;
           touchBedienung.current = e.pointerType !== "mouse";
           wischStart.current = touchBedienung.current ? { x: e.clientX, y: e.clientY } : null;
-          if (touchBedienung.current) e.currentTarget.setPointerCapture(e.pointerId);
         }}
         onPointerUp={(e) => {
-          const start = wischStart.current;
-          wischStart.current = null;
-          if (!start) return;
-          playerTouchAbschliessen();
-          const dx = e.clientX - start.x, dy = e.clientY - start.y;
-          if (dy >= 70 && Math.abs(dx) <= 60 && !minimiert && aufMinimieren) minimieren();
-          else if (Math.hypot(dx, dy) <= 12) {
-            if (minimiert) aufVergroessern?.();
-            else if (steuerungSichtbar) ausblenden();
-            else zeigen();
-          }
+          if (!gesteMitTouch.current) gesteBeenden(e.clientX, e.clientY);
         }}
         onPointerCancel={() => { wischStart.current = null; }}
+        onTouchStart={(e) => {
+          gesteMitTouch.current = true;
+          touchBedienung.current = true;
+          const t = e.touches[0];
+          wischStart.current = e.touches.length === 1 && t ? { x: t.clientX, y: t.clientY } : null;
+        }}
+        onTouchEnd={(e) => { const t = e.changedTouches[0]; if (t) gesteBeenden(t.clientX, t.clientY); }}
+        onTouchCancel={() => { wischStart.current = null; }}
         onClick={() => {
           if (touchBedienung.current) return;
           if (minimiert) aufVergroessern?.();
@@ -868,6 +883,17 @@ export function Player({
           onPointerLeave={() => {
             if (!zieht.current) setZeiger(null);
           }}
+          onTouchStart={(e) => {
+            if (lage.art !== "bereit" || gesamt <= 0 || e.touches.length !== 1) return;
+            zieht.current = true; zeigen(); springe(zeitAmZeiger(e.touches[0].clientX).zeit);
+          }}
+          onTouchMove={(e) => { if (zieht.current) springe(zeitAmZeiger(e.touches[0].clientX).zeit); }}
+          onTouchEnd={(e) => {
+            if (!zieht.current) return;
+            const t = e.changedTouches[0]; if (t) springe(zeitAmZeiger(t.clientX).zeit);
+            zieht.current = false; setZeiger(null); zeigen();
+          }}
+          onTouchCancel={() => { zieht.current = false; setZeiger(null); }}
         >
           <div className="leiste-spur">
             {gesamt > 0
@@ -1004,6 +1030,7 @@ export function Player({
             )}
           </PlayerTaste>
         </div>
+      </div>
       </div>
     </div>
   );
