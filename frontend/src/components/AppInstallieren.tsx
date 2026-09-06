@@ -35,8 +35,7 @@ export function AppInstallieren() {
         <div>
           <strong>Läuft als App.</strong>
           <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
-            Vorschaubilder werden auf dem Gerät behalten, die Oberfläche startet
-            ohne Browserleiste.
+            Das Archiv startet mit eigenem Symbol und ohne Browserleiste.
           </div>
         </div>
       </div>
@@ -45,18 +44,17 @@ export function AppInstallieren() {
 
   if (zustand.art === "unsicher") {
     return (
-      <div className="hinweis" data-art="arbeit">
+      <div className="hinweis">
         <div>
-          <strong>Als App installieren geht hier nicht.</strong>
+          <strong>App-Installation benötigt HTTPS.</strong>
           <div style={{ color: "var(--text-gedaempft)", marginTop: 6 }}>
-            Das Archiv ist über <code>{zustand.herkunft}</code> geöffnet. Browser
-            erlauben die Installation und den Bildspeicher nur über HTTPS – oder
-            über <code>localhost</code>, was auf dem Telefon nicht hilft. Im
-            Browser funktioniert weiterhin alles, nur eben ohne eigenes Symbol
-            auf dem Startbildschirm.
+            Du nutzt das Archiv über <code>{zustand.herkunft}</code>.
+            Anmeldung, Einstellungen und Videos funktionieren auch über HTTP.
+            Für die optionale Installation als App öffne das Archiv über HTTPS
+            oder direkt auf dem Server über <code>localhost</code>.
           </div>
-          <div style={{ color: "var(--text-gedaempft)", marginTop: 10 }}>
-            Drei übliche Wege zu HTTPS im eigenen Netz:
+          <details style={{ color: "var(--text-gedaempft)", marginTop: 10 }}>
+            <summary>HTTPS im eigenen Netz einrichten</summary>
             <ul style={{ margin: "6px 0 0", paddingLeft: 20, lineHeight: 1.7 }}>
               <li>
                 <strong>Tailscale</strong> – vergibt selbst ein gültiges
@@ -71,7 +69,7 @@ export function AppInstallieren() {
                 Router.
               </li>
             </ul>
-          </div>
+          </details>
         </div>
       </div>
     );
@@ -84,8 +82,7 @@ export function AppInstallieren() {
           <div style={{ flex: 1, minWidth: 220 }}>
             <strong>Als App auf dem Gerät ablegen</strong>
             <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
-              Eigenes Symbol, Start ohne Browserleiste, Vorschaubilder bleiben
-              gespeichert.
+              Eigenes Symbol und Start ohne Browserleiste.
             </div>
           </div>
           <button className="knopf" data-art="stark" onClick={() => void installieren()}>
@@ -100,9 +97,11 @@ export function AppInstallieren() {
     return (
       <div className="hinweis">
         <div>
-          <strong>Dieser Browser kann keine Apps ablegen.</strong>
+          <strong>App-Funktionen sind hier nicht verfügbar.</strong>
           <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
-            Das Archiv funktioniert trotzdem vollständig.
+            Der Browser stellt den Hintergrunddienst für die App hier nicht
+            bereit. Du kannst dich anmelden und das Archiv vollständig im
+            Browser nutzen.
           </div>
         </div>
       </div>

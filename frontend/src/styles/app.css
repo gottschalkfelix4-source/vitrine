@@ -1350,7 +1350,7 @@
   .kopf-rechts .kanal-hinzufuegen { width: 40px; height: 40px; padding: 8px; justify-content: center; }
   .inhalt { padding-left: 24px; padding-right: 24px; }
 }
-@media (max-width: 860px) {
+@media (max-width: 860px), (max-width: 1000px) and (max-height: 500px) and (pointer: coarse) {
   .huelle { grid-template-columns: minmax(0, 1fr); grid-template-areas: "kopf" "inhalt"; }
   .leiste { position: fixed; top: var(--kopf-hoehe); left: 0; bottom: 0; width: 240px; z-index: 30; visibility: hidden; border-right: 1px solid var(--rand); padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
   .leiste[data-offen="true"] { visibility: visible; }
@@ -1410,11 +1410,6 @@
   .player-einstellungen.steuer-menue { bottom: 56px; max-height: calc(100% - 64px); }
   .player-status { inset-block-end: 64px; padding: 12px; }
   .player-status .player-meldung-icon { display: none; }
-}
-@media (display-mode: standalone) {
-  .kopf { padding-top: env(safe-area-inset-top); }
-  .huelle { grid-template-rows: calc(var(--kopf-hoehe) + env(safe-area-inset-top)) minmax(0,1fr); }
-  .leiste, .leiste-schatten { top: calc(var(--kopf-hoehe) + env(safe-area-inset-top)); }
 }
 
 /* ---- Qualitaet nachtraeglich anheben */
@@ -1733,6 +1728,12 @@
 
 /* Gemeinsame App-Oberfläche: feste Navigation, ein klarer Scrollbereich. */
 .huelle { grid-template-rows: var(--kopf-gesamt) minmax(0, 1fr); }
+@media (display-mode: standalone) {
+  /* Die installierte App füllt ihren Viewport direkt. iOS kann für 100dvh
+     und den verfügbaren Bereich unterschiedliche Höhen liefern. Die Safe
+     Areas werden innerhalb des Grids von Kopf und Navigation reserviert. */
+  .huelle { position: fixed; inset: 0; height: auto; }
+}
 .kopf {
   padding-top: env(safe-area-inset-top, 0px);
   padding-left: max(16px, env(safe-area-inset-left, 0px));
@@ -1789,9 +1790,16 @@
 @media (max-width: 1100px) {
   .kopf { padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 }
-@media (max-width: 860px) {
+@media (max-width: 860px), (max-width: 1000px) and (max-height: 500px) and (pointer: coarse) {
   .kopf { padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px)); }
-  .leiste { top: var(--kopf-gesamt); width: min(256px, calc(100vw - 48px)); z-index: 60; opacity: 0; transition: opacity 160ms ease, visibility 160ms; }
+  .inhalt > .anmeldung { min-height: 0; padding: clamp(16px, 4dvh, 48px) 0; }
+  .inhalt > .anmeldung .anmeldung-inhalt { margin-top: 0; }
+  .leiste {
+    top: var(--kopf-gesamt);
+    width: min(calc(256px + env(safe-area-inset-left, 0px)), calc(100vw - 48px - env(safe-area-inset-right, 0px)));
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    z-index: 60; opacity: 0; transition: opacity 160ms ease, visibility 160ms;
+  }
   .leiste[data-offen="true"] { opacity: 1; transition: opacity 160ms ease; }
   .leiste-schatten { inset: var(--kopf-gesamt) 0 0; z-index: 55; animation: erscheinen 160ms ease-out; }
   .nav-punkt { min-height: 48px; }
@@ -1802,11 +1810,11 @@
   .inhalt { scrollbar-gutter: auto; padding-inline: max(20px, env(safe-area-inset-left, 0px)) max(20px, env(safe-area-inset-right, 0px)); }
   .start-filter { min-height: 68px; }
 }
-@media (max-width: 600px) {
+/* Die untere Navigation bleibt auch auf einem quer gehaltenen iPhone sichtbar.
+   Nur sie reserviert den Platz für den Home-Indikator; der Scrollbereich
+   bekommt diesen Abstand nicht noch einmal. */
+@media (max-width: 600px), (max-width: 1000px) and (max-height: 500px) and (pointer: coarse) {
   .huelle { grid-template-areas: "kopf" "inhalt" "mobil"; grid-template-rows: var(--kopf-gesamt) minmax(0, 1fr) auto; }
-  .kopf { padding-inline: max(8px, env(safe-area-inset-left, 0px)) max(8px, env(safe-area-inset-right, 0px)); }
-  .kopf-links { gap: 4px; }
-  .kopf-rechts { gap: 0; }
   .kopf-rechts .abmelden-knopf { display: none; }
   .mobile-navigation {
     grid-area: mobil; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1818,6 +1826,13 @@
   .mobile-navigation a[data-aktiv="true"] svg { stroke-width: 2.4; }
   .mobile-navigation a:hover, .mobile-navigation a:active { background: var(--flaeche-hoch); }
   .mobile-navigation a:focus-visible { outline-offset: -4px; }
+  .inhalt { padding-bottom: 24px; }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }
+}
+@media (max-width: 600px) {
+  .kopf { padding-inline: max(8px, env(safe-area-inset-left, 0px)) max(8px, env(safe-area-inset-right, 0px)); }
+  .kopf-links { gap: 4px; }
+  .kopf-rechts { gap: 0; }
   .inhalt { padding: 16px max(12px, env(safe-area-inset-right, 0px)) 24px max(12px, env(safe-area-inset-left, 0px)); }
   .start-filter { min-height: 68px; margin-bottom: 4px; }
   .start-bestand { margin-bottom: 20px; }
@@ -1828,7 +1843,6 @@
   .startseite > .skelettgitter .kachel > .skelett { border-radius: 0; }
   .dialog { padding: 20px; }
   .seiten-kopf .knopf { white-space: normal; }
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }
   .einstellungen-nav button { min-height: 44px; }
   .speicherleiste { margin-inline: 0; }
 }

@@ -99,12 +99,15 @@ export function serviceWorkerAnmelden(): void {
   // Fehlern, die es im Betrieb gar nicht gibt.
   if (import.meta.env.DEV) return;
 
-  if (!("serviceWorker" in navigator)) {
-    setzen({ art: "nicht_unterstuetzt" });
-    return;
-  }
+  // In unsicheren Kontexten blenden Browser die Service-Worker-API aus.
+  // Deshalb zuerst den Kontext prüfen, sonst wird HTTP im Heimnetz
+  // fälschlich als fehlende Browser-Unterstützung gemeldet.
   if (!window.isSecureContext) {
     setzen({ art: "unsicher", herkunft: window.location.origin });
+    return;
+  }
+  if (!("serviceWorker" in navigator)) {
+    setzen({ art: "nicht_unterstuetzt" });
     return;
   }
 

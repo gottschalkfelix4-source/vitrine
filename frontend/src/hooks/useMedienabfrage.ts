@@ -33,4 +33,4 @@ export function useMedienabfrage(abfrage: string): boolean {
 
 /** Die Schwelle, ab der die Oberfläche auf Handbedienung umschaltet.
  *  Muss mit der Medienabfrage in app.css übereinstimmen. */
-export const SCHMAL = "(max-width: 860px)";
+export const SCHMAL = "(max-width: 860px), (max-width: 1000px) and (max-height: 500px) and (pointer: coarse)";
