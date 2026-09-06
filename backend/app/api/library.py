@@ -671,10 +671,10 @@ def videos(
             muster = f"%{suche}%"
             anfrage = anfrage.where(Video.title.ilike(muster) | Video.description.ilike(muster))
         else:
-            treffer = volltext.video_treffer(db, suche, limit=limit, offset=offset, archived_only=not admin)
-            if not treffer:
-                return []
-            anfrage = anfrage.where(Video.id.in_(treffer))
+            # Erst alle Filter und die gewünschte Sortierung kombinieren, dann
+            # genau einmal blättern. Ein Seitenlimit im FTS-Vorabruf würde
+            # passende Videos anderer Seiten verschlucken und offset verdoppeln.
+            anfrage = anfrage.where(Video.id.in_(volltext.video_treffer_abfrage(suche)))
 
     # Sortiert wird nach dem Rang in der Uploads-Liste, nicht nach dem Datum.
     #
@@ -693,7 +693,10 @@ def videos(
             "alt": (Video.uploads_position.desc().nulls_last(), Video.upload_date.asc()),
             "aufrufe": (Video.view_count.desc().nulls_last(),),
             "titel": (Video.title.asc(),),
-        }[sortierung]
+        }[sortierung],
+        # Eindeutiger letzter Schlüssel für stabile Seitengrenzen, auch wenn
+        # Aufrufe, Datum oder Titel vieler Videos gleich bzw. unbekannt sind.
+        Video.id.asc(),
     )
     return [VideoKurz.aus(v, admin=admin) for v in db.scalars(anfrage.limit(limit).offset(offset))]
 
@@ -705,18 +708,25 @@ class Untertitelfund(BaseModel):
     zeile: str
 
 
+class Suchfortsetzung(BaseModel):
+    videos: bool = False
+    untertitel: bool = False
+
+
 class Suchergebnis(BaseModel):
     anfrage: str
     videos: list[VideoKurz]
     #: Fundstellen im gesprochenen Wort, je Video hoechstens eine.
     im_gesprochenen: list[Untertitelfund]
     zu_kurz: bool = False
+    has_more: Suchfortsetzung = Field(default_factory=Suchfortsetzung)
 
 
 @router.get("/search", response_model=Suchergebnis)
 def volltextsuche(
     q: str = Query(description="Suchbegriff"),
     limit: int = Query(40, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     admin: bool = Depends(administrator),
 ) -> Suchergebnis:
@@ -729,16 +739,18 @@ def volltextsuche(
     if len(volltext.normalisieren(q).strip()) < volltext.MIN_LAENGE:
         return Suchergebnis(anfrage=q, videos=[], im_gesprochenen=[], zu_kurz=True)
 
-    ids = volltext.video_treffer(db, q, limit=limit, archived_only=not admin)
+    ids = volltext.video_treffer(db, q, limit=limit + 1, offset=offset, archived_only=not admin)
+    untertitel = volltext.untertitel_treffer(db, q, limit=limit + 1, offset=offset, archived_only=not admin)
+    alle_ids = set(ids) | {fund.video_id for fund in untertitel}
     gefunden = {v.id: v for v in db.scalars(select(Video).where(
-        Video.id.in_(ids), True if admin else Video.status == VideoStatus.ARCHIVED))} if ids else {}
+        Video.id.in_(alle_ids), True if admin else Video.status == VideoStatus.ARCHIVED))} if alle_ids else {}
     # Reihenfolge des Index beibehalten - sie ist die Relevanzsortierung.
     videos = [VideoKurz.aus(gefunden[i], admin=admin) for i in ids if i in gefunden]
 
     funde: list[Untertitelfund] = []
-    for f in volltext.untertitel_treffer(db, q, limit=limit, archived_only=not admin):
-        v = db.get(Video, f.video_id)
-        if v is None or (not admin and v.status != VideoStatus.ARCHIVED):
+    for f in untertitel:
+        v = gefunden.get(f.video_id)
+        if v is None:
             continue
         funde.append(
             Untertitelfund(
@@ -746,7 +758,10 @@ def volltextsuche(
             )
         )
 
-    return Suchergebnis(anfrage=q, videos=videos, im_gesprochenen=funde)
+    return Suchergebnis(
+        anfrage=q, videos=videos[:limit], im_gesprochenen=funde[:limit],
+        has_more=Suchfortsetzung(videos=len(videos) > limit, untertitel=len(funde) > limit),
+    )
 
 
 @router.post("/search/reindex", status_code=status.HTTP_200_OK)

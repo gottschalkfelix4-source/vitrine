@@ -16,7 +16,7 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
 
   async function absenden(e: React.FormEvent) {
     e.preventDefault();
-    if (!url.trim()) return;
+    if (laeuft || !url.trim()) return;
     setLaeuft(true);
     setFehler(null);
     try {
@@ -36,12 +36,12 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
   }
 
   return (
-    <Dialog titelId="kanal-dialog-titel" schliessenGesperrt={laeuft} aufSchliessen={aufSchliessen}>
-      <form className="dialog" onSubmit={absenden}>
+    <Dialog titelId="kanal-dialog-titel" beschreibungId="kanal-dialog-beschreibung" schliessenGesperrt={laeuft} aufSchliessen={aufSchliessen}>
+      <form className="dialog" onSubmit={absenden} aria-busy={laeuft}>
         <div className="dialog-kopf"><h2 id="kanal-dialog-titel">Kanal aufnehmen</h2>
           <button type="button" className="symbol-knopf" aria-label="Dialog schließen" disabled={laeuft} onClick={aufSchliessen}><Icon name="close" /></button>
         </div>
-        <p className="erklaerung">
+        <p id="kanal-dialog-beschreibung" className="erklaerung">
           Adresse, Handle oder Kanal-ID. Vitrine erfasst zunächst nur, welche Videos und Playlists
           es gibt – das dauert bei großen Kanälen einige Minuten. Heruntergeladen wird erst, wenn
           du es auslöst.
@@ -52,6 +52,13 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
           <input
             id="kanal-url"
             type="text"
+            name="channel"
+            autoCapitalize="none"
+            autoComplete="off"
+            spellCheck={false}
+            required
+            maxLength={2048}
+            disabled={laeuft}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="@handle, youtube.com/@handle oder UC…"
@@ -60,7 +67,7 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
         </div>
 
         <label className="schalter">
-          <input type="checkbox" checked={sofort} onChange={(e) => setSofort(e.target.checked)} />
+          <input type="checkbox" disabled={laeuft} checked={sofort} onChange={(e) => setSofort(e.target.checked)} />
           <span>
             Videos sofort herunterladen
             <div style={{ color: "var(--text-schwach)", fontSize: 12 }}>
@@ -72,12 +79,12 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
         </label>
 
         <label className="schalter">
-          <input type="checkbox" checked={shorts} onChange={(e) => setShorts(e.target.checked)} />
+          <input type="checkbox" disabled={laeuft} checked={shorts} onChange={(e) => setShorts(e.target.checked)} />
           <span>Shorts mit aufnehmen</span>
         </label>
 
         <label className="schalter">
-          <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
+          <input type="checkbox" disabled={laeuft} checked={live} onChange={(e) => setLive(e.target.checked)} />
           <span>
             Livestream-Aufzeichnungen mit aufnehmen
             <div style={{ color: "var(--text-schwach)", fontSize: 12 }}>
@@ -97,7 +104,7 @@ export function KanalAnlegenDialog({ aufSchliessen }: { aufSchliessen: () => voi
             Abbrechen
           </button>
           <button type="submit" className="knopf" data-art="stark" disabled={laeuft || !url.trim()}>
-            {laeuft ? "wird geprüft …" : "Aufnehmen"}
+            {laeuft ? "Wird geprüft …" : "Aufnehmen"}
           </button>
         </div>
       </form>

@@ -149,6 +149,108 @@ def test_videosuche(umgebung):
     assert [v["id"] for v in treffer] == ["v0"]
 
 
+@pytest.mark.parametrize("sortierung", ["neu", "alt", "aufrufe", "titel"])
+def test_videoseiten_bleiben_bei_gleichen_sortierwerten_eindeutig(umgebung, sortierung):
+    client, db = umgebung
+    db.add(Channel(id="UCseiten", name="Seiten"))
+    for nummer in [4, 1, 5, 0, 3, 2]:
+        db.add(Video(
+            id=f"seite{nummer}", channel_id="UCseiten", title="Gleicher Titel",
+            status=VideoStatus.ARCHIVED, view_count=100,
+        ))
+    db.commit()
+    ids = []
+    for offset in range(0, 8, 2):
+        antwort = client.get("/api/videos", params={
+            "kanal": "UCseiten", "sortierung": sortierung, "offset": offset, "limit": 2,
+        })
+        assert antwort.status_code == 200
+        ids.extend(video["id"] for video in antwort.json())
+    assert ids == [f"seite{nummer}" for nummer in range(6)]
+
+
+@pytest.mark.parametrize("admin", [True, False])
+@pytest.mark.parametrize("sortierung", ["neu", "alt", "aufrufe", "titel"])
+def test_videosuche_blaettert_erst_nach_kanal_status_und_artfilter(umgebung, admin, sortierung):
+    client, db = umgebung
+    client.app.dependency_overrides[library.administrator] = lambda: admin
+    db.add_all([Channel(id="UCsuche", name="Suchkanal"), Channel(id="UCfremd", name="Anderer Kanal")])
+    # Diese höher bewerteten FTS-Treffer dürfen die passenden Videos nicht
+    # schon vor dem Kanal-/Status-/Artfilter aus dem Seitenlimit verdrängen.
+    for nummer in range(6):
+        db.add_all([
+            Video(id=f"fremd{nummer}", channel_id="UCfremd", title="Seitenwort", status=VideoStatus.ARCHIVED),
+            Video(id=f"short{nummer}", channel_id="UCsuche", title="Seitenwort", status=VideoStatus.ARCHIVED, is_short=True),
+            Video(id=f"offen{nummer}", channel_id="UCsuche", title="Seitenwort", status=VideoStatus.QUEUED),
+        ])
+    for nummer in range(6):
+        db.add(Video(
+            id=f"treffer{nummer}", channel_id="UCsuche", title=f"Seitenwort {nummer}",
+            status=VideoStatus.ARCHIVED, uploads_position=nummer, view_count=nummer,
+        ))
+    db.commit()
+    from app.services.reindex import index_neu_aufbauen
+
+    index_neu_aufbauen(db, mit_untertiteln=False)
+    ids = []
+    for offset in range(0, 8, 2):
+        antwort = client.get("/api/videos", params={
+            "suche": "Seitenwort", "kanal": "UCsuche", "art": "videos",
+            "nur_archiviert": True, "sortierung": sortierung, "limit": 2, "offset": offset,
+        })
+        assert antwort.status_code == 200
+        ids.extend(video["id"] for video in antwort.json())
+    erwartet = [f"treffer{nummer}" for nummer in range(6)]
+    if sortierung in ("alt", "aufrufe"):
+        erwartet.reverse()
+    assert ids == erwartet
+
+
+@pytest.mark.parametrize("admin", [True, False])
+def test_volltextsuche_blaettert_beide_bereiche_mit_sichtbarkeit_vor_dem_limit(umgebung, admin):
+    from app.services import suche
+
+    client, db = umgebung
+    client.app.dependency_overrides[library.administrator] = lambda: admin
+    # Umgekehrte Einfügereihenfolge prüft den ID-Schlüssel bei gleichem Rang.
+    archivierte = [f"suche{nummer}" for nummer in range(6)]
+    private = [f"a_priv{nummer}" for nummer in range(3)]
+    for video_id in reversed(archivierte + private):
+        db.add(Video(
+            id=video_id, channel_id="UCtest", title="Suchseite",
+            status=VideoStatus.QUEUED if video_id in private else VideoStatus.ARCHIVED,
+        ))
+    db.commit()
+    for video_id in reversed(archivierte + private):
+        suche.video_indizieren(db, video_id=video_id, titel="Suchseite", beschreibung=None, kanal=None)
+        if video_id in archivierte[:4] or video_id in private:
+            suche.untertitel_indizieren(db, video_id, "de", "WEBVTT\n\n00:00:02.000 --> 00:00:04.000\nSuchseite\n")
+    # Verwaiste Indexzeilen dürfen keine Seite verkürzen oder has_more verfälschen.
+    suche.video_indizieren(db, video_id="aaa_verwaist", titel="Suchseite", beschreibung=None, kanal=None)
+    suche.untertitel_indizieren(db, "aaa_verwaist", "de", "WEBVTT\n\n00:00:02.000 --> 00:00:04.000\nSuchseite\n")
+    db.commit()
+    erwartete_videos = sorted(archivierte + (private if admin else []))
+    erwartete_untertitel = sorted(archivierte[:4] + (private if admin else []))
+    for offset in range(0, 12, 2):
+        antwort = client.get("/api/search", params={"q": "Suchseite", "limit": 2, "offset": offset})
+        assert antwort.status_code == 200
+        daten = antwort.json()
+        assert [video["id"] for video in daten["videos"]] == erwartete_videos[offset:offset + 2]
+        assert [fund["video"]["id"] for fund in daten["im_gesprochenen"]] == erwartete_untertitel[offset:offset + 2]
+        assert daten["has_more"] == {
+            "videos": len(erwartete_videos) > offset + 2,
+            "untertitel": len(erwartete_untertitel) > offset + 2,
+        }
+
+
+def test_volltextsuche_zu_kurz_hat_keine_fortsetzung_und_lehnt_negative_seiten_ab(umgebung):
+    client, _ = umgebung
+    daten = client.get("/api/search", params={"q": "ab", "offset": 10}).json()
+    assert daten["zu_kurz"] is True
+    assert daten["has_more"] == {"videos": False, "untertitel": False}
+    assert client.get("/api/search", params={"q": "Suchwort", "offset": -1}).status_code == 422
+
+
 def test_videodetail_weist_ersparnis_aus(umgebung):
     client, _ = umgebung
     d = client.get("/api/videos/v0").json()

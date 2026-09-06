@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { aufrufe, dauer, istHochaufloesend, qualitaet, vorZeit, zustandText } from "../lib/format";
 import { Icon } from "./Icons";
 import { KanalAvatar } from "./KanalAvatar";
+import { Bild } from "./Bild";
 import { useAdmin } from "./Anmeldung";
 import { lokalFortschrittLesen } from "../lib/wiedergabeFortschritt";
 
@@ -64,11 +65,9 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
   const vorschaubild = (
     <>
       <div className="kachel-bild">
-        {bild ? (
-          <img src={bild} alt="" loading="lazy" />
-        ) : (
+        <Bild src={bild} alt="" loading="lazy">
           <div className="platzhalter"><Icon name="play" size={40} /></div>
-        )}
+        </Bild>
         {/* Qualitaet oben, Dauer unten - so ueberdecken sie sich nie, auch
             nicht bei "1440p60" neben "1:02:33". */}
         {guete ? (
@@ -77,7 +76,7 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
           </span>
         ) : null}
         {video.dauer_s ? <span className="dauer">{dauer(video.dauer_s)}</span> : null}
-        {anteil ? (
+        {anteil != null && Number.isFinite(anteil) && anteil > 0 ? (
           <div className="fortschritt">
             <span style={{ width: `${Math.min(100, anteil * 100)}%` }} />
           </div>
@@ -108,9 +107,9 @@ export function Videokachel({ video, ohneKanal, position }: KachelProps) {
           </h3>
           <div className="kachel-zeile">
             {!ohneKanal && video.kanal_name ? (
-              <Link to={`/kanal/${video.kanal_id}`} onClick={(e) => e.stopPropagation()}>
+              video.kanal_id ? <Link to={`/kanal/${video.kanal_id}`} onClick={(e) => e.stopPropagation()}>
                 {video.kanal_name}
-              </Link>
+              </Link> : <span>{video.kanal_name}</span>
             ) : null}
           </div>
           <div className="kachel-zeile">
@@ -149,13 +148,16 @@ export function Gitter({ children, form }: { children: React.ReactNode; form?: "
 
 export function Skelettgitter({ anzahl = 12 }: { anzahl?: number }) {
   return (
-    <div className="gitter">
+    <div className="gitter skelettgitter" role="status" aria-label="Videos werden geladen" aria-busy="true">
       {Array.from({ length: anzahl }, (_, i) => (
-        <div key={i} className="kachel">
+        <div key={i} className="kachel" aria-hidden="true">
           <div className="skelett" style={{ aspectRatio: "16 / 9" }} />
-          <div>
+          <div className="kachel-text">
+            <div className="skelett skelett-avatar" />
+            <div className="skelett-details">
             <div className="skelett skelett-zeile" style={{ width: "90%" }} />
             <div className="skelett skelett-zeile" style={{ width: "55%" }} />
+            </div>
           </div>
         </div>
       ))}

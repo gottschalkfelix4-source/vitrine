@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Fehler, Hinweis, Skelettgitter } from "../components/ui";
 import { useApi } from "../hooks/useApi";
@@ -21,16 +21,22 @@ export function Einstellungenseite() {
   // Nur die vom Nutzer angefassten Felder - so bleibt beim Speichern klar,
   // was er wirklich gesetzt hat, und unberuehrte Felder behalten ihre Herkunft.
   const [entwurf, setEntwurf] = useState<Record<string, unknown>>({});
-  const [speichert, setSpeichert] = useState(false);
+  const [aktion, setAktion] = useState<"speichern" | "zuruecksetzen" | null>(null);
+  const transaktion = useRef(false);
+  const speichert = aktion !== null;
   const [meldung, setMeldung] = useState<string | null>(null);
   const [speicherFehler, setSpeicherFehler] = useState<string | null>(null);
   const [neustartNoetig, setNeustartNoetig] = useState<string[]>([]);
   const [bereich, setBereich] = useState("Allgemein");
 
-  // Beim Neuladen der Daten den Entwurf verwerfen, sonst zeigt die Seite
-  // Werte an, die es serverseitig gar nicht gibt.
+  // Nur bestätigte Werte entfernen. Das Zurücksetzen eines einzelnen Felds
+  // darf ungespeicherte Änderungen an anderen Feldern nicht verwerfen.
   useEffect(() => {
-    setEntwurf({});
+    if (!daten) return;
+    setEntwurf((alt) => Object.fromEntries(Object.entries(alt).filter(([name, wert]) => {
+      const feld = daten.felder.find((f) => f.name === name);
+      return feld && String(wert) !== String(feld.wert);
+    })));
   }, [daten]);
 
   const gruppen = useMemo(() => {
@@ -44,6 +50,7 @@ export function Einstellungenseite() {
   const offen = Object.keys(entwurf).length;
 
   function setzen(feld: EinstellungsFeld, wert: unknown) {
+    if (transaktion.current) return;
     setEntwurf((alt) => {
       const neu = { ...alt };
       // Zurück auf den Ausgangswert heißt: keine Änderung mehr.
@@ -56,28 +63,46 @@ export function Einstellungenseite() {
   }
 
   async function speichern() {
-    setSpeichert(true);
+    if (transaktion.current || offen === 0) return;
+    transaktion.current = true;
+    setAktion("speichern");
     setSpeicherFehler(null);
     setMeldung(null);
     try {
       const r = await api.einstellungenSpeichern(entwurf);
       setNeustartNoetig(r.neustart_noetig);
       setMeldung(`${r.geaendert.length} Einstellung${r.geaendert.length === 1 ? "" : "en"} gespeichert.`);
-      neuLaden();
+      await neuLaden();
+      // Der Server normalisiert etwa „de, en“ zu ["de", "en"]. Während
+      // dieser Transaktion sind Eingaben gesperrt, daher ist alles bestätigt.
+      setEntwurf({});
     } catch (e) {
       setSpeicherFehler(e instanceof Error ? e.message : String(e));
     } finally {
-      setSpeichert(false);
+      transaktion.current = false;
+      setAktion(null);
     }
   }
 
   async function zuruecksetzen(name: string) {
+    if (transaktion.current) return;
+    transaktion.current = true;
+    setAktion("zuruecksetzen");
+    setSpeicherFehler(null);
     try {
       await api.einstellungenZuruecksetzen([name]);
+      setEntwurf((alt) => {
+        const neu = { ...alt };
+        delete neu[name];
+        return neu;
+      });
       setMeldung(null);
-      neuLaden();
+      await neuLaden();
     } catch (e) {
       setSpeicherFehler(e instanceof Error ? e.message : String(e));
+    } finally {
+      transaktion.current = false;
+      setAktion(null);
     }
   }
 
@@ -149,6 +174,7 @@ export function Einstellungenseite() {
               feld={f}
               entwurf={entwurf[f.name]}
               geaendert={f.name in entwurf}
+              gesperrt={speichert}
               aufAendern={(w) => setzen(f, w)}
               aufZuruecksetzen={() => void zuruecksetzen(f.name)}
             />
@@ -169,7 +195,7 @@ export function Einstellungenseite() {
             Verwerfen
           </button>
           <button className="knopf" data-art="stark" onClick={speichern} disabled={speichert}>
-            {speichert ? "wird gespeichert …" : "Speichern"}
+            {aktion === "speichern" ? "Wird gespeichert …" : aktion === "zuruecksetzen" ? "Wird zurückgesetzt …" : "Speichern"}
           </button>
         </div>
       ) : null}
@@ -181,12 +207,14 @@ function Zeile({
   feld,
   entwurf,
   geaendert,
+  gesperrt,
   aufAendern,
   aufZuruecksetzen,
 }: {
   feld: EinstellungsFeld;
   entwurf: unknown;
   geaendert: boolean;
+  gesperrt: boolean;
   aufAendern: (wert: unknown) => void;
   aufZuruecksetzen: () => void;
 }) {
@@ -206,7 +234,7 @@ function Zeile({
         {/* Nur bei "datenbank" sinnvoll: Sonst gibt es nichts zurückzunehmen,
             und der Knopf wäre ein leeres Versprechen. */}
         {feld.herkunft === "datenbank" ? (
-          <button className="einst-zuruecksetzen" onClick={aufZuruecksetzen}>
+          <button className="einst-zuruecksetzen" onClick={aufZuruecksetzen} disabled={gesperrt}>
             zurücksetzen
           </button>
         ) : null}
@@ -218,6 +246,7 @@ function Zeile({
             <input
               id={`f-${feld.name}`}
               type="checkbox"
+              disabled={gesperrt}
               checked={Boolean(wert)}
               onChange={(e) => aufAendern(e.target.checked)}
             />
@@ -226,6 +255,7 @@ function Zeile({
         ) : feld.art === "auswahl" ? (
           <select
             id={`f-${feld.name}`}
+            disabled={gesperrt}
             value={String(wert ?? "")}
             onChange={(e) => aufAendern(e.target.value)}
           >
@@ -240,6 +270,7 @@ function Zeile({
             <input
               id={`f-${feld.name}`}
               type="number"
+              disabled={gesperrt}
               value={String(wert ?? "")}
               min={feld.min ?? undefined}
               max={feld.max ?? undefined}
@@ -252,6 +283,7 @@ function Zeile({
           <input
             id={`f-${feld.name}`}
             type="text"
+            disabled={gesperrt}
             value={String(wert ?? "")}
             placeholder={feld.art === "liste" ? "de,en" : "leer = aus"}
             onChange={(e) => aufAendern(e.target.value)}

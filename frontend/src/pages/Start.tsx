@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { Fehler, Gitter, Leer, Skelettgitter, Videokachel } from "../components/ui";
+import { VideoNachladen } from "../components/VideoNachladen";
 import { useVideostapel } from "../hooks/useApi";
 import { useAdmin } from "../components/Anmeldung";
 
@@ -16,18 +16,37 @@ const SORTIERUNGEN: { wert: Sortierung; text: string }[] = [
 
 export function Startseite() {
   const admin = useAdmin();
-  const [sortierung, setSortierung] = useState<Sortierung>("neu");
-  const [nurOffen, setNurOffen] = useState(false);
+  const [suchparameter, setSuchparameter] = useSearchParams();
+  const sortWert = suchparameter.get("sort");
+  const sortierung: Sortierung = sortWert === "alt" || sortWert === "aufrufe" || sortWert === "titel" ? sortWert : "neu";
+  const nurOffen = admin && suchparameter.get("status") === "alle";
+
+  function setSortierung(wert: Sortierung) {
+    setSuchparameter((vorher) => {
+      const neu = new URLSearchParams(vorher);
+      if (wert === "neu") neu.delete("sort"); else neu.set("sort", wert);
+      return neu;
+    });
+  }
+
+  function alleZustaendeUmschalten() {
+    setSuchparameter((vorher) => {
+      const neu = new URLSearchParams(vorher);
+      if (nurOffen) neu.delete("status"); else neu.set("status", "alle");
+      return neu;
+    });
+  }
 
   const stapel = useVideostapel({ sortierung, nur_archiviert: !admin || !nurOffen });
 
   return (
     <div className="startseite">
       <h1 className="nur-screenreader">Dein Videoarchiv</h1>
-      <div className="chips start-filter" aria-label="Videos sortieren und filtern">
+      <div className="chips start-filter" role="group" aria-label="Videos sortieren und filtern">
         {SORTIERUNGEN.map((s) => (
           <button
             key={s.wert}
+            type="button"
             className="chip"
             data-aktiv={sortierung === s.wert}
             aria-pressed={sortierung === s.wert}
@@ -37,13 +56,13 @@ export function Startseite() {
           </button>
         ))}
         {admin ? <><span className="chip-trenner" aria-hidden="true" />
-        <button className="chip" data-aktiv={nurOffen} aria-pressed={nurOffen} onClick={() => setNurOffen(!nurOffen)}>
+        <button type="button" className="chip" data-aktiv={nurOffen} aria-pressed={nurOffen} onClick={alleZustaendeUmschalten}>
           Auch nicht archivierte
         </button></> : null}
       </div>
-      <div className="start-bestand">{stapel.videos.length} Videos{stapel.ende ? "" : " geladen"} · {nurOffen ? "Alle Archivzustände" : "Zum Ansehen bereit"}</div>
+      <div className="start-bestand">{stapel.laedt && stapel.videos.length === 0 ? "Videos werden geladen …" : `${stapel.videos.length} Videos${stapel.ende ? "" : " geladen"} · ${nurOffen ? "Alle Archivzustände" : "Zum Ansehen bereit"}`}</div>
 
-      {stapel.fehler ? <Fehler text={stapel.fehler} erneut={stapel.neuLaden} /> : null}
+      {stapel.fehler && stapel.videos.length === 0 ? <Fehler text={stapel.fehler} erneut={stapel.mehrLaden} /> : null}
 
       {stapel.laedt && stapel.videos.length === 0 ? (
         <Skelettgitter />
@@ -54,13 +73,7 @@ export function Startseite() {
               <Videokachel key={v.id} video={v} />
             ))}
           </Gitter>
-          {!stapel.ende ? (
-            <div className="mehr-laden">
-              <button className="knopf" onClick={stapel.mehrLaden} disabled={stapel.laedt}>
-                {stapel.laedt ? "lädt …" : "Mehr laden"}
-              </button>
-            </div>
-          ) : null}
+          <VideoNachladen stapel={stapel} />
         </>
       ) : !stapel.fehler ? (
         <Leer

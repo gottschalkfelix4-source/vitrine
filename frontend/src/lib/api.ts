@@ -310,6 +310,7 @@ export interface Suchergebnis {
   videos: VideoKurz[];
   im_gesprochenen: Untertitelfund[];
   zu_kurz: boolean;
+  has_more?: { videos: boolean; untertitel: boolean };
 }
 
 export interface Auftrag {
@@ -537,7 +538,7 @@ export const api = {
       body: JSON.stringify(namen),
     }),
 
-  suchen: (q: string, limit = 40) => hole<Suchergebnis>(`/api/search${frage({ q, limit })}`),
+  suchen: (q: string, limit = 40, offset = 0) => hole<Suchergebnis>(`/api/search${frage({ q, limit, offset })}`),
   suchindexNeuAufbauen: () =>
     hole<Record<string, number>>("/api/search/reindex", { method: "POST" }),
 };

@@ -1,31 +1,36 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { Fortschrittsleiste } from "./components/Fortschritt";
 import { Abmelden, Anmeldung, AnmeldeSchranke, Sitzungsverwaltung, useAdmin, useAnmeldung } from "./components/Anmeldung";
 import { Icon, type IconName } from "./components/Icons";
 import { KanalAvatar, KanalKontext } from "./components/KanalAvatar";
+import { SeitenFehlergrenze } from "./components/SeitenFehlergrenze";
+import { Leer, Skelettgitter } from "./components/ui";
 import { api } from "./lib/api";
 import { useApi } from "./hooks/useApi";
 import { SCHMAL, useMedienabfrage } from "./hooks/useMedienabfrage";
 import { KanalAnlegenDialog } from "./pages/KanalAnlegen";
 import { Kanalseite } from "./pages/Kanal";
-import { Einstellungenseite } from "./pages/Einstellungen";
 import { Kanaeleseite } from "./pages/Kanaele";
 import { Playlistseite } from "./pages/Playlist";
 import { Speicherseite } from "./pages/Speicher";
 import { Startseite } from "./pages/Start";
-import { Streamsseite } from "./pages/Streams";
 import { Suchseite } from "./pages/Suche";
 import { Warteschlangeseite } from "./pages/Warteschlange";
-import { Wiedergabeseite } from "./pages/Wiedergabe";
+
+// Player und Weltkarte erst laden, wenn sie tatsächlich gebraucht werden.
+const Wiedergabeseite = lazy(() => import("./pages/Wiedergabe").then((m) => ({ default: m.Wiedergabeseite })));
+const Streamsseite = lazy(() => import("./pages/Streams").then((m) => ({ default: m.Streamsseite })));
+const Einstellungenseite = lazy(() => import("./pages/Einstellungen").then((m) => ({ default: m.Einstellungenseite })));
 
 const LEISTE_INTERVALL = 15_000;
 
-function Kopfleiste({ aufLeiste, leisteOffen, aufKanalAnlegen }: {
+function Kopfleiste({ aufLeiste, leisteOffen, aufKanalAnlegen, gesperrt }: {
   aufLeiste: () => void;
   leisteOffen: boolean;
   aufKanalAnlegen: () => void;
+  gesperrt: boolean;
 }) {
   const admin = useAdmin();
   const navigate = useNavigate();
@@ -44,20 +49,37 @@ function Kopfleiste({ aufLeiste, leisteOffen, aufKanalAnlegen }: {
 
   useEffect(() => {
     setText(ort.pathname === "/suche" ? new URLSearchParams(ort.search).get("q") ?? "" : "");
-    setSucheOffen(false);
-  }, [ort.pathname, ort.search]);
+    setSucheOffen(ort.pathname === "/suche" && !new URLSearchParams(ort.search).get("q"));
+  }, [ort.pathname, ort.search, ort.key]);
 
   useEffect(() => {
     document.documentElement.dataset.thema = hell ? "hell" : "dunkel";
     document.documentElement.style.colorScheme = hell ? "light" : "dark";
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", hell ? "#ffffff" : "#0f0f0f");
+    document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
+      meta.setAttribute("content", hell ? "#ffffff" : "#0f0f0f");
+    });
     try { localStorage.setItem("vitrine-thema", hell ? "hell" : "dunkel"); } catch { /* Privater Browsermodus */ }
   }, [hell]);
 
   useEffect(() => { if (sucheOffen) suchfeld.current?.focus(); }, [sucheOffen]);
 
+  useEffect(() => {
+    function tastatur(e: KeyboardEvent) {
+      if (gesperrt || document.querySelector("dialog[open], [aria-modal='true']")) return;
+      const ziel = e.target;
+      if (ziel instanceof HTMLElement && (ziel.closest("input, textarea, select, [contenteditable='true']") || ziel.closest(".player"))) return;
+      if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setSucheOffen(true);
+        suchfeld.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", tastatur);
+    return () => window.removeEventListener("keydown", tastatur);
+  }, [gesperrt]);
+
   return (
-    <header className="kopf" data-suche-offen={sucheOffen}>
+    <header className="kopf" data-suche-offen={sucheOffen} inert={gesperrt}>
       <div className="kopf-links">
         <button id="menue-knopf" className="symbol-knopf" onClick={aufLeiste}
           aria-label="Seitenleiste umschalten" aria-controls="hauptnavigation" aria-expanded={leisteOffen}>
@@ -79,9 +101,9 @@ function Kopfleiste({ aufLeiste, leisteOffen, aufKanalAnlegen }: {
         if (text.trim()) navigate(`/suche?q=${encodeURIComponent(text.trim())}`);
       }}>
         <div className="suche-feld">
-          <input ref={suchfeld} value={text} onChange={(e) => setText(e.target.value)}
+          <input ref={suchfeld} value={text} onChange={(e) => setText(e.target.value)} type="search" enterKeyHint="search"
             onKeyDown={(e) => { if (e.key === "Escape" && sucheOffen) sucheSchliessen(); }}
-            placeholder="Suchen" aria-label="Im Archiv suchen" autoComplete="off" />
+            placeholder="Suchen" aria-label="Im Archiv suchen" aria-keyshortcuts="/" autoComplete="off" />
           {text ? <button type="button" className="symbol-knopf suche-leeren" aria-label="Suchbegriff löschen"
             onClick={() => { setText(""); suchfeld.current?.focus(); }}><Icon name="close" size={20} /></button> : null}
         </div>
@@ -134,8 +156,11 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
 
   useEffect(() => {
     if (!schubladeOffen) return;
-    nav.current?.querySelector<HTMLAnchorElement>("a")?.focus();
-    return () => document.getElementById("menue-knopf")?.focus();
+    const frame = window.requestAnimationFrame(() => nav.current?.querySelector<HTMLButtonElement>("button")?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.requestAnimationFrame(() => document.getElementById("menue-knopf")?.focus());
+    };
   }, [schubladeOffen]);
 
   return (
@@ -145,13 +170,17 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
       onKeyDown={(e) => {
         if (e.key === "Escape") aufSchliessen();
         if (e.key === "Tab" && schubladeOffen) {
-          const links = nav.current?.querySelectorAll<HTMLAnchorElement>("a");
+          const links = nav.current?.querySelectorAll<HTMLElement>("a, button:not(:disabled)");
           if (!links?.length) return;
           const first = links[0], last = links[links.length - 1];
           if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
           if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
         }
       }}>
+      {handbetrieb ? <div className="leiste-mobilkopf">
+        <span>Navigation</span>
+        <button className="symbol-knopf" aria-label="Navigation schließen" onClick={aufSchliessen}><Icon name="close" /></button>
+      </div> : null}
       {gruppen.map((g, i) => <div className="leiste-gruppe" key={i}>
         {g.titel ? <div className="leiste-titel">{g.titel}<Icon name="chevronRight" size={18} /></div> : null}
         {g.punkte.map((p) => {
@@ -180,8 +209,27 @@ function Seitenleiste({ schmal, handbetrieb, schubladeOffen, aufSchliessen, dial
           <Icon name="settings" className="zeichen" /><span>Einstellungen</span>
         </Link>
       </div> : null}
+      {admin && handbetrieb ? <div className="leiste-gruppe leiste-abmelden"><Abmelden /></div> : null}
     </nav>
   );
+}
+
+function MobileNavigation({ gesperrt }: { gesperrt: boolean }) {
+  const admin = useAdmin();
+  const ort = useLocation();
+  const punkte: { pfad: string; icon: IconName; text: string; aktiv: boolean }[] = [
+    { pfad: "/", icon: "home", text: "Start", aktiv: ort.pathname === "/" },
+    { pfad: "/kanaele", icon: "channels", text: "Kanäle", aktiv: /^\/(kanal|kanaele|playlist)(\/|$)/.test(ort.pathname) },
+    { pfad: "/suche", icon: "search", text: "Suchen", aktiv: ort.pathname === "/suche" },
+    admin
+      ? { pfad: "/einstellungen", icon: "settings", text: "Verwaltung", aktiv: ["/einstellungen", "/speicher", "/warteschlange", "/streams"].includes(ort.pathname) }
+      : { pfad: "/anmelden", icon: "login", text: "Anmelden", aktiv: ort.pathname === "/anmelden" },
+  ];
+  return <nav className="mobile-navigation" aria-label="Mobile Navigation" inert={gesperrt}>
+    {punkte.map((p) => <Link key={p.pfad} to={p.pfad} data-aktiv={p.aktiv} aria-current={p.aktiv ? "page" : undefined}>
+      <Icon name={p.icon} size={22} /><span>{p.text}</span>
+    </Link>)}
+  </nav>;
 }
 
 export default function App() {
@@ -222,14 +270,21 @@ function Archiv() {
   useEffect(() => {
     setSchubladeOffen(false);
     inhalt.current?.scrollTo({ top: 0 });
-  }, [ort.pathname, ort.search]);
+  }, [ort.pathname, ort.search, ort.key]);
   useEffect(() => { if (!handbetrieb) setSchubladeOffen(false); }, [handbetrieb]);
+
+  useEffect(() => {
+    const namen: Record<string, string> = { kanaele: "Kanäle", kanal: "Kanal", playlist: "Playlist", video: "Wiedergabe", suche: "Suche", warteschlange: "Warteschlange", speicher: "Speicher", streams: "Streams", einstellungen: "Einstellungen", anmelden: "Anmelden" };
+    const name = namen[ort.pathname.split("/")[1]];
+    document.title = name ? `${name} – Vitrine` : "Vitrine";
+  }, [ort.pathname]);
 
   return (
     <KanalKontext.Provider value={kanaele.daten ?? []}>
       <div className="huelle" data-handbetrieb={handbetrieb || undefined} data-seite={ort.pathname.split("/")[1] || "start"}>
         <a className="sprunglink" href="#inhalt">Zum Inhalt</a>
         <Kopfleiste leisteOffen={handbetrieb ? schubladeOffen : !schmal}
+          gesperrt={schubladeOffen || dialogOffen}
           aufLeiste={() => handbetrieb ? setSchubladeOffen((o) => !o) : setVonHand(!schmal)}
           aufKanalAnlegen={kanalDialogOeffnen} />
         {handbetrieb && schubladeOffen ? <div className="leiste-schatten"
@@ -238,6 +293,8 @@ function Archiv() {
           schubladeOffen={handbetrieb && schubladeOffen} aufSchliessen={() => setSchubladeOffen(false)} />
         <main id="inhalt" className="inhalt" ref={inhalt} tabIndex={-1} inert={schubladeOffen || dialogOffen}>
           {admin ? <Fortschrittsleiste /> : null}
+          <SeitenFehlergrenze key={ort.pathname + (ort.pathname === "/suche" ? new URLSearchParams(ort.search).get("q") ?? "" : "")}>
+          <Suspense fallback={<Skelettgitter anzahl={6} />}>
           <Routes>
             <Route path="/" element={<Startseite />} />
             <Route path="/kanaele" element={<Kanaeleseite aufAnlegen={kanalDialogOeffnen} />} />
@@ -250,9 +307,13 @@ function Archiv() {
             <Route path="/anmelden" element={<Anmeldeseite />} />
             <Route path="/einstellungen" element={<AnmeldeSchranke><Einstellungenseite /></AnmeldeSchranke>} />
             <Route path="/streams" element={<AnmeldeSchranke><Streamsseite /></AnmeldeSchranke>} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Leer titel="Diese Seite gibt es nicht" text="Der Link ist möglicherweise veraltet. Auf der Startseite findest du dein Videoarchiv."
+              kinder={<Link className="knopf" data-art="stark" to="/">Zur Startseite</Link>} />} />
           </Routes>
+          </Suspense>
+          </SeitenFehlergrenze>
         </main>
+        <MobileNavigation gesperrt={schubladeOffen || dialogOffen} />
         {admin && dialogOffen ? <KanalAnlegenDialog aufSchliessen={kanalDialogSchliessen} /> : null}
       </div>
     </KanalKontext.Provider>

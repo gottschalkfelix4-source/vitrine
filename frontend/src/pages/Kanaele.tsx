@@ -3,9 +3,10 @@ import { Link } from "react-router-dom";
 
 import { Fehler, Leer, Skelettgitter } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { KanalAvatar } from "../components/KanalAvatar";
 import { useAdmin } from "../components/Anmeldung";
 import { useApi } from "../hooks/useApi";
-import { api, thumbUrl } from "../lib/api";
+import { api } from "../lib/api";
 import { bytes, prozent, vorZeit } from "../lib/format";
 import "../styles/browse.css";
 
@@ -34,7 +35,7 @@ export function Kanaeleseite({ aufAnlegen }: { aufAnlegen: () => void }) {
   }
 
   const sichtbar = daten
-    .filter((k) => `${k.name} ${k.handle ?? ""}`.toLocaleLowerCase("de").includes(filter.toLocaleLowerCase("de")))
+    .filter((k) => `${k.name} ${k.handle ?? ""}`.toLocaleLowerCase("de").includes(filter.trim().toLocaleLowerCase("de")))
     .sort((a, b) => sortierung === "archiviert"
       ? b.videos_archiviert - a.videos_archiviert
       : a.name.localeCompare(b.name, "de"));
@@ -64,11 +65,7 @@ export function Kanaeleseite({ aufAnlegen }: { aufAnlegen: () => void }) {
             const anteil = k.videos_gesamt ? k.videos_archiviert / k.videos_gesamt : 0;
             return (
               <Link className="kanal-abo" key={k.id} to={`/kanal/${k.id}`}>
-                    {thumbUrl(k.avatar) ? (
-                      <img className="kanal-abo-avatar" src={thumbUrl(k.avatar)!} alt="" loading="lazy" />
-                    ) : (
-                      <span className="kanal-abo-avatar" aria-hidden="true">{k.name.charAt(0).toLocaleUpperCase("de")}</span>
-                    )}
+                    <KanalAvatar kanalId={k.id} name={k.name} avatar={k.avatar} className="kanal-abo-avatar" />
                     <div className="kanal-abo-info">
                       <h2>{k.name}</h2>
                       {k.handle ? (

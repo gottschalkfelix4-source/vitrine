@@ -45,8 +45,13 @@ Elasticsearch.
   IP-Adresse; vier WireGuard-Tunnel sind vier Budgets. Laeuft einer in die
   Sperre, wechselt das Archiv auf den naechsten, statt anzuhalten. Ohne
   erweiterte Container-Rechte. Siehe [Mehrere Adressen statt einer](#mehrere-adressen-statt-einer).
+- **Automatisch nachladen** auf Start-, Kanal-, Such- und Wiedergabeseiten.
+  Bereits geladene Ergebnisse bleiben bei Verbindungsfehlern erhalten;
+  das Nachladen laesst sich per Knopf wiederholen.
 - **Auf dem Telefon bedienbar** und als App ablegbar: Die Seitenleiste wird zur
-  Schublade, der Player laeuft randlos.
+  Schublade, eine untere Navigation macht die Hauptseiten direkt erreichbar,
+  der Player laeuft randlos. Touch-Flaechen, Untertitel- und Qualitaetsmenues
+  passen sich kleinen Displays an; reduzierte Bewegung wird respektiert.
   Siehe [Auf dem Telefon](#auf-dem-telefon).
 
 ## Schnellstart

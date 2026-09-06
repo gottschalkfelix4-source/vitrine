@@ -183,6 +183,36 @@ def test_je_video_nur_eine_fundstelle(db: Session):
     assert len(funde) == len({f.video_id for f in funde}), "mehrere Fundstellen je Video"
 
 
+def test_untertitelsuche_blaettert_ueber_500_fundzeilen_hinaus(db: Session):
+    vtt = "WEBVTT\n\n" + "\n\n".join(
+        f"00:{i // 60:02d}:{i % 60:02d}.000 --> 00:{(i + 1) // 60:02d}:{(i + 1) % 60:02d}.000\n"
+        f"Seitenwort Thema {i % 2}"
+        for i in range(510)
+    )
+    suche.untertitel_indizieren(db, "v1", "de", vtt)
+    suche.untertitel_indizieren(db, "v2", "de", "WEBVTT\n\n00:00:05.000 --> 00:00:06.000\nSeitenwort mit einem längeren Zusatz\n")
+    db.commit()
+    assert [fund.video_id for fund in suche.untertitel_treffer(db, "Seitenwort", limit=1)] == ["v1"]
+    zweite = suche.untertitel_treffer(db, "Seitenwort", limit=1, offset=1)
+    assert [fund.video_id for fund in zweite] == ["v2"]
+    assert zweite[0].start_s == 5.0
+    assert suche.untertitel_treffer(db, "Seitenwort", limit=1, offset=2) == []
+
+
+def test_untertitelsuche_waehlt_bei_gleichem_rang_stabil_zeit_sprache_und_video(db: Session):
+    for video_id in ["v2", "v1"]:
+        suche.untertitel_indizieren(db, video_id, "en", "WEBVTT\n\n00:00:02.000 --> 00:00:03.000\nSeitenwort c\n")
+        suche.untertitel_indizieren(db, video_id, "de", (
+            "WEBVTT\n\n00:00:12.000 --> 00:00:13.000\nSeitenwort a\n\n"
+            "00:00:02.000 --> 00:00:03.000\nSeitenwort b\n"
+        ))
+    db.commit()
+    erste = suche.untertitel_treffer(db, "Seitenwort", limit=1)
+    zweite = suche.untertitel_treffer(db, "Seitenwort", limit=1, offset=1)
+    assert [fund.video_id for fund in erste + zweite] == ["v1", "v2"]
+    assert all(fund.start_s == 2.0 and fund.sprache == "de" and fund.zeile == "seitenwort b" for fund in erste + zweite)
+
+
 def test_statistik(db: Session):
     s = suche.statistik(db)
     assert s["videos_im_index"] == 2

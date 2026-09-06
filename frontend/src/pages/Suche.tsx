@@ -2,27 +2,27 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { Fehler, Gitter, Leer, Skelettgitter, Videokachel } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { Bild } from "../components/Bild";
+import { VideoNachladen } from "../components/VideoNachladen";
 import { useAdmin } from "../components/Anmeldung";
-import { useApi } from "../hooks/useApi";
-import { api } from "../lib/api";
+import { useSuchstapel } from "../hooks/useSuchstapel";
 import { dauer } from "../lib/format";
 import "../styles/browse.css";
 
 export function Suchseite() {
   const admin = useAdmin();
   const [parameter, setParameter] = useSearchParams();
-  const anfrage = parameter.get("q") ?? "";
-  const filter = parameter.get("bereich") ?? "alle";
+  const anfrage = (parameter.get("q") ?? "").trim();
+  const bereich = parameter.get("bereich");
+  const filter = bereich === "videos" || bereich === "gesprochen" ? bereich : "alle";
 
-  const { daten, laedt, fehler, neuLaden } = useApi(
-    () => (anfrage ? api.suchen(anfrage) : Promise.resolve(null)),
-    [anfrage],
-  );
-
-  if (fehler) return <Fehler text={fehler} erneut={neuLaden} />;
-  if (laedt && !daten) return <Skelettgitter anzahl={8} />;
+  const stapel = useSuchstapel(anfrage, filter);
+  const { daten, laedt, fehler } = stapel;
 
   if (!anfrage) return <Leer zeichen="⌕" titel="Im Archiv suchen" text="Gib oben einen Suchbegriff ein. Du findest Videos, Beschreibungen und Stellen aus den Untertiteln." />;
+
+  if (fehler && !daten) return <Fehler text={fehler} erneut={stapel.mehrLaden} />;
+  if (laedt && !daten) return <Skelettgitter anzahl={8} />;
 
   if (daten?.zu_kurz) {
     return (
@@ -42,12 +42,13 @@ export function Suchseite() {
   // Videos, die schon oben stehen, unten nicht wiederholen - es sei denn, der
   // Untertitelfund fuegt etwas hinzu, naemlich die Fundstelle.
   const gesamt = videos.length + gesprochen.length;
+  const sichtbar = filter === "videos" ? videos.length : filter === "gesprochen" ? gesprochen.length : gesamt;
 
   return (
     <section className="such-seite">
-      <div className="such-filter chips" aria-label="Suchbereich">
+      <div className="such-filter chips" role="group" aria-label="Suchbereich">
         {([{ wert: "alle", text: "Alle" }, { wert: "videos", text: "Titel & Beschreibung" }, { wert: "gesprochen", text: "Im gesprochenen Wort" }] as const).map((f) => (
-          <button key={f.wert} className="chip" data-aktiv={filter === f.wert} aria-pressed={filter === f.wert} onClick={() => setParameter((vorher) => {
+          <button type="button" key={f.wert} className="chip" data-aktiv={filter === f.wert} aria-pressed={filter === f.wert} onClick={() => setParameter((vorher) => {
             const neu = new URLSearchParams(vorher);
             if (f.wert === "alle") neu.delete("bereich"); else neu.set("bereich", f.wert);
             return neu;
@@ -62,7 +63,7 @@ export function Suchseite() {
         </span>
       </div>
 
-      {gesamt === 0 || (filter === "videos" && videos.length === 0) || (filter === "gesprochen" && gesprochen.length === 0) ? (
+      {sichtbar === 0 && stapel.ende ? (
         <Leer
           zeichen="⌕"
           titel="Nichts gefunden"
@@ -92,19 +93,17 @@ export function Suchseite() {
           <div className="fundstellen">
             {gesprochen.map((f) => (
               <Link
-                key={`${f.video.id}-${f.start_s}`}
+                key={JSON.stringify([f.video.id, f.start_s, f.sprache, f.zeile])}
                 className="fundstelle"
-                to={`/video/${f.video.id}?t=${Math.floor(f.start_s)}`}
+                to={`/video/${f.video.id}?t=${Math.max(0, Math.floor(f.start_s))}`}
               >
                 <div className="fundstelle-bild">
-                  {f.video.bild ? (
-                    <img src={f.video.bild!} alt="" loading="lazy" />
-                  ) : (
+                  <Bild src={f.video.bild} alt="" loading="lazy">
                     <div className="platzhalter"><Icon name="play" size={32} /></div>
-                  )}
+                  </Bild>
                   <span className="dauer">{dauer(f.start_s)}</span>
                 </div>
-                <div style={{ minWidth: 0 }}>
+                <div className="fundstelle-text">
                   <h3 className="fundstelle-titel">{f.video.titel}</h3>
                   <div className="kachel-zeile">
                     <span>{f.video.kanal_name}</span>
@@ -118,6 +117,7 @@ export function Suchseite() {
           </div>
         </>
       ) : null}
+      {daten && (sichtbar > 0 || !stapel.ende) ? <VideoNachladen stapel={stapel} anzahl={sichtbar} einheit="Treffer" /> : null}
     </section>
   );
 }

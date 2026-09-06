@@ -3,6 +3,7 @@
   color: var(--text-gedaempft);
   font-size: 14px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .kanal-seite {
@@ -154,16 +155,18 @@
 .kanal-filter .eingabe {
   width: 300px;
   max-width: 100%;
+  min-width: 0;
 }
 
 .kanal-filter input,
 .kanal-filter select {
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 12px;
   border: 1px solid var(--rand);
   border-radius: 8px;
   background: var(--grund);
   color: var(--text);
+  font-size: 16px;
 }
 
 .kanal-filter .auswahl {
@@ -181,9 +184,10 @@
 .kanal-abo {
   display: flex;
   align-items: center;
-  gap: 32px;
-  padding: 24px 16px;
+  gap: 24px;
+  padding: 20px 16px;
   border-radius: 12px;
+  transition: background-color var(--uebergang);
 }
 
 .kanal-abo:hover {
@@ -218,6 +222,7 @@
   margin: 8px 0 0;
   color: var(--text-gedaempft);
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .kanal-abo-info > .browse-meta:last-child {
@@ -248,8 +253,9 @@
   padding: 24px;
   border-radius: 12px;
   background: var(--flaeche-hoch);
-  max-height: calc(100vh - var(--kopf-hoehe) - 48px);
+  max-height: calc(100dvh - var(--kopf-hoehe) - 48px);
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .playlist-cover {
@@ -290,6 +296,17 @@
   gap: 4px;
   font-weight: 500;
   margin-bottom: 4px;
+  max-width: 100%;
+  min-height: 32px;
+}
+
+.playlist-kanallink span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.playlist-kanallink svg {
+  flex-shrink: 0;
 }
 
 .playlist-kanallink:hover {
@@ -314,6 +331,25 @@
   line-height: 1.6;
 }
 
+.playlist-beschreibung[data-offen="false"] {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.beschreibung-umschalten {
+  min-height: 44px;
+  padding: 8px 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.beschreibung-umschalten:hover {
+  text-decoration: underline;
+}
+
 .playlist-inhalt {
   min-width: 0;
 }
@@ -327,6 +363,9 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
 }
 
 .playlist-position {
@@ -335,6 +374,8 @@
   gap: 12px;
   padding: 8px;
   border-radius: 8px;
+  min-width: 0;
+  transition: background-color var(--uebergang);
 }
 
 .playlist-position:hover {
@@ -342,7 +383,7 @@
 }
 
 .playlist-nummer {
-  flex: 0 0 20px;
+  flex: 0 0 3ch;
   text-align: center;
   color: var(--text-gedaempft);
   font-size: 14px;
@@ -390,6 +431,18 @@
   padding-bottom: 16px;
   margin-bottom: 20px;
   border-bottom: 1px solid var(--rand-zart);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.such-filter .chip {
+  flex-shrink: 0;
+}
+
+.such-filter::-webkit-scrollbar {
+  display: none;
 }
 
 .such-seite .such-kopf {
@@ -467,6 +520,19 @@
   padding: 0;
   gap: 20px;
   align-items: flex-start;
+  background: transparent;
+  transition: background-color var(--uebergang);
+}
+
+.such-seite .fundstelle:hover .fundstelle-titel {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.fundstelle-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .such-seite .fundstelle-titel {
@@ -482,6 +548,11 @@
   color: var(--text-gedaempft);
   font-style: normal;
   font-size: 14px;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .fundstelle-zeit {
@@ -490,6 +561,7 @@
   gap: 4px;
   font-size: 13px;
   font-weight: 500;
+  min-height: 32px;
 }
 
 @media (max-width: 1150px) {
@@ -597,6 +669,7 @@
 
   .kanal-filter .auswahl {
     margin: 0;
+    width: 100%;
   }
 
   .kanal-abo {
@@ -624,7 +697,9 @@
 
   .playlist-uebersicht {
     display: block;
-    padding: 20px;
+    padding: 16px;
+    overflow: visible;
+    scrollbar-gutter: auto;
   }
 
   .playlist-details h1 {
@@ -637,13 +712,14 @@
   }
 
   .playlist-nummer {
-    flex-basis: 14px;
+    flex-basis: 3ch;
     font-size: 12px;
   }
 
   .playlist-position .kachel-vorschau {
-    flex-basis: 120px;
-    width: 120px;
+    flex-basis: 40%;
+    width: 40%;
+    max-width: 160px;
   }
 
   .playlist-position .kachel-titel {
@@ -662,32 +738,71 @@
 
   .such-seite .gitter[data-form="liste"] .kachel,
   .such-seite .fundstelle {
+    flex-direction: column;
     gap: 12px;
   }
 
   .such-seite .gitter[data-form="liste"] .kachel-vorschau,
   .such-seite .fundstelle-bild {
-    flex-basis: 42%;
-    width: 42%;
+    flex-basis: auto;
+    width: 100%;
+    max-width: none;
     border-radius: 8px;
   }
 
   .such-seite .kachel-titel,
   .such-seite .fundstelle-titel {
-    font-size: 14px;
+    font-size: 16px;
     margin-bottom: 4px;
   }
 
   .such-seite .kachel-zeile {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .such-seite .fundstelle-zitat {
-    font-size: 12px;
+    font-size: 14px;
     margin: 8px 0;
   }
 
   .fundstelle-zeit {
+    font-size: 13px;
+    min-height: 44px;
+  }
+
+  .such-seite .such-untertitel-kopf {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .such-seite .gitter[data-form="liste"],
+  .such-seite .fundstellen {
+    gap: 28px;
+  }
+
+  .such-seite .kachel-text,
+  .such-seite .fundstelle-text {
+    width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  .kanal-abo {
+    gap: 12px;
+  }
+
+  .kanal-abo-avatar {
+    width: 56px;
+    height: 56px;
+    font-size: 24px;
+  }
+
+  .playlist-position .kachel {
+    gap: 8px;
+  }
+
+  .playlist-position .kachel-zeile {
     font-size: 12px;
   }
 }

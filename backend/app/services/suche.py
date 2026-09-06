@@ -26,8 +26,9 @@ import logging
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import text
+from sqlalchemy import String, text
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.selectable import TextualSelect
 
 log = logging.getLogger(__name__)
 
@@ -248,6 +249,18 @@ def _als_phrase(anfrage: str) -> str:
     return '"' + normalisieren(anfrage).replace('"', '""') + '"'
 
 
+def video_treffer_abfrage(anfrage: str) -> TextualSelect:
+    """Unbegrenzte Treffer-Unterabfrage für gefilterte, sortierte Videolisten.
+
+    Kanal, Archivstatus und Videoart müssen vor dem Seitenlimit greifen.
+    Eine vorab begrenzte ID-Liste würde Treffer aus späteren Seiten verlieren.
+    Die IDs bleiben dabei in SQLite und werden nicht alle in Python geladen.
+    """
+    return text(
+        "SELECT video_id FROM video_suche WHERE video_suche MATCH :videofilter"
+    ).bindparams(videofilter=_als_phrase(anfrage)).columns(video_id=String)
+
+
 def video_treffer(db: Session, anfrage: str, limit: int = 60, offset: int = 0,
                   *, archived_only: bool = False) -> list[str]:
     """Video-IDs, nach Relevanz sortiert.
@@ -261,8 +274,8 @@ def video_treffer(db: Session, anfrage: str, limit: int = 60, offset: int = 0,
         text(
             "SELECT video_id FROM video_suche "
             "WHERE video_suche MATCH :q "
-            "AND (:archived = 0 OR video_id IN (SELECT id FROM videos WHERE status = 'archived')) "
-            "ORDER BY bm25(video_suche, 0.0, 10.0, 1.0, 3.0) "
+            "AND video_id IN (SELECT id FROM videos WHERE :archived = 0 OR status = 'archived') "
+            "ORDER BY bm25(video_suche, 0.0, 10.0, 1.0, 3.0), video_id "
             "LIMIT :l OFFSET :o"
         ),
         {"q": _als_phrase(anfrage), "l": limit, "o": offset, "archived": int(archived_only)},
@@ -270,7 +283,7 @@ def video_treffer(db: Session, anfrage: str, limit: int = 60, offset: int = 0,
     return [z[0] for z in zeilen]
 
 
-def untertitel_treffer(db: Session, anfrage: str, limit: int = 40,
+def untertitel_treffer(db: Session, anfrage: str, limit: int = 40, offset: int = 0,
                       *, archived_only: bool = False) -> list[Untertitelfund]:
     """Fundstellen in gesprochenem Text, mit Zeitangabe.
 
@@ -281,14 +294,20 @@ def untertitel_treffer(db: Session, anfrage: str, limit: int = 40,
         return []
     zeilen = db.execute(
         text(
-            "SELECT video_id, start_s, sprache, zeile, MIN(rang) FROM ("
-            "  SELECT video_id, start_s, sprache, zeile, bm25(untertitel_suche) AS rang"
+            # FTS-Hilfsfunktionen müssen ausgewertet sein, bevor die Fenster-
+            # funktion pro Video die relevanteste und früheste Fundstelle wählt.
+            "WITH treffer AS MATERIALIZED ("
+            "  SELECT rowid AS zeilen_id, video_id, start_s, sprache, zeile, bm25(untertitel_suche) AS rang"
             "  FROM untertitel_suche WHERE untertitel_suche MATCH :q"
-            "  AND (:archived = 0 OR video_id IN (SELECT id FROM videos WHERE status = 'archived'))"
-            "  ORDER BY rang LIMIT 500"
-            ") GROUP BY video_id ORDER BY MIN(rang) LIMIT :l"
+            "  AND video_id IN (SELECT id FROM videos WHERE :archived = 0 OR status = 'archived')"
+            "), je_video AS ("
+            "  SELECT *, ROW_NUMBER() OVER ("
+            "    PARTITION BY video_id ORDER BY rang, CAST(start_s AS REAL), sprache, zeilen_id"
+            "  ) AS position FROM treffer"
+            ") SELECT video_id, start_s, sprache, zeile FROM je_video"
+            " WHERE position = 1 ORDER BY rang, video_id LIMIT :l OFFSET :o"
         ),
-        {"q": _als_phrase(anfrage), "l": limit, "archived": int(archived_only)},
+        {"q": _als_phrase(anfrage), "l": limit, "o": offset, "archived": int(archived_only)},
     ).fetchall()
     return [Untertitelfund(z[0], float(z[1]), z[2], z[3]) for z in zeilen]
 

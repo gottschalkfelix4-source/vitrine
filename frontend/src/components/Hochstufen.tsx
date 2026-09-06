@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../lib/api";
-import type { UpgradeVorschau } from "../lib/api";
 import { bytes } from "../lib/format";
+import { useApi } from "../hooks/useApi";
 
 /**
  * Nachträglich auf eine höhere Qualität gehen.
@@ -28,39 +28,38 @@ const STUFEN: { wert: number; text: string }[] = [
 
 export function Hochstufen({ kanal }: { kanal?: string }) {
   const [ziel, setZiel] = useState(2160);
-  const [vorschau, setVorschau] = useState<UpgradeVorschau | null>(null);
-  const [laedt, setLaedt] = useState(true);
+  const { daten: vorschau, laedt, fehler: ladeFehler, neuLaden: holen } = useApi(() => api.upgradeVorschau(ziel, kanal), [ziel, kanal]);
   const [fehler, setFehler] = useState<string | null>(null);
   const [nachfrage, setNachfrage] = useState(false);
   const [meldung, setMeldung] = useState<string | null>(null);
+  const [sendet, setSendet] = useState(false);
+  const transaktion = useRef(false);
 
-  const holen = useCallback(() => {
-    setLaedt(true);
+  useEffect(() => {
     setNachfrage(false);
-    api
-      .upgradeVorschau(ziel, kanal)
-      .then((v) => {
-        setVorschau(v);
-        setFehler(null);
-      })
-      .catch((e) => setFehler(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLaedt(false));
+    setFehler(null);
+    setMeldung(null);
   }, [ziel, kanal]);
 
-  useEffect(holen, [holen]);
-
   async function einreihen() {
+    if (transaktion.current || !vorschau || laedt || ladeFehler || vorschau.ziel !== ziel) return;
+    transaktion.current = true;
+    setSendet(true);
+    setFehler(null);
     try {
-      const r = await api.upgradeEinreihen(ziel, kanal);
+      const r = await api.upgradeEinreihen(vorschau.ziel, kanal);
       setMeldung(
         r.eingereiht === 0
           ? "Nichts einzureihen – alles liegt schon auf dieser Stufe oder darüber."
           : `${r.eingereiht} ${r.eingereiht === 1 ? "Video" : "Videos"} eingereiht. Der Fortschritt steht oben und in der Warteschlange.`,
       );
       setNachfrage(false);
-      holen();
+      await holen();
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e));
+    } finally {
+      transaktion.current = false;
+      setSendet(false);
     }
   }
 
@@ -76,6 +75,7 @@ export function Hochstufen({ kanal }: { kanal?: string }) {
           <select
             className="knopf"
             value={ziel}
+            disabled={sendet}
             onChange={(e) => setZiel(Number(e.target.value))}
           >
             {STUFEN.map((s) => (
@@ -88,19 +88,21 @@ export function Hochstufen({ kanal }: { kanal?: string }) {
         {laedt ? <span className="beiwerk">wird berechnet …</span> : null}
       </div>
 
-      {fehler ? (
-        <div className="hinweis" data-art="fehler">
-          <div>{fehler}</div>
+      {fehler || ladeFehler ? (
+        <div className="hinweis" data-art="fehler" role="alert">
+          <div>{fehler || ladeFehler}
+            {ladeFehler ? <button type="button" className="knopf" onClick={holen} disabled={laedt || sendet}>Erneut versuchen</button> : null}
+          </div>
         </div>
       ) : null}
 
       {meldung ? (
-        <div className="hinweis">
+        <div className="hinweis" role="status">
           <div>{meldung}</div>
         </div>
       ) : null}
 
-      {vorschau && !laedt ? (
+      {vorschau && !laedt && !ladeFehler && vorschau.ziel === ziel ? (
         vorschau.videos === 0 ? (
           <p className="beiwerk">
             Alles Archivierte liegt bereits auf dieser Stufe oder darüber. Nichts zu tun.
@@ -172,10 +174,10 @@ export function Hochstufen({ kanal }: { kanal?: string }) {
                   {vorschau.videos.toLocaleString("de-DE")} Videos neu laden, geschätzt{" "}
                   {bytes(vorschau.zusatz_bytes)} zusätzlich?
                 </span>
-                <button className="knopf" data-art="stark" onClick={() => void einreihen()}>
-                  Ja, einreihen
+                <button className="knopf" data-art="stark" disabled={sendet} onClick={() => void einreihen()}>
+                  {sendet ? "Wird eingereiht …" : "Ja, einreihen"}
                 </button>
-                <button className="knopf" onClick={() => setNachfrage(false)}>
+                <button className="knopf" disabled={sendet} onClick={() => setNachfrage(false)}>
                   Abbrechen
                 </button>
               </div>

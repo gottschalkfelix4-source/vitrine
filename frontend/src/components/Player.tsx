@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icon } from "./Icons";
-import { PlayerEinstellungen } from "./PlayerEinstellungen";
+import { PlayerEinstellungen, PlayerUntertitel } from "./PlayerEinstellungen";
 import type { Kapitel } from "../lib/api";
 import { api, untertitelUrl } from "../lib/api";
 import { useAdmin } from "./Anmeldung";
@@ -141,6 +141,8 @@ export function Player({
   const spurRef = useRef(spur);
   spurRef.current = spur;
   const [zeiger, setZeiger] = useState<{ x: number; zeit: number } | null>(null);
+  const [touchBedienung, setTouchBedienung] = useState(false);
+  const [hinweis, setHinweis] = useState<string | null>(null);
   const zieht = useRef(false);
   const ausblender = useRef<number | undefined>(undefined);
 
@@ -162,7 +164,19 @@ export function Player({
     setQualitaet("auto");
     setTranskodieren(false);
     setAngebote([{ value: "auto", label: "Automatisch" }]);
+    setZeit(0);
+    setGepuffert([]);
+    setHochkant(false);
+    setSpur(-1);
+    setMenue(null);
+    setHinweis(null);
   }, [videoId]);
+
+  useEffect(() => {
+    if (!hinweis) return;
+    const timer = window.setTimeout(() => setHinweis(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [hinweis]);
 
   // ---- Quelle beschaffen -------------------------------------------------
   useEffect(() => {
@@ -170,6 +184,8 @@ export function Player({
     let sitzung: Wiedergabesitzung | null = null;
     quellenwechsel.current = true;
     gesprungen.current = false;
+    setWartet(false);
+    setGepuffert([]);
     setLage({ art: "pruefen" });
 
     async function oeffnen(): Promise<void> {
@@ -455,7 +471,7 @@ export function Player({
     setSichtbar(true);
     window.clearTimeout(ausblender.current);
     ausblender.current = window.setTimeout(() => {
-      if (menue === null) setSichtbar(false);
+      if (menue === null && !zieht.current) setSichtbar(false);
     }, AUSBLENDEN_MS);
   }, [menue]);
 
@@ -478,10 +494,19 @@ export function Player({
     else el.pause();
   }, [lage.art]);
 
+  const tonUmschalten = useCallback(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.muted || el.volume === 0) {
+      el.muted = false;
+      if (el.volume === 0) el.volume = 1;
+    } else el.muted = true;
+  }, []);
+
   const springe = useCallback(
     (t: number) => {
       const el = videoRef.current;
-      if (!el) return;
+      if (!el || el.readyState < 1 || !Number.isFinite(t)) return;
       const ziel = Math.max(0, Math.min(gesamt || el.duration || 0, t));
       el.currentTime = ziel;
       setZeit(ziel);
@@ -492,14 +517,16 @@ export function Player({
   const vollbildUmschalten = useCallback(() => {
     // Absichtlich ohne await: Safari auf iOS knuepft die Erlaubnis an den
     // laufenden Klick. Wer vorher noch etwas abwartet, verliert sie.
-    void umschaltenVollbild(huelleRef.current, videoRef.current);
+    void umschaltenVollbild(huelleRef.current, videoRef.current).catch(() => {
+      setHinweis("Vollbild ist in diesem Browser gerade nicht verfügbar.");
+    });
   }, []);
 
   const bildImBild = useCallback(() => {
     const el = videoRef.current;
-    if (!el || !document.pictureInPictureEnabled) return;
-    if (document.pictureInPictureElement) void document.exitPictureInPicture();
-    else void el.requestPictureInPicture();
+    if (!el || el.readyState < 1 || !document.pictureInPictureEnabled || typeof el.requestPictureInPicture !== "function") return;
+    const wechsel = document.pictureInPictureElement ? document.exitPictureInPicture() : el.requestPictureInPicture();
+    void wechsel.catch(() => setHinweis("Bild im Bild ist gerade nicht verfügbar."));
   }, []);
 
   const spurWaehlen = useCallback((index: number) => {
@@ -544,9 +571,11 @@ export function Player({
     if (lage.art !== "bereit") return;
     const beim = (e: KeyboardEvent) => {
       const ziel = e.target as HTMLElement | null;
-      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || document.querySelector("dialog[open]") || huelleRef.current?.closest("[inert]") || ziel?.closest("input, textarea, select, [contenteditable=true]"))
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || document.querySelector("dialog[open]") || huelleRef.current?.closest("[inert]") || ziel?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox]"))
         return;
       if (ziel?.closest('[role="menu"]')) return;
+      // Navigation und andere Formulare behalten ihre eigene Tastaturbedienung.
+      if (ziel?.closest("button, a, [role=slider]") && !huelleRef.current?.contains(ziel)) return;
       // Leertaste auf einem fokussierten Knopf gehört dem Knopf. Die übrigen
       // Player-Kürzel bleiben auch nach einem Klick auf die Steuerung aktiv.
       if ((e.key === " " || e.key === "Enter") && ziel?.closest("button, a")) return;
@@ -587,7 +616,7 @@ export function Player({
           el.volume = Math.max(0, el.volume - 0.05);
           break;
         case "m":
-          el.muted = !el.muted;
+          tonUmschalten();
           break;
         case "f":
           vollbildUmschalten();
@@ -625,7 +654,7 @@ export function Player({
     return () => window.removeEventListener("keydown", beim);
   }, [
     lage.art, gesamt, umschalten, springe, vollbildUmschalten, aufTheater, theater,
-    spurWaehlen, spur, untertitel.length, bildImBild, zeigen,
+    spurWaehlen, spur, untertitel.length, bildImBild, zeigen, tonUmschalten,
   ]);
 
   // ---- Leiste: Zeiger und Ziehen ----------------------------------------
@@ -656,10 +685,11 @@ export function Player({
       data-theater={theater}
       data-steuerung={steuerungSichtbar}
       data-laeuft={laeuft}
-      onMouseMove={zeigen}
+      data-status={lage.art}
+      onPointerMove={(e) => { if (e.pointerType === "mouse") zeigen(); }}
       onFocus={zeigen}
-      onMouseLeave={() => {
-        if (laeuft && menue === null) setSichtbar(false);
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse" && laeuft && menue === null && !zieht.current) setSichtbar(false);
       }}
     >
       <video
@@ -669,8 +699,13 @@ export function Player({
         playsInline
         preload="metadata"
         data-modus={lage.art === "bereit" ? lage.modus : undefined}
-        onClick={umschalten}
-        onDoubleClick={vollbildUmschalten}
+        onPointerDown={(e) => setTouchBedienung(e.pointerType !== "mouse")}
+        onClick={() => {
+          if (!touchBedienung) { umschalten(); return; }
+          if (!sichtbar) zeigen();
+          else if (laeuft) setSichtbar(false);
+        }}
+        onDoubleClick={() => { if (!touchBedienung) vollbildUmschalten(); }}
         onError={(e) => {
           const fehler = e.currentTarget.error;
           if (lage.art === "bereit" && fehler && fehler.code !== MediaError.MEDIA_ERR_ABORTED) {
@@ -699,11 +734,12 @@ export function Player({
         {!transkodieren ? <button className="knopf player-erneut" onClick={liveVersuchen}>Mit Live-Transkodierung versuchen</button> : null}
       </div> : null}
       {lage.art === "bereit" && wartet && laeuft ? <div className="player-lader" aria-hidden="true" /> : null}
+      {hinweis ? <div className="player-hinweis" role="status">{hinweis}</div> : null}
 
-      {lage.art === "bereit" && !laeuft ? (
-        <button className="player-gross" onClick={umschalten} aria-label="Abspielen">
+      {lage.art === "bereit" && (!laeuft || (touchBedienung && steuerungSichtbar && menue === null)) ? (
+        <button className="player-gross" onClick={() => { umschalten(); zeigen(); }} aria-label={laeuft ? "Pause" : "Abspielen"}>
           <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
-            <path d="M8 5v14l11-7z" fill="currentColor" />
+            <path d={laeuft ? "M6 5h4v14H6zm8 0h4v14h-4z" : "M8 5v14l11-7z"} fill="currentColor" />
           </svg>
         </button>
       ) : null}
@@ -714,8 +750,9 @@ export function Player({
           ref={leisteRef}
           className="zeitleiste"
           role="slider"
-          tabIndex={0}
+          tabIndex={lage.art === "bereit" && gesamt > 0 ? 0 : -1}
           aria-label="Position"
+          aria-disabled={lage.art !== "bereit" || gesamt <= 0}
           aria-valuetext={`${dauer(zeit)} von ${dauer(gesamt)}`}
           aria-valuemin={0}
           aria-valuemax={Math.round(gesamt)}
@@ -732,7 +769,10 @@ export function Player({
             springe(ziel);
           }}
           onPointerDown={(e) => {
+            if (lage.art !== "bereit" || gesamt <= 0 || e.button !== 0) return;
+            e.preventDefault();
             zieht.current = true;
+            zeigen();
             (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
             springe(zeitAmZeiger(e.clientX).zeit);
           }}
@@ -742,10 +782,15 @@ export function Player({
             if (zieht.current) springe(p.zeit);
           }}
           onPointerUp={(e) => {
+            if (!zieht.current) return;
+            springe(zeitAmZeiger(e.clientX).zeit);
             zieht.current = false;
-            (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+            if (e.pointerType !== "mouse") setZeiger(null);
+            zeigen();
           }}
           onPointerCancel={() => { zieht.current = false; setZeiger(null); }}
+          onLostPointerCapture={() => { zieht.current = false; }}
           onPointerLeave={() => {
             if (!zieht.current) setZeiger(null);
           }}
@@ -770,7 +815,7 @@ export function Player({
           </div>
           <div className="leiste-griff" style={{ left: `${gespielt}%` }} />
           {zeiger ? (
-            <div className="leiste-tipp" style={{ left: zeiger.x }}>
+            <div className="leiste-tipp" style={{ left: `clamp(62px, ${zeiger.x}px, calc(100% - 62px))` }}>
               {zeigerKapitel ? <div className="leiste-tipp-kapitel">{zeigerKapitel.titel}</div> : null}
               <div>{dauer(zeiger.zeit)}</div>
             </div>
@@ -779,7 +824,7 @@ export function Player({
 
         {/* ---- Knopfzeile */}
         <div className="steuer-zeile">
-          <button className="steuer-knopf" onClick={umschalten} aria-label={laeuft ? "Pause" : "Abspielen"} title={laeuft ? "Pause (k)" : "Abspielen (k)"}>
+          <button className="steuer-knopf" disabled={lage.art !== "bereit"} onClick={umschalten} aria-label={laeuft ? "Pause" : "Abspielen"} title={laeuft ? "Pause (k)" : "Abspielen (k)"}>
             {laeuft ? (
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 5h4v14H6zm8 0h4v14h-4z" fill="currentColor" />
@@ -794,12 +839,10 @@ export function Player({
           <div className="steuer-ton">
             <button
               className="steuer-knopf"
-              onClick={() => {
-                const el = videoRef.current;
-                if (el) el.muted = !el.muted;
-              }}
-              aria-label={gemerkt.stumm ? "Ton an" : "Stumm"}
-              title={gemerkt.stumm ? "Ton an (m)" : "Stumm (m)"}
+              disabled={lage.art !== "bereit"}
+              onClick={tonUmschalten}
+              aria-label={gemerkt.stumm || gemerkt.lautstaerke === 0 ? "Ton an" : "Stumm"}
+              title={gemerkt.stumm || gemerkt.lautstaerke === 0 ? "Ton an (m)" : "Stumm (m)"}
             >
               {gemerkt.stumm || gemerkt.lautstaerke === 0 ? (
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -814,6 +857,7 @@ export function Player({
             <input
               className="steuer-regler"
               type="range"
+              disabled={lage.art !== "bereit"}
               min={0}
               max={1}
               step={0.02}
@@ -840,37 +884,13 @@ export function Player({
             aufQualitaet={qualitaetWaehlen} tempo={gemerkt.tempo} aufTempo={tempoSetzen} />
 
           {/* Untertitel */}
-          {untertitel.length > 0 ? (
-            <div className="steuer-menue-anker">
-              <button
-                className="steuer-knopf steuer-text"
-                data-aktiv={spur >= 0}
-                onClick={() => setMenue(menue === "untertitel" ? null : "untertitel")}
-                aria-label="Untertitel"
-                aria-expanded={menue === "untertitel"}
-                title="Untertitel (c)"
-              >
-                CC
-              </button>
-              {menue === "untertitel" ? (
-                <div className="steuer-menue">
-                  <button data-aktiv={spur === -1} onClick={() => spurWaehlen(-1)}>
-                    Aus
-                  </button>
-                  {untertitel.map((u, i) => (
-                    <button key={i} data-aktiv={spur === i} onClick={() => spurWaehlen(i)}>
-                      {u.sprache}
-                      {u.automatisch ? " (automatisch)" : ""}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+          {untertitel.length > 0 ? <PlayerUntertitel offen={menue === "untertitel"}
+            aufOffen={(offen) => setMenue(offen ? "untertitel" : null)} bereich={huelleRef}
+            untertitel={untertitel} spur={spur} aufSpur={spurWaehlen} /> : null}
 
           {/* Bild-im-Bild */}
           {typeof document !== "undefined" && document.pictureInPictureEnabled ? (
-            <button className="steuer-knopf steuer-pip" onClick={bildImBild} aria-label="Bild im Bild" title="Bild im Bild (i)">
+            <button className="steuer-knopf steuer-pip" disabled={lage.art !== "bereit"} onClick={bildImBild} aria-label="Bild im Bild" title="Bild im Bild (i)">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M19 11h-8v6h8zm4 8V4.9A2 2 0 0 0 21 3H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2zm-2 0H3V5h18z" fill="currentColor" />
               </svg>
@@ -880,7 +900,7 @@ export function Player({
           {/* Theater */}
           {aufTheater && !vollbild ? (
             <button
-              className="steuer-knopf"
+              className="steuer-knopf steuer-theater"
               onClick={() => aufTheater(!theater)}
               aria-label={theater ? "Normale Ansicht" : "Kinomodus"}
               title={theater ? "Normale Ansicht (t)" : "Kinomodus (t)"}

@@ -82,7 +82,7 @@
 .seiten-kopf { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
 .seiten-kopf h1 { margin: 0; font-size: 28px; line-height: 1.25; font-weight: 700; letter-spacing: -.6px; }
 .seiten-kopf .beiwerk { font-size: 14px; color: var(--text-gedaempft); }
-.gitter { display: grid; gap: 36px 20px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+.gitter { display: grid; gap: 32px 20px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); }
 .gitter[data-form="liste"] { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .kachel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .kachel-vorschau { display: block; min-width: 0; }
@@ -101,7 +101,7 @@
 .kachel-text .avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
 .kachel-kanalbild { flex-shrink: 0; }
 .kachel-titel { margin: 0 0 5px; font-size: 16px; font-weight: 600; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.kachel-zeile { font-size: 14px; color: var(--text-gedaempft); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.kachel-zeile { font-size: 14px; color: var(--text-gedaempft); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
 .kachel-zeile a:hover { color: var(--text); }
 .kachel-archiv { gap: 8px; font-size: 12px; margin-top: 4px; }
 .kachel-archiv:empty { display: none; }
@@ -1717,4 +1717,112 @@
   .auftraege-tabelle .auftrag-art { font-size: 12px; color: var(--text-gedaempft); }
   .fl-text { gap: 4px 10px; }
   .fl-meldung { flex-basis: 100%; }
+}
+
+/* Gemeinsame App-Oberfläche: feste Navigation, ein klarer Scrollbereich. */
+.huelle { grid-template-rows: var(--kopf-gesamt) minmax(0, 1fr); }
+.kopf {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(24px, env(safe-area-inset-right, 0px));
+}
+.inhalt { overscroll-behavior-y: contain; scrollbar-gutter: stable; }
+.inhalt:focus { outline: none; }
+.startseite { max-width: 1920px; margin-inline: auto; }
+.leiste { scrollbar-gutter: stable; }
+.leiste-mobilkopf { display: flex; align-items: center; justify-content: space-between; padding: 0 0 12px 12px; font-size: 16px; font-weight: 600; }
+.leiste-abmelden .abmelden-knopf { width: 100%; justify-content: flex-start; gap: 24px; min-height: 48px; padding: 0 12px; border-radius: 10px; background: none; }
+.leiste-abmelden .abmelden-knopf:hover { background: var(--flaeche-hoch); }
+.leiste-abmelden .abmelden-knopf span { display: inline; }
+.leiste-abmelden .abmelden-fehler { position: static; width: auto; overflow-wrap: anywhere; }
+.mobile-navigation { display: none; }
+.nav-punkt, .symbol-knopf, .suche-absenden, .kanal-abo, .playlist-position, .einstellungen-nav button {
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.symbol-knopf:active, .knopf:active:not(:disabled), .chip:active { opacity: .75; }
+.suche input::-webkit-search-cancel-button, .suche input::-webkit-search-decoration { -webkit-appearance: none; }
+.suche:focus-within { outline: 1px solid var(--text-schwach); outline-offset: -1px; }
+.start-filter .chip { flex-shrink: 0; }
+.start-filter { scrollbar-gutter: auto; }
+.kachel { animation: erscheinen 180ms ease-out both; }
+.kachel-text { min-height: 72px; }
+.kachel-zeile:empty { display: none; }
+.kachel-bild { isolation: isolate; }
+.kachel-details { min-width: 0; flex: 1; }
+.skelett-avatar { width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; }
+.skelett-details { flex: 1; min-height: 64px; }
+.skelettgitter .skelett-zeile { height: 14px; margin-top: 3px; margin-bottom: 10px; }
+.mehr-laden { min-height: 100px; padding-block: 28px; }
+.nachladen-status { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 32px; color: var(--text-gedaempft); }
+.nachladen-spinner { width: 20px; height: 20px; border: 2px solid var(--rand); border-top-color: var(--text-gedaempft); border-radius: 50%; animation: drehen .8s linear infinite; }
+.nachladen-fehler { max-width: 48ch; text-align: center; color: var(--zu-fehler); overflow-wrap: anywhere; }
+.fehler-aktionen { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 20px; }
+.hinweis > div { min-width: 0; overflow-wrap: anywhere; }
+.dialog {
+  max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  border-radius: 12px;
+  animation: erscheinen 160ms ease-out;
+}
+.schleier { padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); animation: erscheinen 120ms ease-out; }
+.dialog-fuss { flex-wrap: wrap; }
+.dialog .knopf { min-height: 44px; white-space: normal; justify-content: center; }
+.einst-eingabe { max-width: 100%; flex-wrap: wrap; }
+.einst-eingabe input, .einst-eingabe select { min-width: 0; }
+.einst-text, .einst-text p, .vpn-meldung, .vpn-daten { overflow-wrap: anywhere; }
+@keyframes erscheinen { from { opacity: 0; } to { opacity: 1; } }
+
+@media (max-width: 1100px) {
+  .kopf { padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+}
+@media (max-width: 860px) {
+  .kopf { padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px)); }
+  .leiste { top: var(--kopf-gesamt); width: min(256px, calc(100vw - 48px)); z-index: 60; opacity: 0; transition: opacity 160ms ease, visibility 160ms; }
+  .leiste[data-offen="true"] { opacity: 1; transition: opacity 160ms ease; }
+  .leiste-schatten { inset: var(--kopf-gesamt) 0 0; z-index: 55; animation: erscheinen 160ms ease-out; }
+  .nav-punkt { min-height: 48px; }
+  .symbol-knopf { min-width: 44px; min-height: 44px; }
+  .suche-leeren { min-width: 32px; min-height: 32px; }
+  .knopf, .chip, .kachel-laden, .tab { min-height: 44px; }
+  .chip { padding-block: 10px; }
+  .inhalt { scrollbar-gutter: auto; padding-inline: max(20px, env(safe-area-inset-left, 0px)) max(20px, env(safe-area-inset-right, 0px)); }
+  .start-filter { min-height: 68px; }
+}
+@media (max-width: 600px) {
+  .huelle { grid-template-areas: "kopf" "inhalt" "mobil"; grid-template-rows: var(--kopf-gesamt) minmax(0, 1fr) auto; }
+  .kopf { padding-inline: max(8px, env(safe-area-inset-left, 0px)) max(8px, env(safe-area-inset-right, 0px)); }
+  .kopf-links { gap: 4px; }
+  .kopf-rechts { gap: 0; }
+  .kopf-rechts .abmelden-knopf { display: none; }
+  .mobile-navigation {
+    grid-area: mobil; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    background: var(--grund); border-top: 1px solid var(--rand-zart); z-index: 40;
+    padding: 2px env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  .mobile-navigation a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 56px; font-size: 10px; color: var(--text-gedaempft); transition: color 150ms, background-color 150ms; }
+  .mobile-navigation a[data-aktiv="true"] { color: var(--text); font-weight: 600; }
+  .mobile-navigation a[data-aktiv="true"] svg { stroke-width: 2.4; }
+  .mobile-navigation a:hover, .mobile-navigation a:active { background: var(--flaeche-hoch); }
+  .mobile-navigation a:focus-visible { outline-offset: -4px; }
+  .inhalt { padding: 16px max(12px, env(safe-area-inset-right, 0px)) 24px max(12px, env(safe-area-inset-left, 0px)); }
+  .start-filter { min-height: 68px; margin-bottom: 4px; }
+  .start-bestand { margin-bottom: 20px; }
+  .kachel-text { min-height: 64px; }
+  .kachel-titel { font-size: 15px; line-height: 1.45; }
+  .kachel-zeile { line-height: 1.5; }
+  .startseite > .skelettgitter { margin-inline: -12px; }
+  .startseite > .skelettgitter .kachel > .skelett { border-radius: 0; }
+  .dialog { padding: 20px; }
+  .seiten-kopf .knopf { white-space: normal; }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }
+  .einstellungen-nav button { min-height: 44px; }
+  .speicherleiste { margin-inline: 0; }
+}
+@media (max-width: 360px) {
+  .kopf-links { gap: 0; }
+  .kopf .marke > span { font-size: 21px; }
+  .kopf-rechts .thema-knopf { width: 40px; min-width: 40px; }
+  .dialog { padding: 16px; }
 }

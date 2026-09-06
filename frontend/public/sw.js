@@ -38,10 +38,10 @@ self.addEventListener("install", (e) => {
       // scheitert komplett. Deshalb einzeln und fehlertolerant: Ein fehlendes
       // Icon darf nicht dazu führen, dass die App gar nicht installierbar ist.
       .then((c) => Promise.allSettled(SCHALE_DATEIEN.map((p) => c.add(p))))
-      // Sofort übernehmen. Das ist hier gefahrlos, weil das Frontend als ein
-      // einziges Bündel ausgeliefert wird - es gibt keine nachgeladenen
-      // Teilstücke, die zu einer bereits laufenden alten Fassung passen
-      // müssten. Bei aufgeteiltem Code wäre das ein Fehler.
+      // Gehashte Bausteine behalten ihren Inhalt auch bei einem Update.
+      // Noch nicht besuchte Seiten werden separat geladen. Fehlt nach einem
+      // Deployment ein alter Baustein auf dem Server, bietet die Fehlergrenze
+      // einen Seitenreload an; dabei kommt die aktuelle Hülle aus dem Netz.
       .then(() => self.skipWaiting()),
   );
 });

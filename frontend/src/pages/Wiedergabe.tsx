@@ -4,9 +4,10 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Icon } from "../components/Icons";
 import { KanalAvatar } from "../components/KanalAvatar";
 import { Player } from "../components/Player";
+import { VideoNachladen } from "../components/VideoNachladen";
 import { useAdmin } from "../components/Anmeldung";
 import { Fehler, Gitter, Skelettgitter, Videokachel, Zustand } from "../components/ui";
-import { useApi } from "../hooks/useApi";
+import { useApi, useVideostapel } from "../hooks/useApi";
 import { api } from "../lib/api";
 import { lokalFortschrittLesen } from "../lib/wiedergabeFortschritt";
 import { aufrufe, bytes, dauer, datum, istHochaufloesend, prozent, qualitaet } from "../lib/format";
@@ -29,11 +30,6 @@ export function Wiedergabeseite() {
   const navigate = useNavigate();
 
   const detail = useApi(() => api.video(videoId), [videoId]);
-  const kanalId = detail.daten?.video.id === videoId ? detail.daten.video.kanal_id : null;
-  const weitere = useApi(
-    () => kanalId ? api.videos({ kanal: kanalId, nur_archiviert: true, limit: 16 }) : Promise.resolve([]),
-    [kanalId],
-  );
 
   useEffect(() => {
     setBeschreibungOffen(false);
@@ -57,14 +53,13 @@ export function Wiedergabeseite() {
   const guete = qualitaet(technik.breite, technik.hoehe, technik.fps);
   const ersparnis = technik.quelle_bytes && technik.buendel_bytes
     ? 1 - technik.buendel_bytes / technik.quelle_bytes : null;
-  const andere = (weitere.daten ?? []).filter((x) => x.id !== videoId && x.kanal_id === kanalId).slice(0, 10);
   const sprungSekunde = sprungziel !== null && Number.isFinite(sprungziel) && sprungziel >= 0
     ? sprungziel : undefined;
 
   function springe(sekunde: number) {
     const el = playerBereich.current?.querySelector("video");
-    if (el) {
-      el.currentTime = sekunde;
+    if (el && el.readyState >= 1 && Number.isFinite(sekunde)) {
+      el.currentTime = Math.max(0, Number.isFinite(el.duration) ? Math.min(sekunde, el.duration) : sekunde);
       void el.play().catch(() => { /* Manuelles Abspielen bleibt möglich. */ });
     }
   }
@@ -113,11 +108,11 @@ export function Wiedergabeseite() {
           ) : null}
           <div className="watch-aktionen">
             {(admin ? v.gesehen : lokal?.gesehen) ? <span className="watch-gesehen"><Icon name="check" size={20} />Gesehen</span> : null}
-            <button className="knopf" onClick={() => setTechnikOffen(!technikOffen)} aria-expanded={technikOffen} aria-controls="watch-technik">
+            <button className="knopf" onClick={() => setTechnikOffen(!technikOffen)} aria-expanded={technikOffen} aria-controls={technikOffen ? "watch-technik" : undefined}>
               <Icon name="info" size={20} />Technik
             </button>
             {admin && v.status === "archived" ? (
-              <button className="knopf" onClick={() => setEntfernenNachfrage(!entfernenNachfrage)} aria-label="Aus dem Archiv entfernen" aria-expanded={entfernenNachfrage} aria-controls="watch-entfernen">
+              <button className="knopf" disabled={entfernenLaeuft} onClick={() => setEntfernenNachfrage(!entfernenNachfrage)} aria-label="Aus dem Archiv entfernen" aria-expanded={entfernenNachfrage} aria-controls={entfernenNachfrage ? "watch-entfernen" : undefined}>
                 <Icon name="trash" size={20} />Entfernen
               </button>
             ) : null}
@@ -195,11 +190,22 @@ export function Wiedergabeseite() {
 
         <section className="watch-empfehlungen">
           <h2>Mehr von {v.kanal_name ?? "diesem Kanal"}</h2>
-          {weitere.fehler ? <Fehler text={weitere.fehler} erneut={weitere.neuLaden} /> : weitere.laedt && andere.length === 0 ? <Skelettgitter anzahl={3} /> : andere.length === 0 ? (
-            <p className="watch-leer">Noch keine weiteren archivierten Videos dieses Kanals.{" "}{v.kanal_id ? <Link to={`/kanal/${v.kanal_id}`}>Zum Kanal</Link> : null}</p>
-          ) : <Gitter form="liste">{andere.map((x) => <Videokachel key={x.id} video={x} />)}</Gitter>}
+          {v.kanal_id ? <WeitereVideos key={v.kanal_id} kanalId={v.kanal_id} videoId={videoId} />
+            : <p className="watch-leer">Diesem Video ist kein Kanal zugeordnet.</p>}
         </section>
       </aside>
     </div>
   );
+}
+
+function WeitereVideos({ kanalId, videoId }: { kanalId: string; videoId: string }) {
+  const stapel = useVideostapel({ kanal: kanalId, nur_archiviert: true }, 16);
+  const andere = stapel.videos.filter((video) => video.id !== videoId);
+  if (stapel.fehler && stapel.videos.length === 0) return <Fehler text={stapel.fehler} erneut={stapel.mehrLaden} />;
+  if (stapel.laedt && stapel.videos.length === 0) return <Skelettgitter anzahl={3} />;
+  return <>
+    {andere.length > 0 ? <Gitter form="liste">{andere.map((video) => <Videokachel key={video.id} video={video} />)}</Gitter>
+      : stapel.ende ? <p className="watch-leer">Noch keine weiteren archivierten Videos dieses Kanals. <Link to={`/kanal/${kanalId}`}>Zum Kanal</Link></p> : null}
+    <VideoNachladen stapel={{ ...stapel, videos: andere }} />
+  </>;
 }

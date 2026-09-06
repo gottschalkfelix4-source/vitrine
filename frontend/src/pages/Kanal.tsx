@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { Fehler, Gitter, Hinweis, Leer, Skelettgitter, Videokachel } from "../components/ui";
 import { Icon } from "../components/Icons";
+import { Bild } from "../components/Bild";
+import { Dialog } from "../components/Dialog";
+import { KanalAvatar } from "../components/KanalAvatar";
+import { VideoNachladen } from "../components/VideoNachladen";
 import { useAdmin } from "../components/Anmeldung";
 import { useApi, useVideostapel } from "../hooks/useApi";
 import type { AlleLadenErgebnis, Sammlung } from "../lib/api";
@@ -47,8 +51,12 @@ const ART_TEXT: Record<Sammlung["art"], string> = {
 type Tab = "videos" | "shorts" | "live" | "playlists";
 
 export function Kanalseite() {
-  const admin = useAdmin();
   const { kanalId = "" } = useParams();
+  return <Kanalinhalt key={kanalId} kanalId={kanalId} />;
+}
+
+function Kanalinhalt({ kanalId }: { kanalId: string }) {
+  const admin = useAdmin();
   const navigate = useNavigate();
   const [suchparameter, setSuchparameter] = useSearchParams();
   const tabWert = suchparameter.get("tab");
@@ -66,7 +74,7 @@ export function Kanalseite() {
   const [ladenMeldung, setLadenMeldung] = useState<string | null>(null);
   const [aktionsFehler, setAktionsFehler] = useState<string | null>(null);
 
-  const kanal = useApi(() => api.kanal(kanalId), [kanalId]);
+  const kanal = useApi(() => api.kanal(kanalId), [kanalId, admin]);
   const offene = useApi(() => admin ? api.kanalOffene(kanalId) : Promise.resolve(null), [kanalId, admin]);
 
   // Die Videos kommen serverseitig gefiltert und seitenweise. Der Filter
@@ -94,7 +102,7 @@ export function Kanalseite() {
           : d.zaehler.videos;
 
   async function abgleichen() {
-    if (!admin) return;
+    if (!admin || abgleichLaeuft) return;
     setAbgleichLaeuft(true);
     setAktionsFehler(null);
     try {
@@ -129,13 +137,9 @@ export function Kanalseite() {
         </Hinweis>
       ) : null}
       <div className="kanal-kopf">
-        {thumbUrl(d.banner) ? <img className="banner" src={thumbUrl(d.banner)!} alt="" /> : null}
+        <Bild className="banner" src={thumbUrl(d.banner)} alt="">{null}</Bild>
         <div className="kanal-zeile">
-          {thumbUrl(d.kanal.avatar) ? (
-            <img className="avatar-gross" src={thumbUrl(d.kanal.avatar)!} alt="" />
-          ) : (
-            <span className="avatar-gross kanal-initial" aria-hidden="true">{d.kanal.name.charAt(0).toLocaleUpperCase("de")}</span>
-          )}
+          <KanalAvatar className="avatar-gross" kanalId={d.kanal.id} name={d.kanal.name} avatar={d.kanal.avatar} />
           <div className="kanal-identitaet">
             <h1>{d.kanal.name}</h1>
             <div className="browse-meta">
@@ -210,13 +214,14 @@ export function Kanalseite() {
         </div>
       </div>
 
-      <div className="tabs">
+      <div className="tabs" role="group" aria-label="Kanalinhalte">
         {tabs
           // Leere Tabs gar nicht erst zeigen - nicht jeder Kanal hat Shorts.
-          .filter((t) => t.zahl > 0 || t.wert === "videos")
+          .filter((t) => t.zahl > 0 || t.wert === "videos" || t.wert === tab)
           .map((t) => (
             <button
               key={t.wert}
+              type="button"
               className="tab"
               data-aktiv={tab === t.wert}
               aria-pressed={tab === t.wert}
@@ -233,7 +238,7 @@ export function Kanalseite() {
       </div>
 
       {tab !== "playlists" ? (
-        <div className="chips kanal-sortierung" aria-label="Videos sortieren">
+        <div className="chips kanal-sortierung" role="group" aria-label="Videos sortieren">
           {([{ wert: "neu", text: "Neueste" }, { wert: "aufrufe", text: "Beliebt" }, { wert: "alt", text: "Älteste" }] as const).map((s) => (
             <button className="chip" key={s.wert} data-aktiv={sortierung === s.wert} aria-pressed={sortierung === s.wert} onClick={() => setSuchparameter((vorher) => {
               const neu = new URLSearchParams(vorher);
@@ -250,11 +255,9 @@ export function Kanalseite() {
             {playlists.map((p) => (
               <Link key={p.id} className="kachel playlist-kachel" to={`/playlist/${p.id}`}>
                 <div className="kachel-bild">
-                  {thumbUrl(p.thumb) ? (
-                    <img src={thumbUrl(p.thumb)!} alt="" loading="lazy" />
-                  ) : (
+                  <Bild src={thumbUrl(p.thumb)} alt="" loading="lazy">
                     <div className="platzhalter"><Icon name="playlist" size={42} /></div>
-                  )}
+                  </Bild>
                   <span className="dauer playlist-anzahl"><Icon name="playlist" size={16} />{p.anzahl} Videos</span>
                 </div>
                 <div className="kachel-text">
@@ -272,7 +275,7 @@ export function Kanalseite() {
         )
       ) : (
         <div className="kanal-videoergebnisse" data-art={tab}>
-          {stapel.fehler ? <Fehler text={stapel.fehler} erneut={stapel.neuLaden} /> : null}
+          {stapel.fehler && stapel.videos.length === 0 ? <Fehler text={stapel.fehler} erneut={stapel.mehrLaden} /> : null}
           {stapel.laedt && stapel.videos.length === 0 ? (
             <Skelettgitter />
           ) : stapel.videos.length > 0 ? (
@@ -282,16 +285,7 @@ export function Kanalseite() {
                   <Videokachel key={v.id} video={v} ohneKanal />
                 ))}
               </Gitter>
-              <div className="mehr-laden">
-                <span>
-                  {stapel.videos.length} von {gesamtImTab}
-                </span>
-                {!stapel.ende ? (
-                  <button className="knopf" onClick={stapel.mehrLaden} disabled={stapel.laedt}>
-                    {stapel.laedt ? "lädt …" : "Mehr laden"}
-                  </button>
-                ) : null}
-              </div>
+              <VideoNachladen stapel={stapel} gesamt={gesamtImTab} />
             </>
           ) : !stapel.fehler ? (
             <Leer
@@ -337,14 +331,9 @@ function KanalEntfernenDialog({
   const [dateien, setDateien] = useState(true);
   const [laeuft, setLaeuft] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const el = dialog.current;
-    el?.showModal();
-    return () => el?.close();
-  }, []);
 
   async function bestaetigen() {
+    if (laeuft) return;
     setLaeuft(true);
     setFehler(null);
     try {
@@ -357,25 +346,22 @@ function KanalEntfernenDialog({
   }
 
   return (
-    <dialog
-      ref={dialog}
-      className="kanal-dialog"
-      aria-labelledby="kanal-entfernen-titel"
-      onCancel={(e) => { if (laeuft) e.preventDefault(); else aufSchliessen(); }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !laeuft) aufSchliessen();
-      }}
+    <Dialog
+      titelId="kanal-entfernen-titel"
+      beschreibungId="kanal-entfernen-beschreibung"
+      aufSchliessen={aufSchliessen}
+      schliessenGesperrt={laeuft}
     >
       <div className="dialog">
         <h2 id="kanal-entfernen-titel">„{name}“ entfernen?</h2>
-        <p className="erklaerung">
+        <p id="kanal-entfernen-beschreibung" className="erklaerung">
           Der Kanal verschwindet mit allen {videos} erfassten Videos, den Playlists und den
           zugehörigen Aufträgen aus der Verwaltung. Das lässt sich nicht rückgängig machen –
           ein erneutes Aufnehmen muss alles neu erfassen.
         </p>
 
         <label className="schalter">
-          <input type="checkbox" checked={dateien} onChange={(e) => setDateien(e.target.checked)} />
+          <input type="checkbox" checked={dateien} disabled={laeuft} onChange={(e) => setDateien(e.target.checked)} />
           <span>
             Auch die Videodateien löschen
             <div style={{ color: "var(--text-schwach)", fontSize: 12 }}>
@@ -392,7 +378,7 @@ function KanalEntfernenDialog({
         ) : null}
 
         <div className="dialog-fuss">
-          <button type="button" className="knopf" autoFocus onClick={aufSchliessen} disabled={laeuft}>
+          <button type="button" className="knopf" data-dialog-fokus onClick={aufSchliessen} disabled={laeuft}>
             Abbrechen
           </button>
           <button
@@ -406,6 +392,6 @@ function KanalEntfernenDialog({
           </button>
         </div>
       </div>
-    </dialog>
+    </Dialog>
   );
 }
