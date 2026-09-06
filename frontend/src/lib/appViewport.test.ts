@@ -1,18 +1,25 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { appViewportBeobachten } from "./appViewport";
+import { appViewportBeobachten, dokumentScrollKorrekturen } from "./appViewport";
 
 let viewport: EventTarget & { width: number; height: number; offsetTop: number; scale: number };
 let beenden: (() => void) | undefined;
 const hoehe = () => document.documentElement.style.getPropertyValue("--app-viewport-hoehe");
 /** jsdom kennt keine Layoutbreite; sie wird für die Zoom-Erkennung vorgegeben. */
 const layoutBreite = (px: number) => Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, get: () => px });
+/** Ebenso die Dokumenthöhen, an denen der Scrollspielraum hängt. */
+const dokument = (inhalt: number, sichtbar: number) => {
+  Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, get: () => inhalt });
+  Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, get: () => sichtbar });
+};
 
 beforeEach(() => {
   vi.useFakeTimers();
   viewport = Object.assign(new EventTarget(), { width: 440, height: 894, offsetTop: 0, scale: 1 });
   vi.stubGlobal("visualViewport", viewport);
   vi.stubGlobal("innerHeight", 894);
+  vi.stubGlobal("scrollY", 0);
+  vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("matchMedia", () => ({ matches: true }));
   vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => window.setTimeout(() => fn(0), 16));
   vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
@@ -23,7 +30,7 @@ afterEach(() => {
   beenden = undefined;
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  Reflect.deleteProperty(document.documentElement, "clientWidth");
+  for (const name of ["clientWidth", "scrollHeight", "clientHeight"]) Reflect.deleteProperty(document.documentElement, name);
 });
 
 it("begrenzt die App auf das Webview, auch wenn der Bildschirm höher ist", () => {
@@ -103,6 +110,27 @@ it("übergeht beim Drehen die Bilder, in denen der Ausschnitt noch die alte Brei
   viewport.width = 956;
   vi.runAllTimers();
   expect(hoehe()).toBe("440px");
+});
+
+it("setzt einen Scrollstand ohne Spielraum zurück, wie ihn das iPhone nach dem Zurückdrehen hinterlässt", () => {
+  dokument(894, 894);
+  beenden = appViewportBeobachten();
+  const vorher = dokumentScrollKorrekturen();
+  vi.mocked(window.scrollTo).mockImplementation(() => vi.stubGlobal("scrollY", 0));
+  vi.stubGlobal("scrollY", 62);
+  window.dispatchEvent(new Event("scroll"));
+  vi.runAllTimers();
+  expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
+  expect(dokumentScrollKorrekturen()).toBe(vorher + 1);
+});
+
+it("lässt einen Scrollstand innerhalb des Spielraums in Ruhe", () => {
+  dokument(1200, 894);
+  vi.stubGlobal("scrollY", 100);
+  beenden = appViewportBeobachten();
+  window.dispatchEvent(new Event("scroll"));
+  vi.runAllTimers();
+  expect(window.scrollTo).not.toHaveBeenCalled();
 });
 
 it("behält bei ungültigen Start- oder Wechselwerten die letzte gültige Höhe", () => {

@@ -1,4 +1,6 @@
 import { useEffect, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { dokumentScrollKorrekturen } from "../lib/appViewport";
 import { trefferflaecheVersetzt } from "../lib/trefferflaeche";
 import { alsAppGestartet } from "../pwa";
 
@@ -35,7 +37,7 @@ export function PlayerDiagnose({ huelle, oberflaeche, appVollbild, nativesVollbi
       setZeilen([
         `lage ${screen.orientation?.type ?? "?"} quer=${quer} app=${appVollbild} nativ=${nativesVollbild} pwa=${alsAppGestartet()}`,
         `innen ${window.innerWidth}×${window.innerHeight} sichtbar ${vv ? `${Math.round(vv.width)}×${Math.round(vv.height)} +${Math.round(vv.offsetTop)} skala ${vv.scale.toFixed(2)}` : "–"}`,
-        `layout ${de.clientWidth}×${de.clientHeight} dokument h ${de.scrollHeight} scroll ${Math.round(de.scrollTop)}/${Math.round(document.body.scrollTop)}`,
+        `layout ${de.clientWidth}×${de.clientHeight} dokument h ${de.scrollHeight} scroll ${Math.round(de.scrollTop)}/${Math.round(document.body.scrollTop)} zurueck ${dokumentScrollKorrekturen()}×`,
         `var ${getComputedStyle(de).getPropertyValue("--app-viewport-hoehe") || "–"} scrollY ${Math.round(window.scrollY)} inhalt ${Math.round(document.querySelector(".inhalt")?.scrollTop ?? -1)}`,
         `huelle ${kasten(document.querySelector(".huelle"))}`,
         `player ${kasten(huelle.current)}`,
@@ -65,5 +67,7 @@ export function PlayerDiagnose({ huelle, oberflaeche, appVollbild, nativesVollbi
     };
   }, [huelle, oberflaeche, appVollbild, nativesVollbild, quer]);
 
-  return <pre className="player-diagnose" aria-hidden="true">{[...zeilen, ...tipp].join("\n")}</pre>;
+  // Ausserhalb des Players, dessen Stapelebene sonst den Kopf der App über
+  // die ersten Zeilen zeichnet.
+  return createPortal(<pre className="player-diagnose" aria-hidden="true">{[...zeilen, ...tipp].join("\n")}</pre>, document.body);
 }

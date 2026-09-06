@@ -27,6 +27,30 @@ function gezoomt(viewport: VisualViewport): boolean {
   return Math.abs(viewport.scale - 1) > 0.01;
 }
 
+let scrollKorrekturen = 0;
+
+/** Wie oft ein unmöglicher Scrollstand des Dokuments zurückgesetzt wurde;
+ *  zum Ablesen in der Diagnoseanzeige des Players. */
+export function dokumentScrollKorrekturen(): number {
+  return scrollKorrekturen;
+}
+
+/** Das Dokument scrollt in der App nie, das übernimmt der Inhaltsbereich.
+ *  Nach dem Zurückdrehen ins Hochformat steht window.scrollY auf dem iPhone
+ *  trotzdem auf 62 - der Höhe der Statusleiste -, obwohl das Dokument keinen
+ *  Überlauf hat: Die Hülle liegt rechnerisch 62 Pixel über dem Bildschirm,
+ *  gezeichnet wird sie oben bündig. Jede Berührung trifft damit, was 62 Pixel
+ *  tiefer gezeichnet ist, in der ganzen App und dauerhaft; von selbst räumt
+ *  WebKit den Stand nie auf. Ein Scrollstand jenseits des Spielraums ist in
+ *  keinem gesunden Zustand möglich und wird deshalb zurückgesetzt. */
+function dokumentZurueckscrollen() {
+  const de = document.documentElement;
+  const spielraum = Math.max(0, de.scrollHeight - de.clientHeight);
+  if (!(window.scrollY > spielraum)) return;
+  scrollKorrekturen++;
+  window.scrollTo(0, spielraum);
+}
+
 /** Hält die PWA samt unterer Navigation innerhalb des sichtbaren Webviews. */
 export function appViewportBeobachten(): () => void {
   if (!alsAppGestartet()) return () => {};
@@ -38,6 +62,7 @@ export function appViewportBeobachten(): () => void {
   let beendet = false;
 
   function messen() {
+    dokumentZurueckscrollen();
     if (viewport && gezoomt(viewport)) return;
     // offsetTop berücksichtigt das Verschieben beim Öffnen der Tastatur.
     // Nie über innerHeight hinausgehen, auch wenn iOS einen veralteten
@@ -63,6 +88,7 @@ export function appViewportBeobachten(): () => void {
   window.addEventListener("resize", aktualisieren);
   window.addEventListener("orientationchange", aktualisieren);
   window.addEventListener("pageshow", aktualisieren);
+  window.addEventListener("scroll", aktualisieren, { passive: true });
   window.screen?.orientation?.addEventListener("change", aktualisieren);
   viewport?.addEventListener("resize", aktualisieren);
   viewport?.addEventListener("scroll", aktualisieren);
@@ -71,6 +97,7 @@ export function appViewportBeobachten(): () => void {
     window.removeEventListener("resize", aktualisieren);
     window.removeEventListener("orientationchange", aktualisieren);
     window.removeEventListener("pageshow", aktualisieren);
+    window.removeEventListener("scroll", aktualisieren);
     window.screen?.orientation?.removeEventListener("change", aktualisieren);
     viewport?.removeEventListener("resize", aktualisieren);
     viewport?.removeEventListener("scroll", aktualisieren);
