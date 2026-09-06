@@ -189,9 +189,11 @@
 /* Das decodierte Video nimmt keine Taps vor den HTML-Bedienelementen an. */
 .watch-seite .player { isolation: isolate; }
 .watch-seite .player video { z-index: 0; pointer-events: none; }
-/* Eigene zusammengesetzte HTML-Ebene über der nativen iOS-Videofläche. */
-.player-oberflaeche { position: absolute; inset: 0; z-index: 1; transform: translateZ(0); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.player-gesten { position: absolute; inset: 0; z-index: 1; touch-action: none; }
+/* Eigene zusammengesetzte HTML-Ebene über der nativen iOS-Videofläche. Das
+   touch-action gehört auf die ganze Ebene, nicht nur auf die Gestenfläche:
+   Sonst dürfte iOS eine Berührung auf einer Taste noch als beginnendes
+   Scrollen deuten, bräche sie ab und die Taste bliebe ohne Wirkung. */
+.player-oberflaeche { position: absolute; inset: 0; z-index: 1; transform: translateZ(0); touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .watch-seite .player-gross[hidden] { display: none; }
 .watch-seite .player-kopf svg, .watch-seite .player-steuerung svg, .player-einstellungen svg { pointer-events: none; }
 .watch-seite .player-status { z-index: 2; pointer-events: none; }

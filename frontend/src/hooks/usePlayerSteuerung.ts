@@ -31,6 +31,34 @@ export function usePlayerSteuerung({ laeuft, bereit, minimiert, menueOffen, voll
     return () => clearTimeout(timer.current);
   }, [festhalten, vollbild, zeigen]);
 
+  // Die Elementhandler unten sehen nur, was im Baum liegen bleibt. Schließt
+  // ein Druck das Menü, in dem er begonnen hat, kommt das Loslassen nirgends
+  // mehr an: Der Merker "gerade gedrückt" bliebe stehen und die Steuerung
+  // würde nie wieder ausblenden. Am Dokument kommt jedes Ende an. Eine
+  // Berührung ist außerdem überall im Dokument ein Beleg gegen Tastaturfokus,
+  // auch auf einem Menüblatt neben dem Player.
+  useEffect(() => {
+    const beginn = (e: Event) => {
+      if (e.type === "pointerdown" && (e as PointerEvent).pointerType === "mouse") return;
+      letzterTouch.current = Date.now();
+      setTastaturFokus(false);
+    };
+    const ende = () => {
+      if (!gedrueckt.current) return;
+      gedrueckt.current = false;
+      planen();
+    };
+    const optionen = { capture: true, passive: true } as const;
+    const beginnNamen = ["touchstart", "pointerdown"];
+    const endeNamen = ["touchend", "touchcancel", "pointerup", "pointercancel"];
+    for (const name of beginnNamen) document.addEventListener(name, beginn, optionen);
+    for (const name of endeNamen) document.addEventListener(name, ende, optionen);
+    return () => {
+      for (const name of beginnNamen) document.removeEventListener(name, beginn, true);
+      for (const name of endeNamen) document.removeEventListener(name, ende, true);
+    };
+  }, [planen]);
+
   const ereignisse: HTMLAttributes<HTMLDivElement> = {
     onTouchStartCapture: () => {
       letzterTouch.current = Date.now(); gedrueckt.current = true;

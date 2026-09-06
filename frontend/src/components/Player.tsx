@@ -774,33 +774,45 @@ export function Player({
           />
         ))}
       </video>
-      <div className="player-oberflaeche">
-      <div className="player-gesten" aria-hidden="true"
+      {/* Die Gesten liegen auf der Ebene selbst, nicht auf einer eigenen Fläche
+          darüber oder darunter: Eine solche Fläche müsste die Bedienelemente
+          in jedem Browser zuverlässig durchlassen - genau daran scheitert es
+          auf iOS. Alles, was die Ebene selbst trifft, ist freies Bild; jedes
+          Bedienelement ist ein Kind und bekommt die Berührung zuerst. */}
+      <div className="player-oberflaeche"
         onPointerDown={(e) => {
+          if (e.target !== e.currentTarget) return;
           gesteMitTouch.current = false;
           touchBedienung.current = e.pointerType !== "mouse";
           wischStart.current = touchBedienung.current ? { x: e.clientX, y: e.clientY } : null;
         }}
         onPointerUp={(e) => {
+          if (e.target !== e.currentTarget) return;
           if (!gesteMitTouch.current) gesteBeenden(e.clientX, e.clientY);
         }}
         onPointerCancel={() => { wischStart.current = null; }}
         onTouchStart={(e) => {
+          if (e.target !== e.currentTarget) return;
           gesteMitTouch.current = true;
           touchBedienung.current = true;
           const t = e.touches[0];
           wischStart.current = e.touches.length === 1 && t ? { x: t.clientX, y: t.clientY } : null;
         }}
-        onTouchEnd={(e) => { const t = e.changedTouches[0]; if (t) gesteBeenden(t.clientX, t.clientY); }}
+        onTouchEnd={(e) => {
+          if (e.target !== e.currentTarget) return;
+          const t = e.changedTouches[0]; if (t) gesteBeenden(t.clientX, t.clientY);
+        }}
         onTouchCancel={() => { wischStart.current = null; }}
-        onClick={() => {
-          if (touchBedienung.current) return;
+        onClick={(e) => {
+          if (e.target !== e.currentTarget || touchBedienung.current) return;
           if (minimiert) aufVergroessern?.();
           else umschalten();
         }}
-        onDoubleClick={() => { if (!touchBedienung.current && !minimiert) vollbildUmschalten(); }}
-      />
-
+        onDoubleClick={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (!touchBedienung.current && !minimiert) vollbildUmschalten();
+        }}
+      >
       <div className="player-kopf" onClick={(e) => e.stopPropagation()}>
         {minimiert ? <>
           <PlayerTaste className="steuer-knopf" onClick={aufVergroessern} aria-label="Video vergrößern" title="Video vergrößern"><Icon name="expand" /></PlayerTaste>

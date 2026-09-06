@@ -1,7 +1,11 @@
 import { useRef, type ComponentProps } from "react";
 import { playerTouchAbschliessen } from "../lib/playerTouch";
 
-/** Touch direkt abschließen; ein nachgereichter Safari-Klick darf nicht doppelt auslösen. */
+/**
+ * Touch direkt abschließen; ein nachgereichter Safari-Klick darf nicht doppelt
+ * auslösen. Der eigene Touch-Weg ist dabei immer nur die Abkürzung: Sperrt er
+ * den nachgereichten Klick, muss er die Aktion auch wirklich ausgeführt haben.
+ */
 export function PlayerTaste({ onClick, onPointerDown, onPointerMove, onPointerUp, onPointerCancel,
   onTouchStart, onTouchMove, onTouchEnd, onTouchCancel, ...props }: ComponentProps<"button">) {
   const druck = useRef<{ id: number; x: number; y: number } | null>(null);
@@ -52,7 +56,9 @@ export function PlayerTaste({ onClick, onPointerDown, onPointerMove, onPointerUp
     onTouchMove={(e) => {
       const start = beruehrung.current;
       const t = Array.from(e.changedTouches).find(t => t.identifier === start?.id);
-      if (start && t && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 12) beruehrung.current = null;
+      if (start && t && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 12) {
+        beruehrung.current = null; letzterTap.current = Date.now();
+      }
       onTouchMove?.(e);
     }}
     onTouchCancel={(e) => { beruehrung.current = null; letzterTap.current = Date.now(); onTouchCancel?.(e); }}
@@ -60,13 +66,17 @@ export function PlayerTaste({ onClick, onPointerDown, onPointerMove, onPointerUp
       const start = beruehrung.current;
       beruehrung.current = null;
       onTouchEnd?.(e);
-      // Nur den Folge-Klick dieser Taste sperren, wenn die Geste abgebrochen wurde.
-      if (mitTouch.current) letzterTap.current = Date.now();
       mitTouch.current = false;
       druck.current = null;
-      if (!start || props.disabled || e.defaultPrevented) return;
-      const t = Array.from(e.changedTouches).find(t => t.identifier === start.id);
-      if (!t || Math.hypot(t.clientX - start.x, t.clientY - start.y) > 12) return;
+      if (props.disabled || e.defaultPrevented) return;
+      const t = start ? Array.from(e.changedTouches).find(b => b.identifier === start.id) : undefined;
+      // Der Klick wird nur dort gesperrt, wo die Geste erkennbar abgebrochen
+      // wurde (Bewegung, Abbruch, Loslassen daneben) oder die Aktion bereits
+      // lief. Liefert ein Browser unerwartete Touch-Daten - eine zweite
+      // Berührung, eine andere Kennung, gar kein Start -, bleibt der ganz
+      // normale Klick der Weg zur Aktion. Sonst wäre die Taste vollkommen tot.
+      if (!start || !t) return;
+      if (Math.hypot(t.clientX - start.x, t.clientY - start.y) > 12) { letzterTap.current = Date.now(); return; }
       ausloesen(e.currentTarget);
     }}
     onClick={(e) => {

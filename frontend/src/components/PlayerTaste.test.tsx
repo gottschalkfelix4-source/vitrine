@@ -106,3 +106,33 @@ it("führt bei Pointer- und Touch-Events genau eine Aktion aus und lässt Scroll
   await act(() => host.querySelector('button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
   expect(aktion).toHaveBeenCalledTimes(1);
 });
+
+async function mehrfinger(typ: string, kennung = 7) {
+  const punkt = { identifier: kennung, clientX: 20, clientY: 20 };
+  const zweiter = { identifier: 8, clientX: 60, clientY: 60 };
+  const e = Object.assign(new Event(typ, { bubbles: true, cancelable: true }), {
+    changedTouches: [punkt], touches: typ === "touchstart" ? [punkt, zweiter] : [],
+  });
+  await act(() => host.querySelector('button')!.dispatchEvent(e));
+}
+
+it("überlässt die Aktion dem Klick, wenn der Touch-Weg keine Berührung merken konnte", async () => {
+  const aktion = await starten();
+  // Eine zweite Berührung auf dem Schirm - der eigene Touch-Weg steigt aus.
+  await mehrfinger("touchstart"); await mehrfinger("touchend");
+  expect(aktion).not.toHaveBeenCalled();
+  await act(() => host.querySelector('button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+  expect(aktion).toHaveBeenCalledTimes(1);
+});
+
+it("überlässt die Aktion dem Klick, wenn das Touch-Ende eine andere Kennung meldet", async () => {
+  const aktion = await starten();
+  await touch("touchstart");
+  const e = Object.assign(new Event("touchend", { bubbles: true, cancelable: true }), {
+    changedTouches: [{ identifier: 99, clientX: 20, clientY: 20 }], touches: [],
+  });
+  await act(() => host.querySelector('button')!.dispatchEvent(e));
+  expect(aktion).not.toHaveBeenCalled();
+  await act(() => host.querySelector('button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+  expect(aktion).toHaveBeenCalledTimes(1);
+});

@@ -68,7 +68,8 @@ async function drehen(page: Page, quer: boolean) {
   await page.evaluate(quer => (window as unknown as { testDrehen: (q: boolean) => void }).testDrehen(quer), quer);
 }
 async function bildAntippen(page: Page) {
-  await page.locator('.player-gesten').tap({ position: { x: 60, y: 90 } });
+  // Freies Bild neben der Wiedergabetaste: Ein Bedienelement fängt den Tap ab.
+  await page.locator('.player-oberflaeche').tap({ position: { x: 60, y: 90 } });
 }
 async function gleicheWiedergabe(page: Page) {
   await expect.poll(() => page.locator('video').evaluate(v => v === (window as unknown as { originalVideo: HTMLVideoElement }).originalVideo)).toBe(true);
@@ -205,4 +206,28 @@ test.describe("Maus und Tastatur", () => {
     await page.getByRole("button", { name: "Video schließen", exact: true }).click();
     await expect(page.locator('video')).toHaveCount(0);
   });
+});
+
+test("bedient Kopf- und Vollbildtasten auch während laufender Wiedergabe", async ({ page }) => {
+  await archiv(page);
+  await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(false);
+  const wiederZeigen = async () => {
+    // Während der Wiedergabe blendet die Steuerung von selbst aus.
+    await expect(page.locator('.player')).toHaveAttribute("data-steuerung", "false", { timeout: 8000 });
+    await bildAntippen(page);
+    await expect(page.locator('.player')).toHaveAttribute("data-steuerung", "true");
+  };
+  await wiederZeigen();
+  await page.getByRole("button", { name: "Wiedergabeeinstellungen", exact: true }).tap();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.getByRole("button", { name: "Menü schließen", exact: true }).tap();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  // Nach einem Menü als Blatt darf kein vermeintlicher Tastaturfokus hängen bleiben.
+  await wiederZeigen();
+  await page.getByRole("button", { name: "Vollbild", exact: true }).tap();
+  await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "true");
+  await wiederZeigen();
+  await page.getByRole("button", { name: "Video minimieren", exact: true }).tap();
+  await expect(page.locator('.player')).toHaveAttribute("data-mini", "true");
+  await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(false);
 });
