@@ -24,7 +24,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: var(--kopf-hoehe) minmax(0, 1fr);
   grid-template-areas: "kopf kopf" "leiste inhalt";
-  height: 100dvh;
+  height: var(--app-viewport-hoehe, 100dvh);
   overflow: hidden;
 }
 .kopf {
@@ -1729,12 +1729,10 @@
 /* Gemeinsame App-Oberfläche: feste Navigation, ein klarer Scrollbereich. */
 .huelle { grid-template-rows: var(--kopf-gesamt) minmax(0, 1fr); }
 @media (display-mode: standalone) {
-  /* In iOS-PWAs kann der durch inset: 0 aufgespannte Bereich um die
-     Systemleisten verkürzt sein. 100vh umfasst hier den ganzen Bildschirm
-     (bugs.webkit.org/show_bug.cgi?id=254868#c2). Die Unterkante deshalb aus
-     dieser Höhe bestimmen, nicht aus bottom: 0 oder 100dvh. Safe Areas
-     bleiben innerhalb des Grids und werden nicht von der App-Höhe abgezogen. */
-  .huelle { position: fixed; inset: 0 0 auto; height: 100vh; }
+  /* Die Höhe kommt vom sichtbaren Webview (appViewport.ts), nicht vom
+     physischen Bildschirm: iOS kann 100vh hinter einer Systemfläche
+     abschneiden. Bis zur Messung gilt das dynamische CSS-Viewportmaß. */
+  .huelle { position: fixed; inset: 0 0 auto; }
   @supports (-webkit-touch-callout: none) {
     /* WebKit kann in PWAs die ausgeblendete Browserleiste zum unteren
        Inset addieren (bugs.webkit.org/show_bug.cgi?id=301172#c8).

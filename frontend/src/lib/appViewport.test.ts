@@ -1,0 +1,117 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { appViewportBeobachten } from "./appViewport";
+
+let viewport: EventTarget & { height: number; offsetTop: number; scale: number };
+let beenden: (() => void) | undefined;
+const hoehe = () => document.documentElement.style.getPropertyValue("--app-viewport-hoehe");
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  viewport = Object.assign(new EventTarget(), { height: 894, offsetTop: 0, scale: 1 });
+  vi.stubGlobal("visualViewport", viewport);
+  vi.stubGlobal("innerHeight", 894);
+  vi.stubGlobal("matchMedia", () => ({ matches: true }));
+  vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => window.setTimeout(() => fn(0), 16));
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
+});
+
+afterEach(() => {
+  beenden?.();
+  beenden = undefined;
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+it("begrenzt die App auf das Webview, auch wenn der Bildschirm höher ist", () => {
+  vi.stubGlobal("screen", { height: 956, width: 440 });
+  beenden = appViewportBeobachten();
+  expect(hoehe()).toBe("894px");
+});
+
+it("überschreitet weder Fensterhöhe noch sichtbare Unterkante", () => {
+  viewport.height = 956;
+  beenden = appViewportBeobachten();
+  expect(hoehe()).toBe("894px");
+  viewport.height = 820;
+  viewport.dispatchEvent(new Event("resize"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("820px");
+});
+
+it("zieht nach Drehen und Wiederöffnen der PWA die neue Höhe nach", () => {
+  beenden = appViewportBeobachten();
+  vi.stubGlobal("innerHeight", 440);
+  viewport.height = 440;
+  window.dispatchEvent(new Event("resize"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("440px");
+  vi.stubGlobal("innerHeight", 956);
+  viewport.height = 956;
+  window.dispatchEvent(new Event("pageshow"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("956px");
+});
+
+it("hält die Navigation bei Tastatur und verschobenem Viewport sichtbar", () => {
+  beenden = appViewportBeobachten();
+  viewport.height = 490;
+  viewport.offsetTop = 30;
+  viewport.dispatchEvent(new Event("resize"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("520px");
+  viewport.offsetTop = 45;
+  viewport.dispatchEvent(new Event("scroll"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("535px");
+});
+
+it("lässt Pinch-Zoom zu, ohne das Layout zu verkleinern", () => {
+  beenden = appViewportBeobachten();
+  viewport.scale = 2;
+  viewport.height = 447;
+  viewport.dispatchEvent(new Event("resize"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("894px");
+});
+
+it("behält bei ungültigen Start- oder Wechselwerten die letzte gültige Höhe", () => {
+  beenden = appViewportBeobachten();
+  viewport.height = 0;
+  viewport.dispatchEvent(new Event("resize"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("894px");
+});
+
+it("nutzt ohne VisualViewport die Fensterhöhe", () => {
+  vi.stubGlobal("visualViewport", null);
+  beenden = appViewportBeobachten();
+  expect(hoehe()).toBe("894px");
+});
+
+it("erkennt den iOS-Standalone-Fallback", () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  vi.stubGlobal("navigator", { standalone: true });
+  beenden = appViewportBeobachten();
+  expect(hoehe()).toBe("894px");
+});
+
+it("lässt normale Browserfenster unverändert", () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  beenden = appViewportBeobachten();
+  expect(hoehe()).toBe("");
+  window.dispatchEvent(new Event("resize"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("");
+});
+
+it("entfernt Listener und ausstehende Messungen beim Beenden", () => {
+  beenden = appViewportBeobachten();
+  window.dispatchEvent(new Event("resize"));
+  beenden();
+  vi.runAllTimers();
+  viewport.dispatchEvent(new Event("resize"));
+  window.dispatchEvent(new Event("pageshow"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("");
+});
