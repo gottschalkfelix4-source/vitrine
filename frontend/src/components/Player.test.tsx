@@ -16,7 +16,7 @@ it("behält Video und zugängliche Einstellungen schon während des ersten Laden
 it("verhindert Spulen und Abspielen vor dem Öffnen der Quelle", () => {
   const html = renderToStaticMarkup(<Player videoId="video" dauerS={7200} />);
   expect(html).toMatch(/role="slider" tabindex="-1" aria-label="Position" aria-disabled="true"/);
-  expect(html).toMatch(/<button class="steuer-knopf" disabled="" aria-label="Abspielen"/);
+  expect(html).toMatch(/<button[^>]*class="steuer-knopf"[^>]*disabled=""[^>]*aria-label="Abspielen"/);
   expect(html).toContain('aria-valuemax="7200"');
 });
 

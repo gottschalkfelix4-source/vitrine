@@ -878,12 +878,17 @@ Beim Drehen ins Querformat fuellt ein geoeffnetes Video den App-Bereich;
 hochkant erscheint wieder die vorherige Videoansicht. Die eigenen
 Bedienelemente bleiben dabei erreichbar. Das Zahnrad sitzt oben rechts;
 im Hochformat oeffnet es ein grosses, scrollbar bedienbares Einstellungsmenue.
+Titel und Bedienelemente blenden waehrend der Wiedergabe gemeinsam aus;
+ein Tippen auf das Bild zeigt sie wieder an. Offene Menues bleiben sichtbar.
 
 Der Pfeil oben links oder ein Wisch nach unten minimiert das Video. Es laeuft
 dann unten rechts weiter, waehrend du im Archiv stoeberst. Antippen oder das
 Vergroessern-Symbol oeffnet dieselbe Wiedergabe wieder; Pause und Schliessen
 sind direkt im kleinen Player erreichbar. Beim Wechsel zwischen den Ansichten
 bleiben Position, Tempo und die aktive Wiedergabesitzung erhalten.
+Das Minimieren funktioniert auch direkt aus dem Vollbild. Ein Wisch im
+Einstellungsmenue scrollt dessen Eintraege, ohne versehentlich eine Auswahl
+auszuloesen.
 
 Zusaetzlich ist das Archiv eine Progressive Web App: Mit Manifest, Symbolen und
 einem Service Worker laesst es sich auf den Startbildschirm legen und startet

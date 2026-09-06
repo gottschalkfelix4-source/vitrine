@@ -91,9 +91,13 @@ jobs:
         working-directory: frontend
         run: npm test
 
-      - name: Bauen
+      - name: Testbrowser installieren
         working-directory: frontend
-        run: npm run build
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Bauen und Player im Browser pruefen
+        working-directory: frontend
+        run: npm run test:e2e
 
   container:
     name: Container

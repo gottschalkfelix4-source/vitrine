@@ -1,0 +1,171 @@
+import { expect, test, type Page } from "@playwright/test";
+import { clip } from "./clip";
+
+async function archiv(page: Page, ohneKlick = false, maus = false) {
+  const sitzungen = { gestartet: 0, beendet: 0 };
+  await page.addInitScript((ohneKlick) => {
+    Object.defineProperty(navigator, "standalone", { value: true });
+    const ausrichtung = Object.assign(new EventTarget(), { type: "portrait-primary" });
+    Object.defineProperty(screen, "orientation", { get: () => ausrichtung });
+    Object.assign(window, { testDrehen: (quer: boolean) => {
+      ausrichtung.type = quer ? "landscape-primary" : "portrait-primary";
+      ausrichtung.dispatchEvent(new Event("change"));
+    } });
+    // Touch muss auch ohne das von Safari synthetisierte Maus-/Klickereignis gehen.
+    if (ohneKlick) document.addEventListener("click", (e) => {
+      if (e.detail > 0 && (e.target as Element).closest(".player, .player-menue-blatt")) e.stopImmediatePropagation();
+    }, true);
+  }, ohneKlick);
+  const angebote = [{ value: "auto", label: "Automatisch" }, { value: "original", label: "Original" }, { value: "720p", label: "720p" }];
+  const video = (id: string) => ({ id, titel: `Testvideo ${id}`, kanal_id: "kanal", kanal_name: "Testkanal", dauer_s: 60,
+    status: "archived", hoehe: 72, breite: 128, fps: 1, bild: null, ist_short: false, war_live: false, gesehen: false, fortschritt_s: 0 });
+  await page.route("**/testclip.mp4*", async route => {
+    const range = /bytes=(\d+)-(\d*)/.exec(route.request().headers().range ?? "");
+    if (!range) return route.fulfill({ contentType: "video/mp4", body: clip });
+    const start = Number(range[1]), end = range[2] ? Number(range[2]) : clip.length - 1;
+    await route.fulfill({ status: 206, contentType: "video/mp4", headers: {
+      "accept-ranges": "bytes", "content-range": `bytes ${start}-${end}/${clip.length}`,
+    }, body: clip.subarray(start, end + 1) });
+  });
+  await page.route("**/api/**", async route => {
+    const pfad = new URL(route.request().url()).pathname;
+    let daten: unknown = [];
+    if (pfad.endsWith("/auth/session")) daten = { eingerichtet: true, angemeldet: false, benutzer: null, csrf_token: null };
+    else if (/\/videos\/[^/]+\/playback$/.test(pfad)) {
+      const quality = route.request().postDataJSON().quality;
+      daten = { token: `sitzung-${++sitzungen.gestartet}`, mode: "direct", url: `/testclip.mp4?s=${sitzungen.gestartet}`,
+        duration_s: 60, segment_seconds: 4, quality, quality_label: angebote.find(a => a.value === quality)?.label,
+        available_qualities: angebote };
+    } else if (pfad.endsWith("/ended")) { sitzungen.beendet++; daten = {}; }
+    else if (pfad.endsWith("/heartbeat")) daten = {};
+    else if (pfad.includes("/subtitles/")) return route.fulfill({ contentType: "text/vtt", body: "WEBVTT\n\n00:00.000 --> 01:00.000\nTestuntertitel\n" });
+    else if (pfad === "/api/videos") daten = Array.from({ length: 8 }, (_, i) => video(`v${i}`));
+    else if (/\/videos\/[^/]+$/.test(pfad)) daten = { video: video(pfad.split("/").at(-1)!), technik: { breite: 128, hoehe: 72, fps: 1 },
+      kapitel: [], untertitel: [{ sprache: "de", automatisch: false }], beschreibung: "Testbeschreibung", in_playlists: [], statusmeldung: null };
+    await route.fulfill({ json: daten });
+  });
+  await page.goto("/");
+  const kachel = page.locator('.kachel a[href="/video/v0"]').first();
+  if (maus) await kachel.click(); else await kachel.tap();
+  const el = page.locator("video");
+  await expect(page.locator('.player')).toHaveAttribute("data-status", "bereit");
+  // Der stille Testclip benötigt keine Audio-Freigabe durch den Testhost.
+  await el.evaluate(v => { v.muted = true; void v.play(); });
+  await expect.poll(() => el.evaluate(v => v.currentTime)).toBeGreaterThan(0);
+  await el.evaluate(v => { Object.assign(window, { originalVideo: v }); v.currentTime = 12; });
+  await expect.poll(() => el.evaluate(v => v.currentTime)).toBeGreaterThanOrEqual(12);
+  return sitzungen;
+}
+
+async function drehen(page: Page, quer: boolean) {
+  await page.setViewportSize(quer ? { width: 844, height: 390 } : { width: 390, height: 844 });
+  await page.evaluate(quer => (window as unknown as { testDrehen: (q: boolean) => void }).testDrehen(quer), quer);
+}
+async function bildAntippen(page: Page) {
+  await page.locator('.player-gesten').tap({ position: { x: 60, y: 90 } });
+}
+async function gleicheWiedergabe(page: Page) {
+  await expect.poll(() => page.locator('video').evaluate(v => v === (window as unknown as { originalVideo: HTMLVideoElement }).originalVideo)).toBe(true);
+  await expect.poll(() => page.locator('video').evaluate(v => v.currentTime)).toBeGreaterThanOrEqual(12);
+}
+
+for (const ohneKlick of [false, true]) {
+  test(`Menüs und Miniplayer mit Touch${ohneKlick ? " ohne Klickereignis" : ""}`, async ({ page }) => {
+    const sitzungen = await archiv(page, ohneKlick);
+    const taste = (name: string) => page.getByRole("button", { name, exact: true });
+    await taste("Wiedergabeeinstellungen").tap();
+    await page.getByRole("menuitem", { name: /Geschwindigkeit/ }).tap();
+    await page.getByRole("menuitemradio", { name: "2.5×", exact: true }).tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.playbackRate)).toBe(2.5);
+    await taste("Wiedergabeeinstellungen").tap();
+    await page.getByRole("menuitem", { name: /Qualität/ }).tap();
+    await page.getByRole("menuitemradio", { name: "720p", exact: true }).tap();
+    await gleicheWiedergabe(page);
+    await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(false);
+    await taste("Untertitel").tap();
+    await page.getByRole("menuitemradio", { name: "de", exact: true }).tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.textTracks[0].mode)).toBe("showing");
+    await drehen(page, true);
+    await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "true");
+    const vorher = sitzungen.gestartet;
+    await taste("Video minimieren").tap();
+    await expect(page.locator('.player')).toHaveAttribute("data-mini", "true");
+    await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "false");
+    await drehen(page, false);
+    await page.locator('.mobile-navigation a[href="/kanaele"]').tap();
+    await gleicheWiedergabe(page);
+    await taste("Pause").tap();
+    await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(true);
+    await taste("Abspielen").tap();
+    await taste("Video vergrößern").tap();
+    await expect(page.locator('.player')).toHaveAttribute("data-mini", "false");
+    await gleicheWiedergabe(page);
+    expect(sitzungen.gestartet).toBe(vorher);
+    await expect.poll(() => page.locator('video').evaluate(v => v.playbackRate)).toBe(2.5);
+    await taste("Vollbild").tap();
+    await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "true");
+    await taste("Vollbild beenden").tap();
+    await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "false");
+    await taste("Video minimieren").tap();
+    const beendet = sitzungen.beendet;
+    await taste("Video schließen").tap();
+    await expect(page.locator('video')).toHaveCount(0);
+    await expect.poll(() => sitzungen.beendet).toBeGreaterThan(beendet);
+  });
+}
+
+test("Titel und Steuerung blenden nach Drehung aus und lassen sich erneut bedienen", async ({ page }) => {
+  await archiv(page);
+  await drehen(page, true);
+  await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "true");
+  // Früher hielt :focus-within den Titel selbst nach Ablauf des Timers sichtbar.
+  await page.locator('.player').focus();
+  await expect(page.locator('.player-kopf')).toHaveCSS("opacity", "0");
+  await expect(page.locator('.player-steuerung')).toHaveCSS("opacity", "0");
+  await bildAntippen(page);
+  await expect(page.locator('.player-kopf')).toHaveCSS("opacity", "1");
+  await page.getByRole("button", { name: "Wiedergabeeinstellungen", exact: true }).tap();
+  await page.getByRole("menuitem", { name: /Geschwindigkeit/ }).tap();
+  // Fokuswechsel beim Berühren eines nicht fokussierbaren Bereichs schließt kein Menü.
+  await page.locator('.player').focus();
+  await page.waitForTimeout(2800);
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.getByRole("menuitemradio", { name: "1.5×", exact: true }).tap();
+  await expect(page.locator('.player-kopf')).toHaveCSS("opacity", "0");
+  await bildAntippen(page);
+  await page.getByRole("button", { name: "Video minimieren", exact: true }).tap();
+  await expect(page.locator('.player')).toHaveAttribute("data-mini", "true");
+  await page.getByRole("button", { name: "Video schließen", exact: true }).tap();
+  await expect(page.locator('video')).toHaveCount(0);
+});
+
+test.describe("Maus und Tastatur", () => {
+  test.use({ isMobile: false, hasTouch: false, viewport: { width: 1280, height: 800 } });
+  test("bedient Wiedergabe, Menüs, Vollbild und Miniplayer auch am Schreibtisch", async ({ page }) => {
+    const sitzungen = await archiv(page, false, true);
+    await page.locator('.player').focus();
+    await page.keyboard.press("k");
+    await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(true);
+    await page.keyboard.press("k");
+    await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(false);
+    await page.getByRole("button", { name: "Wiedergabeeinstellungen", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: /Qualität/ })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitemradio", { name: /Normal/ })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await page.getByRole("button", { name: "Vollbild", exact: true }).click();
+    await expect(page.locator('.player')).toHaveAttribute("data-vollbild", "true");
+    await page.getByRole("button", { name: "Vollbild beenden", exact: true }).click();
+    await expect(page.locator('.player')).toHaveAttribute("data-vollbild", "false");
+    // Nach dem nativen Vollbild liegt der Mauszeiger außerhalb des kleineren Players.
+    await page.locator('.player').hover({ position: { x: 60, y: 90 } });
+    await page.getByRole("button", { name: "Video minimieren", exact: true }).click();
+    await expect(page.locator('.player')).toHaveAttribute("data-mini", "true");
+    await gleicheWiedergabe(page);
+    expect(sitzungen.gestartet).toBe(1);
+    await page.getByRole("button", { name: "Video schließen", exact: true }).click();
+    await expect(page.locator('video')).toHaveCount(0);
+  });
+});

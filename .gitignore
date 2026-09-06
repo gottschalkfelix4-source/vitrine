@@ -21,6 +21,8 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+test-results/
+playwright-report/
 
 # OS / Editor
 .DS_Store

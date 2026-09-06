@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icon } from "./Icons";
+import { PlayerTaste } from "./PlayerTaste";
+import { usePlayerSteuerung } from "../hooks/usePlayerSteuerung";
 import { PlayerEinstellungen, PlayerUntertitel } from "./PlayerEinstellungen";
 import { usePlayerAusrichtung } from "../hooks/usePlayerAusrichtung";
 import type { Kapitel } from "../lib/api";
@@ -9,6 +11,7 @@ import { useAdmin } from "./Anmeldung";
 import { ApiFehler } from "../lib/auth";
 import { dauer } from "../lib/format";
 import { lokalFortschrittMerken } from "../lib/wiedergabeFortschritt";
+import { playerTouchAbschliessen } from "../lib/playerTouch";
 import { wiedergabeStarten, wiedergabeMelden, wiedergabeBeenden, type Wiedergabesitzung, type WiedergabeQualitaet, type Qualitaetsangebot } from "../lib/wiedergabe";
 import {
   istVollbild,
@@ -59,8 +62,6 @@ interface Props {
  *  gleich zum Abraeumen fuehrt. */
 const HERZSCHLAG_MS = 15_000;
 const FORTSCHRITT_MS = 5_000;
-/** Nach so viel Ruhe verschwindet die Steuerung waehrend der Wiedergabe. */
-const AUSBLENDEN_MS = 2600;
 const SPEICHER_SCHLUESSEL = "vitrine.wiedergabe";
 
 interface Gemerkt {
@@ -147,18 +148,18 @@ export function Player({
   const [appVollbild, setAppVollbild] = useState(false);
   const vollbild = nativesVollbild || appVollbild;
   const ausrichtung = usePlayerAusrichtung();
-  const [sichtbar, setSichtbar] = useState(true);
   const [menue, setMenue] = useState<"einstellungen" | "untertitel" | null>(null);
   const [spur, setSpur] = useState(-1); // -1 = aus
   const spurRef = useRef(spur);
   spurRef.current = spur;
   const [zeiger, setZeiger] = useState<{ x: number; zeit: number } | null>(null);
-  const [touchBedienung, setTouchBedienung] = useState(false);
+  const touchBedienung = useRef(false);
   const [hinweis, setHinweis] = useState<string | null>(null);
   const zieht = useRef(false);
-  const ausblender = useRef<number | undefined>(undefined);
   const wischStart = useRef<{ x: number; y: number } | null>(null);
-  const gewischt = useRef(false);
+  const { sichtbar: steuerungSichtbar, zeigen, ausblenden, ereignisse } = usePlayerSteuerung({
+    laeuft, bereit: lage.art === "bereit", minimiert, menueOffen: menue !== null, vollbild,
+  });
 
   // Vor src/load/Effect-Cleanup lesen: Danach setzt der Browser Zeit und Pause zurück.
   const wiedergabeMerken = useCallback(() => {
@@ -494,7 +495,7 @@ export function Player({
     const hintergrund = [...document.querySelectorAll<HTMLElement>(".kopf, .leiste, .mobile-navigation, .watch-information, .watch-neben")];
     const gesperrt = hintergrund.map((h) => h.inert);
     hintergrund.forEach((h) => { h.inert = true; });
-    el.focus({ preventScroll: true });
+    if (!ausrichtung.touch) el.focus({ preventScroll: true });
     const fokusHalten = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
       const knoepfe = [...el.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]')]
@@ -513,26 +514,7 @@ export function Player({
       hintergrund.forEach((h, i) => { h.inert = gesperrt[i]; });
       if (vorher?.isConnected) vorher.focus({ preventScroll: true });
     };
-  }, [appVollbild]);
-
-  // ---- Steuerung ein-/ausblenden ----------------------------------------
-  const zeigen = useCallback(() => {
-    setSichtbar(true);
-    window.clearTimeout(ausblender.current);
-    ausblender.current = window.setTimeout(() => {
-      if (menue === null && !zieht.current) setSichtbar(false);
-    }, AUSBLENDEN_MS);
-  }, [menue]);
-
-  useEffect(() => {
-    if (!laeuft) {
-      setSichtbar(true);
-      window.clearTimeout(ausblender.current);
-    } else {
-      zeigen();
-    }
-    return () => window.clearTimeout(ausblender.current);
-  }, [laeuft, zeigen]);
+  }, [appVollbild, ausrichtung.touch]);
 
   // ---- Bedienung ---------------------------------------------------------
   const umschalten = useCallback(() => {
@@ -574,6 +556,12 @@ export function Player({
       setAppVollbild(true);
     });
   }, [appVollbild, ausrichtung.touch]);
+
+  const minimieren = () => {
+    setMenue(null);
+    setAppVollbild(false);
+    aufMinimieren?.();
+  };
 
   const bildImBild = useCallback(() => {
     const el = videoRef.current;
@@ -727,7 +715,6 @@ export function Player({
 
   // ---- Darstellung -------------------------------------------------------
   const gespielt = gesamt > 0 ? Math.max(0, Math.min(100, (zeit / gesamt) * 100)) : 0;
-  const steuerungSichtbar = minimiert || lage.art !== "bereit" || sichtbar || !laeuft || menue !== null;
   const zeigerKapitel = zeiger ? kapitelBei(zeiger.zeit) : null;
 
   return (
@@ -743,11 +730,7 @@ export function Player({
       data-laeuft={laeuft}
       data-status={lage.art}
       tabIndex={-1}
-      onPointerMove={(e) => { if (e.pointerType === "mouse") zeigen(); }}
-      onFocus={zeigen}
-      onPointerLeave={(e) => {
-        if (e.pointerType === "mouse" && laeuft && menue === null && !zieht.current) setSichtbar(false);
-      }}
+      {...ereignisse}
     >
       <video
         ref={videoRef}
@@ -756,28 +739,6 @@ export function Player({
         playsInline
         preload="metadata"
         data-modus={lage.art === "bereit" ? lage.modus : undefined}
-        onPointerDown={(e) => {
-          setTouchBedienung(e.pointerType !== "mouse");
-          gewischt.current = false;
-          wischStart.current = e.pointerType === "touch" ? { x: e.clientX, y: e.clientY } : null;
-        }}
-        onPointerUp={(e) => {
-          const start = wischStart.current;
-          wischStart.current = null;
-          if (!start || minimiert || e.clientY - start.y < 70 || Math.abs(e.clientX - start.x) > 60) return;
-          gewischt.current = true;
-          if (vollbild) vollbildUmschalten();
-          else aufMinimieren?.();
-        }}
-        onPointerCancel={() => { wischStart.current = null; }}
-        onClick={() => {
-          if (gewischt.current) { gewischt.current = false; return; }
-          if (minimiert) { aufVergroessern?.(); return; }
-          if (!touchBedienung) { umschalten(); return; }
-          if (!sichtbar) zeigen();
-          else if (laeuft) setSichtbar(false);
-        }}
-        onDoubleClick={() => { if (!touchBedienung) vollbildUmschalten(); }}
         onError={(e) => {
           const fehler = e.currentTarget.error;
           if (lage.art === "bereit" && fehler && fehler.code !== MediaError.MEDIA_ERR_ABORTED) {
@@ -797,14 +758,41 @@ export function Player({
           />
         ))}
       </video>
+      <div className="player-gesten" aria-hidden="true"
+        onPointerDown={(e) => {
+          touchBedienung.current = e.pointerType !== "mouse";
+          wischStart.current = touchBedienung.current ? { x: e.clientX, y: e.clientY } : null;
+          if (touchBedienung.current) e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerUp={(e) => {
+          const start = wischStart.current;
+          wischStart.current = null;
+          if (!start) return;
+          playerTouchAbschliessen();
+          const dx = e.clientX - start.x, dy = e.clientY - start.y;
+          if (dy >= 70 && Math.abs(dx) <= 60 && !minimiert && aufMinimieren) minimieren();
+          else if (Math.hypot(dx, dy) <= 12) {
+            if (minimiert) aufVergroessern?.();
+            else if (steuerungSichtbar) ausblenden();
+            else zeigen();
+          }
+        }}
+        onPointerCancel={() => { wischStart.current = null; }}
+        onClick={() => {
+          if (touchBedienung.current) return;
+          if (minimiert) aufVergroessern?.();
+          else umschalten();
+        }}
+        onDoubleClick={() => { if (!touchBedienung.current && !minimiert) vollbildUmschalten(); }}
+      />
 
       <div className="player-kopf" onClick={(e) => e.stopPropagation()}>
         {minimiert ? <>
-          <button className="steuer-knopf" onClick={aufVergroessern} aria-label="Video vergrößern" title="Video vergrößern"><Icon name="expand" /></button>
+          <PlayerTaste className="steuer-knopf" onClick={aufVergroessern} aria-label="Video vergrößern" title="Video vergrößern"><Icon name="expand" /></PlayerTaste>
           <span className="player-kopf-titel">{titel}</span>
-          <button className="steuer-knopf" onClick={aufSchliessen} aria-label="Video schließen" title="Video schließen"><Icon name="close" /></button>
+          <PlayerTaste className="steuer-knopf" onClick={aufSchliessen} aria-label="Video schließen" title="Video schließen"><Icon name="close" /></PlayerTaste>
         </> : <>
-          {aufMinimieren ? <button className="steuer-knopf" onClick={aufMinimieren} aria-label="Video minimieren" title="Weitersehen und stöbern"><Icon name="chevronDown" /></button> : null}
+          {aufMinimieren ? <PlayerTaste className="steuer-knopf" onClick={minimieren} aria-label="Video minimieren" title="Weitersehen und stöbern"><Icon name="chevronDown" /></PlayerTaste> : null}
           <span className="player-kopf-titel">{vollbild ? titel : ""}</span>
           <PlayerEinstellungen offen={menue === "einstellungen"} aufOffen={(offen) => setMenue(offen ? "einstellungen" : null)}
             bereich={huelleRef} vollbild={vollbild} touch={ausrichtung.touch} angebote={angebote} qualitaet={qualitaet}
@@ -817,19 +805,18 @@ export function Player({
       {lage.art === "fehler" ? <div className="buehne-meldung player-status" role="alert">
         <Icon name="info" className="player-meldung-icon" size={36} />
         <h2>Wiedergabe nicht möglich</h2><p>{lage.text}</p>
-        <button className="knopf player-erneut" onClick={() => { wiedergabeMerken(); setLadeVersuch((n) => n + 1); }}>Erneut versuchen</button>
-        {!transkodieren ? <button className="knopf player-erneut" onClick={liveVersuchen}>Mit Live-Transkodierung versuchen</button> : null}
+        <PlayerTaste className="knopf player-erneut" onClick={() => { wiedergabeMerken(); setLadeVersuch((n) => n + 1); }}>Erneut versuchen</PlayerTaste>
+        {!transkodieren ? <PlayerTaste className="knopf player-erneut" onClick={liveVersuchen}>Mit Live-Transkodierung versuchen</PlayerTaste> : null}
       </div> : null}
       {lage.art === "bereit" && wartet && laeuft ? <div className="player-lader" aria-hidden="true" /> : null}
       {hinweis ? <div className="player-hinweis" role="status">{hinweis}</div> : null}
 
-      {lage.art === "bereit" && (minimiert || !laeuft || ((touchBedienung || ausrichtung.touch) && steuerungSichtbar && menue === null)) ? (
-        <button className="player-gross" onClick={() => { umschalten(); zeigen(); }} aria-label={laeuft ? "Pause" : "Abspielen"}>
-          <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
-            <path d={laeuft ? "M6 5h4v14H6zm8 0h4v14h-4z" : "M8 5v14l11-7z"} fill="currentColor" />
-          </svg>
-        </button>
-      ) : null}
+      <PlayerTaste className="player-gross" hidden={lage.art !== "bereit" || !steuerungSichtbar || menue !== null || (!minimiert && laeuft && !ausrichtung.touch)}
+        onClick={() => { umschalten(); zeigen(); }} aria-label={laeuft ? "Pause" : "Abspielen"}>
+        <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
+          <path d={laeuft ? "M6 5h4v14H6zm8 0h4v14h-4z" : "M8 5v14l11-7z"} fill="currentColor" />
+        </svg>
+      </PlayerTaste>
 
       <div className="player-steuerung" onClick={(e) => e.stopPropagation()}>
         {/* ---- Zeitleiste */}
@@ -911,7 +898,7 @@ export function Player({
 
         {/* ---- Knopfzeile */}
         <div className="steuer-zeile">
-          <button className="steuer-knopf" disabled={lage.art !== "bereit"} onClick={umschalten} aria-label={laeuft ? "Pause" : "Abspielen"} title={laeuft ? "Pause (k)" : "Abspielen (k)"}>
+          <PlayerTaste className="steuer-knopf" disabled={lage.art !== "bereit"} onClick={umschalten} aria-label={laeuft ? "Pause" : "Abspielen"} title={laeuft ? "Pause (k)" : "Abspielen (k)"}>
             {laeuft ? (
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 5h4v14H6zm8 0h4v14h-4z" fill="currentColor" />
@@ -921,10 +908,10 @@ export function Player({
                 <path d="M8 5v14l11-7z" fill="currentColor" />
               </svg>
             )}
-          </button>
+          </PlayerTaste>
 
           <div className="steuer-ton">
-            <button
+            <PlayerTaste
               className="steuer-knopf"
               disabled={lage.art !== "bereit"}
               onClick={tonUmschalten}
@@ -940,7 +927,7 @@ export function Player({
                   <path d="M3 9v6h4l5 5V4L7 9zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z" fill="currentColor" />
                 </svg>
               )}
-            </button>
+            </PlayerTaste>
             <input
               className="steuer-regler"
               type="range"
@@ -972,16 +959,16 @@ export function Player({
 
           {/* Bild-im-Bild */}
           {typeof document !== "undefined" && document.pictureInPictureEnabled ? (
-            <button className="steuer-knopf steuer-pip" disabled={lage.art !== "bereit"} onClick={bildImBild} aria-label="Bild im Bild" title="Bild im Bild (i)">
+            <PlayerTaste className="steuer-knopf steuer-pip" disabled={lage.art !== "bereit"} onClick={bildImBild} aria-label="Bild im Bild" title="Bild im Bild (i)">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M19 11h-8v6h8zm4 8V4.9A2 2 0 0 0 21 3H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2zm-2 0H3V5h18z" fill="currentColor" />
               </svg>
-            </button>
+            </PlayerTaste>
           ) : null}
 
           {/* Theater */}
           {aufTheater && !vollbild ? (
-            <button
+            <PlayerTaste
               className="steuer-knopf steuer-theater"
               onClick={() => aufTheater(!theater)}
               aria-label={theater ? "Normale Ansicht" : "Kinomodus"}
@@ -996,11 +983,11 @@ export function Player({
                   <path d="M2 6h20v12H2zm2 2v8h16V8z" fill="currentColor" />
                 </svg>
               )}
-            </button>
+            </PlayerTaste>
           ) : null}
 
           {/* Auf Touch-Geräten bleiben unsere Bedienelemente im App-Vollbild. */}
-          <button
+          <PlayerTaste
             className="steuer-knopf"
             onClick={vollbildUmschalten}
             aria-label={vollbild ? "Vollbild beenden" : "Vollbild"}
@@ -1015,7 +1002,7 @@ export function Player({
                 <path d="M7 14H5v5h5v-2H7zm-2-4h2V7h3V5H5zm12 7h-3v2h5v-5h-2zM14 5v2h3v3h2V5z" fill="currentColor" />
               </svg>
             )}
-          </button>
+          </PlayerTaste>
         </div>
       </div>
     </div>

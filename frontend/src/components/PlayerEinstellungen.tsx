@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Qualitaetsangebot, WiedergabeQualitaet } from "../lib/wiedergabe";
+import { PlayerTaste } from "./PlayerTaste";
 import { Icon } from "./Icons";
 
 const TEMPI = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];
@@ -28,7 +29,7 @@ function PlayerMenue({ offen, aufOffen, bereich, touch, vollbild, name, titel = 
   }
   function darstellen(knoten: ReactNode) {
     return blatt ? <div className="watch-seite player-menue-blatt">
-      <button className="player-menue-hintergrund" aria-label="Menü schließen" tabIndex={-1} onClick={() => schliessen()} />
+      <PlayerTaste className="player-menue-hintergrund" aria-label="Menü schließen" tabIndex={-1} onClick={() => schliessen()} />
       {knoten}
     </div> : knoten;
   }
@@ -41,7 +42,7 @@ function PlayerMenue({ offen, aufOffen, bereich, touch, vollbild, name, titel = 
       const unten = auswahl.offsetTop + auswahl.offsetHeight;
       if (unten > menue.current.clientHeight) menue.current.scrollTop = unten - menue.current.clientHeight;
     }
-  }, [offen, seite]);
+  }, [offen, seite, blatt]);
   useEffect(() => {
     if (!offen) return;
     const aussen = (e: PointerEvent) => {
@@ -53,13 +54,11 @@ function PlayerMenue({ offen, aufOffen, bereich, touch, vollbild, name, titel = 
   }, [offen, aufOffen]);
 
   return <>
-    <button ref={knopf} className={`steuer-knopf${typeof symbol === "string" ? " steuer-text" : ""}`}
+    <PlayerTaste ref={knopf} className={`steuer-knopf${typeof symbol === "string" ? " steuer-text" : ""}`}
       aria-label={name} title={titel} data-aktiv={aktiv} aria-haspopup="menu" aria-expanded={offen}
-      aria-controls={offen ? id : undefined} onClick={() => aufOffen(!offen)}>{symbol}</button>
+      aria-controls={offen ? id : undefined} onClick={() => aufOffen(!offen)}>{symbol}</PlayerTaste>
     {offen && bereich.current ? createPortal(darstellen(<div ref={menue} id={id} className="steuer-menue player-einstellungen"
-      role="menu" aria-label={inhaltName} onBlur={(e) => {
-        if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget) && !knopf.current?.contains(e.relatedTarget)) aufOffen(false);
-      }} onKeyDown={(e) => {
+      role="menu" aria-label={inhaltName} onKeyDown={(e) => {
         e.stopPropagation();
         if (e.key === "Escape") { e.preventDefault(); schliessen(); return; }
         if (e.key === "Tab") { schliessen(); return; }
@@ -74,7 +73,7 @@ function PlayerMenue({ offen, aufOffen, bereich, touch, vollbild, name, titel = 
         if (e.key === "ArrowLeft" && zurueck) { e.preventDefault(); zurueck(); }
         if (ziel !== null) { e.preventDefault(); knoepfe[ziel]?.focus(); }
       }}>
-        {blatt ? <button role="menuitem" className="player-menue-schliessen" onClick={() => schliessen()}><span>{inhaltName}</span><Icon name="close" size={20} /></button> : null}
+        {blatt ? <PlayerTaste role="menuitem" className="player-menue-schliessen" onClick={() => schliessen()}><span>{inhaltName}</span><Icon name="close" size={20} /></PlayerTaste> : null}
         {children(() => schliessen())}
       </div>), blatt ? document.body : bereich.current) : null}
   </>;
@@ -91,14 +90,14 @@ export function PlayerEinstellungen({ offen, aufOffen, bereich, touch, vollbild,
     inhaltName={seite === "qualitaet" ? "Qualität" : seite === "tempo" ? "Wiedergabegeschwindigkeit" : "Wiedergabeeinstellungen"}
     symbol={<Icon name="settings" />} seite={seite} zurueck={seite === "haupt" ? undefined : () => setSeite("haupt")}>
     {(schliessen) => seite === "haupt" ? <>
-      <button role="menuitem" onClick={() => setSeite("qualitaet")}><span>Qualität</span><span>{bezeichnung}<Icon name="chevronRight" size={16} /></span></button>
-      <button role="menuitem" onClick={() => setSeite("tempo")}><span>Geschwindigkeit</span><span>{tempo === 1 ? "Normal" : `${tempo}×`}<Icon name="chevronRight" size={16} /></span></button>
+      <PlayerTaste role="menuitem" onClick={() => setSeite("qualitaet")}><span>Qualität</span><span>{bezeichnung}<Icon name="chevronRight" size={16} /></span></PlayerTaste>
+      <PlayerTaste role="menuitem" onClick={() => setSeite("tempo")}><span>Geschwindigkeit</span><span>{tempo === 1 ? "Normal" : `${tempo}×`}<Icon name="chevronRight" size={16} /></span></PlayerTaste>
     </> : <>
-      <button role="menuitem" className="player-menue-zurueck" onClick={() => setSeite("haupt")}><Icon name="arrowLeft" size={18} />{seite === "qualitaet" ? "Qualität" : "Geschwindigkeit"}</button>
-      {seite === "qualitaet" ? angebote.map((q) => <button key={q.value} role="menuitemradio" aria-checked={q.value === qualitaet}
-        data-aktiv={q.value === qualitaet} onClick={() => { aufQualitaet(q.value); schliessen(); }}>{q.label}</button>)
-        : tempi.map((t) => <button key={t} role="menuitemradio" aria-checked={t === tempo} data-aktiv={t === tempo}
-          onClick={() => { aufTempo(t); schliessen(); }}>{t === 1 ? "Normal" : `${t}×`}</button>)}
+      <PlayerTaste role="menuitem" className="player-menue-zurueck" onClick={() => setSeite("haupt")}><Icon name="arrowLeft" size={18} />{seite === "qualitaet" ? "Qualität" : "Geschwindigkeit"}</PlayerTaste>
+      {seite === "qualitaet" ? angebote.map((q) => <PlayerTaste key={q.value} role="menuitemradio" aria-checked={q.value === qualitaet}
+        data-aktiv={q.value === qualitaet} onClick={() => { aufQualitaet(q.value); schliessen(); }}>{q.label}</PlayerTaste>)
+        : tempi.map((t) => <PlayerTaste key={t} role="menuitemradio" aria-checked={t === tempo} data-aktiv={t === tempo}
+          onClick={() => { aufTempo(t); schliessen(); }}>{t === 1 ? "Normal" : `${t}×`}</PlayerTaste>)}
     </>}
   </PlayerMenue>;
 }
@@ -108,9 +107,9 @@ export function PlayerUntertitel({ offen, aufOffen, bereich, touch, vollbild, un
 }) {
   return <PlayerMenue offen={offen} aufOffen={aufOffen} bereich={bereich} touch={touch} vollbild={vollbild} name="Untertitel" titel="Untertitel (c)" symbol="CC" aktiv={spur >= 0}>
     {(schliessen) => <>
-      <button role="menuitemradio" aria-checked={spur === -1} data-aktiv={spur === -1} onClick={() => { aufSpur(-1); schliessen(); }}>Aus</button>
-      {untertitel.map((u, i) => <button key={`${u.sprache}-${u.automatisch}`} role="menuitemradio" aria-checked={spur === i}
-        data-aktiv={spur === i} onClick={() => { aufSpur(i); schliessen(); }}>{u.sprache}{u.automatisch ? " (automatisch)" : ""}</button>)}
+      <PlayerTaste role="menuitemradio" aria-checked={spur === -1} data-aktiv={spur === -1} onClick={() => { aufSpur(-1); schliessen(); }}>Aus</PlayerTaste>
+      {untertitel.map((u, i) => <PlayerTaste key={`${u.sprache}-${u.automatisch}`} role="menuitemradio" aria-checked={spur === i}
+        data-aktiv={spur === i} onClick={() => { aufSpur(i); schliessen(); }}>{u.sprache}{u.automatisch ? " (automatisch)" : ""}</PlayerTaste>)}
     </>}
   </PlayerMenue>;
 }

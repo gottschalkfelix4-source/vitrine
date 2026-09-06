@@ -109,8 +109,6 @@
 .watch-seite .leiste-tipp { width: 124px; max-width: 100%; box-sizing: border-box; }
 .watch-seite .leiste-tipp-kapitel { overflow: hidden; text-overflow: ellipsis; }
 .watch-seite .zeitleiste[aria-disabled="true"] { pointer-events: none; opacity: .4; }
-.watch-seite .player:has(:focus-visible) .player-steuerung { opacity: 1; pointer-events: auto; }
-.watch-seite .player:has(:focus-visible) { cursor: auto; }
 .watch-seite .zeitleiste:focus-visible .leiste-spur { height: 5px; }
 .watch-seite .zeitleiste:focus-visible .leiste-griff { transform: translateY(-50%) scale(1); }
 .watch-seite .player-meldung-icon { display: block; margin: 0 auto 14px; width: 36px; height: 36px; }
@@ -185,11 +183,18 @@
 .player-kopf { position: absolute; inset: 0 0 auto; z-index: 4; display: flex; align-items: center; padding: 4px 8px 16px; color: #fff; background: linear-gradient(#0009, transparent); transition: opacity 180ms; }
 .player-kopf-titel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-inline: 8px; font-size: 14px; }
 .player[data-steuerung="false"] .player-kopf { opacity: 0; pointer-events: none; }
-.player:focus-within .player-kopf { opacity: 1; pointer-events: auto; }
 .watch-seite .player-kopf .steuer-knopf { flex: 0 0 44px; width: 44px; height: 44px; }
 .watch-seite .player-steuerung { z-index: 3; }
 .watch-seite .player-gross { z-index: 2; }
-.watch-seite .player video { touch-action: none; }
+/* Das decodierte Video nimmt keine Taps vor den HTML-Bedienelementen an. */
+.watch-seite .player { isolation: isolate; }
+.watch-seite .player video { z-index: 0; pointer-events: none; }
+.player-gesten { position: absolute; inset: 0; z-index: 1; touch-action: none; }
+.watch-seite .player-gross[hidden] { display: none; }
+.watch-seite .player-kopf svg, .watch-seite .player-steuerung svg, .player-einstellungen svg { pointer-events: none; }
+.watch-seite .player-status { z-index: 2; pointer-events: none; }
+.watch-seite .player-status button { pointer-events: auto; }
+.watch-seite .player-einstellungen { z-index: 10; }
 
 /* In-App-Vollbild funktioniert beim Drehen ohne eine neue Klick-Erlaubnis.
    Die reservierte Player-Spalte verhindert Sprünge der vorherigen Ansicht. */
