@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from io import BytesIO
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 from urllib.error import HTTPError
@@ -209,6 +210,103 @@ def test_download_reserves_one_start_before_extracting(monkeypatch, tmp_path):
     assert caught.value is pause
     anfragelimit.vor_video.assert_called_once()
     extract.assert_not_called()
+
+
+@pytest.mark.parametrize("channel_playlists", [False, True])
+def test_long_pagination_waits_in_same_extractor_without_repeating_pages(monkeypatch, channel_playlists):
+    waiting = Event()
+    released = Event()
+    network = Mock(return_value=BytesIO(b"page"))
+    extract_instances = []
+    requests = []
+
+    def gate(url, *, budget_abwarten=False):
+        requests.append(url)
+        assert budget_abwarten is True
+        if len(requests) == 2:
+            waiting.set()
+            assert released.wait(5), "Test budget was not released"
+
+    def extract(instance, *_):
+        extract_instances.append(id(instance))
+        entries = []
+        for page in range(3):
+            instance.urlopen(f"https://www.youtube.com/youtubei/v1/browse?page={page}")
+            entries.append({"id": f"PLfixture{page}" if channel_playlists else f"fixture{page}", "title": f"Page {page}"})
+        return {"entries": entries}
+
+    anfragelimit.vor_anfrage.side_effect = gate
+    fake_factory(monkeypatch, network, extract)
+    listing = ytdlp.list_channel_playlists if channel_playlists else ytdlp.list_entries
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(listing, "https://www.youtube.com/@fixture")
+        try:
+            assert waiting.wait(5)
+            assert not future.done()
+            assert network.call_count == 1
+        finally:
+            released.set()
+        result = future.result(timeout=5)
+    assert len(extract_instances) == 1
+    assert len(result) == 3
+    assert requests == [f"https://www.youtube.com/youtubei/v1/browse?page={page}" for page in range(3)]
+    assert [call.args[0] for call in network.call_args_list] == requests
+
+
+@pytest.mark.parametrize("channel", [False, True])
+def test_interactive_metadata_still_fails_fast_on_own_quota(monkeypatch, channel):
+    pause = anfragelimit.Pause(123)
+    network = Mock()
+
+    def gate(_url, *, budget_abwarten=False):
+        assert budget_abwarten is False
+        raise pause
+
+    def extract(instance, *_):
+        instance.urlopen("https://www.youtube.com/youtubei/v1/player")
+
+    anfragelimit.vor_anfrage.side_effect = gate
+    fake_factory(monkeypatch, network, extract)
+    with pytest.raises(anfragelimit.Pause) as caught:
+        (ytdlp.fetch_channel if channel else ytdlp.fetch_video_info)("@fixture" if channel else "fixture")
+    assert caught.value is pause
+    network.assert_not_called()
+
+
+@pytest.mark.parametrize("pause", [anfragelimit.Pause(3600, "YouTube-Schutzpause"), abbruch.Abgebrochen("shutdown")])
+def test_paginated_budget_wait_still_propagates_shutdown_and_real_block(monkeypatch, pause):
+    network = Mock()
+
+    def gate(_url, *, budget_abwarten=False):
+        assert budget_abwarten is True
+        raise pause
+
+    def extract(instance, *_):
+        instance.urlopen("https://www.youtube.com/youtubei/v1/browse")
+
+    anfragelimit.vor_anfrage.side_effect = gate
+    fake_factory(monkeypatch, network, extract)
+    with pytest.raises(type(pause)) as caught:
+        ytdlp.list_entries("https://www.youtube.com/playlist?list=PLfixture")
+    assert caught.value is pause
+    network.assert_not_called()
+    anfragelimit.abweisung.assert_not_called()
+
+
+def test_paginated_extractor_stops_immediately_on_429_even_when_budget_waiting(monkeypatch):
+    url = "https://www.youtube.com/youtubei/v1/browse"
+    network = Mock(side_effect=HTTPError(url, 429, "Too Many Requests", {}, None))
+
+    def extract(instance, *_):
+        for _ in range(3):
+            instance.urlopen(url)
+
+    fake_factory(monkeypatch, network, extract)
+    with pytest.raises(anfragelimit.Pause):
+        ytdlp.list_entries("https://www.youtube.com/playlist?list=PLfixture")
+    anfragelimit.vor_anfrage.assert_called_once_with(url, budget_abwarten=True)
+    network.assert_called_once()
+    anfragelimit.abweisung.assert_called_once()
 
 
 def test_archiving_budget_pause_keeps_partial_download_without_failed_attempt(monkeypatch, tmp_path):

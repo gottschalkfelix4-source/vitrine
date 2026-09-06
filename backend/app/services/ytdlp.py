@@ -243,7 +243,7 @@ def _youtube_anfrage(url: str) -> bool:
     ))
 
 
-def _vor_anfrage(url: str, ausgang_id: str) -> None:
+def _vor_anfrage(url: str, ausgang_id: str, *, budget_abwarten: bool = False) -> None:
     abbruch.pruefen()
     # Eine YouTube-Pause darf die unabhaengige Zustandspruefung eines Tunnels
     # nicht blockieren und ihn dadurch faelschlich als ausgefallen markieren.
@@ -252,7 +252,7 @@ def _vor_anfrage(url: str, ausgang_id: str) -> None:
     rest = drosselung.wartezeit(ausgang_id)
     if rest > 0:
         raise anfragelimit.Pause(rest, drosselung.hinweis(rest, ausgang=ausgang_id))
-    anfragelimit.vor_anfrage(url)
+    anfragelimit.vor_anfrage(url, budget_abwarten=budget_abwarten)
     # Waehrend des globalen Mindestabstands kann ein anderer Strang eine
     # Abweisung melden. Vor dem echten Socket-Zugriff erneut nachsehen.
     rest = drosselung.wartezeit(ausgang_id)
@@ -260,7 +260,7 @@ def _vor_anfrage(url: str, ausgang_id: str) -> None:
         raise anfragelimit.Pause(rest, drosselung.hinweis(rest, ausgang=ausgang_id))
 
 
-def _kontrollieren(ydl: Any, *, ausgang_id: str) -> None:
+def _kontrollieren(ydl: Any, *, ausgang_id: str, budget_abwarten: bool = False) -> None:
     """Nur diese Instanz umschliessen; Fragmentthreads behalten ihren Ausgang."""
     original = getattr(ydl, "urlopen", None)
     if original is None:
@@ -269,7 +269,7 @@ def _kontrollieren(ydl: Any, *, ausgang_id: str) -> None:
     def kontrolliert(request: Any, *args: Any, **kwargs: Any):
         url = request if isinstance(request, str) else getattr(request, "url", None) or getattr(request, "full_url", "")
         try:
-            _vor_anfrage(url, ausgang_id)
+            _vor_anfrage(url, ausgang_id, budget_abwarten=budget_abwarten)
             try:
                 response = original(request, *args, **kwargs)
             except Exception as error:
@@ -289,12 +289,12 @@ def _kontrollieren(ydl: Any, *, ausgang_id: str) -> None:
 
 
 @contextmanager
-def _youtube_dl(opts: dict[str, Any], *, ausgang_id: str | None = None):
+def _youtube_dl(opts: dict[str, Any], *, ausgang_id: str | None = None, budget_abwarten: bool = False):
     """Zentrale Netzwerkgrenze, ohne globale Aenderung an yt_dlp."""
     kennung = ausgang.aktiv().id if ausgang_id is None else ausgang_id
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            _kontrollieren(ydl, ausgang_id=kennung)
+            _kontrollieren(ydl, ausgang_id=kennung, budget_abwarten=budget_abwarten)
             yield ydl
     except _Schutzabbruch as error:
         raise error.grund from error
@@ -414,12 +414,12 @@ class _Mitschrift:
         return f"{text} (und {weitere} weitere)" if weitere > 0 else text
 
 
-def _extract(url: str, opts: dict[str, Any]) -> dict[str, Any]:
+def _extract(url: str, opts: dict[str, Any], *, budget_abwarten: bool = False) -> dict[str, Any]:
     kennung = ausgang.aktiv().id
     mitschrift = _Mitschrift(kennung)
     opts = opts | {"logger": mitschrift}
     try:
-        with _youtube_dl(opts, ausgang_id=kennung) as ydl:
+        with _youtube_dl(opts, ausgang_id=kennung, budget_abwarten=budget_abwarten) as ydl:
             info = ydl.extract_info(url, download=False)
             # Entfernt interne Objekte und macht das Ergebnis JSON-tauglich -
             # es landet unveraendert im Buendel.
@@ -531,7 +531,9 @@ def list_entries(url: str, limit: int | None = None) -> list[ListedVideo]:
     opts = _base_opts() | {"extract_flat": "in_playlist"}
     if limit:
         opts["playlistend"] = limit
-    info = _extract(url, opts)
+    # Den Fortsetzungszeiger grosser Playlists ueber eigene Budgetpausen
+    # behalten. Ein Neustart der Extraktion wuerde dieselben Seiten neu lesen.
+    info = _extract(url, opts, budget_abwarten=True)
 
     ergebnis: list[ListedVideo] = []
     for e in info.get("entries") or []:
@@ -571,7 +573,7 @@ def list_channel_playlists(channel_url: str) -> list[ListedPlaylist]:
     url = channel_url.rstrip("/") + "/playlists"
     opts = _base_opts() | {"extract_flat": True}
     try:
-        info = _extract(url, opts)
+        info = _extract(url, opts, budget_abwarten=True)
     except Gedrosselt:
         raise
     except YtdlpError as e:

@@ -19,6 +19,7 @@ der Grund, warum dort die Playlist-Treue als kaputt gilt.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import timedelta
 
@@ -37,7 +38,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import anfragelimit, drosselung, jobs, ytdlp
+from app.services import abbruch, anfragelimit, drosselung, jobs, ytdlp
 
 log = logging.getLogger(__name__)
 
@@ -250,7 +251,8 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
     if kanal is None:
         raise ValueError(f"Kanal {kanal_id} nicht in der Datenbank")
 
-    voll = jobs.payload_of(job).get("voll", False)
+    payload = jobs.payload_of(job)
+    voll = payload.get("voll", False) or payload.get("sammlungen_offen", False)
 
     try:
         # ---- Schnellcheck: eine budgetierte RSS-Anfrage
@@ -261,6 +263,12 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
             for eintrag in ytdlp.peek_recent(kanal_id):
                 _, war_neu = _video_anlegen(db, kanal_id, eintrag, aus_rss)
                 neu_gesehen += int(war_neu)
+            if neu_gesehen:
+                # Gemeinsam mit den RSS-Neufunden speichern. Nach einer Pause
+                # sind sie bereits bekannt; der RSS-Kurzschluss darf deshalb
+                # den noch ausstehenden Sammlungsabgleich nicht überspringen.
+                payload["sammlungen_offen"] = True
+                job.payload = json.dumps(payload, ensure_ascii=False)
             db.commit()
         except ytdlp.Gedrosselt:
             db.rollback()
@@ -349,10 +357,16 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
                 log.warning("Playlist %s (%s) nicht lesbar: %s", p.id, p.title, e)
 
         kanal.last_synced_at = utcnow()
+        if payload.pop("sammlungen_offen", False):
+            job.payload = json.dumps(payload, ensure_ascii=False) if payload else None
         db.commit()
         drosselung.entwarnung()
         jobs.erledigt(db, job, f"{neu} neue Videos gefunden")
 
+    except abbruch.Abgebrochen:
+        db.rollback()
+        jobs.unterbrochen(db, job, "beim Herunterfahren unterbrochen")
+        raise  # Der Runner beendet diesen Arbeitsstrang nach dem Zurueckstellen.
     except (anfragelimit.Pause, ytdlp.Gedrosselt) as e:
         # Keine Auskunft ueber diesen Kanal, sondern ueber unsere IP-Adresse.
         # Der Abgleich wird unbewertet zurueckgelegt, und - entscheidend -
@@ -391,6 +405,10 @@ def playlist_abgleichen(db: Session, job: Job) -> None:
             einreihen=jobs.payload_of(job).get("einreihen", False),
         )
         jobs.erledigt(db, job, "abgeglichen")
+    except abbruch.Abgebrochen:
+        db.rollback()
+        jobs.unterbrochen(db, job, "beim Herunterfahren unterbrochen")
+        raise
     except (anfragelimit.Pause, ytdlp.Gedrosselt) as e:
         db.rollback()
         jobs.unterbrochen(db, job, ytdlp.pausenhinweis(e))

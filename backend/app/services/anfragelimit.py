@@ -222,12 +222,14 @@ def vor_video() -> None:
         _setzen(db, "naechstes_video", jetzt + STUNDE / int(blick["limit_videos_stunde"]))
 
 
-def vor_anfrage(url: str) -> None:
+def vor_anfrage(url: str, *, budget_abwarten: bool = False) -> None:
     """Vor jedem HTTP-Versuch aufrufen, einschliesslich Wiederholungen.
 
-    Kurze Abstaende werden abbrechbar abgewartet. Stunden-/Tagesbudgets oder
-    Sperrpausen geben den Auftrag an die Warteschlange zurueck. Es wird waehrend
-    des Wartens weder eine SQLite-Transaktion noch ein anderer Worker blockiert.
+    Kurze Abstaende werden abbrechbar abgewartet. Lange Hintergrundabgleiche
+    duerfen auch eigene Stunden-/Tagesbudgets abwarten, damit ihre laufende
+    Pagination nicht immer wieder von vorne beginnt. Interaktive Aufrufe
+    bleiben sofort beantwortbar. Eine echte YouTube-Sperre unterbricht immer.
+    Waehrend des Wartens bleibt die SQLite-Transaktion geschlossen.
     """
     art = _art(url)
     if art is None:
@@ -243,16 +245,23 @@ def vor_anfrage(url: str) -> None:
             abstand = 0.0
             if art == "anfragen":
                 _, _, rest, grund = _fenster(db, art, jetzt, grenzen)
-                if rest > 0:
+                if rest > 0 and not budget_abwarten:
                     raise Pause(rest, grund)
-                abstand = _wert(db, "letzte_anfrage") + settings.youtube_anfrage_abstand * faktor - jetzt
+                abstand = max(rest, _wert(db, "letzte_anfrage") + settings.youtube_anfrage_abstand * faktor - jetzt)
             if abstand <= 0:
                 _aufraeumen(db, jetzt)
                 db.execute("INSERT INTO ereignisse VALUES (?, ?)", (jetzt, art))
                 if art == "anfragen":
                     _setzen(db, "letzte_anfrage", jetzt)
                 return
-        time.sleep(min(abstand, 0.25))
+        # Lange Budgetpausen pruefen den gemeinsamen Zustand alle fuenf
+        # Sekunden neu; Herunterfahren bleibt innerhalb von 250 ms moeglich.
+        rest = min(abstand, 5.0)
+        while rest > 0:
+            abbruch.pruefen()
+            schritt = min(rest, 0.25)
+            time.sleep(schritt)
+            rest -= schritt
 
 
 def abweisung(retry_after_s: float | None = None) -> None:

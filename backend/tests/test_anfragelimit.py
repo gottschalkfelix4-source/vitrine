@@ -269,3 +269,42 @@ def test_kurze_requestpause_bleibt_beim_herunterfahren_abbrechbar(uhr, monkeypat
     with pytest.raises(abbruch.Abgebrochen):
         limit.vor_anfrage("https://youtube.com/watch?v=2")
     assert limit.zustand()["anfragen_tag"] == 1
+
+
+@pytest.mark.parametrize("fenster,dauer", [("stunde", 3600), ("tag", 86400)])
+def test_hintergrundabgleich_wartet_budgetfenster_ohne_abbruch_ab(uhr, monkeypatch, fenster, dauer):
+    monkeypatch.setattr(limit.settings, f"youtube_anfragen_{fenster}", 1)
+    limit.vor_anfrage("https://youtube.com/youtubei/v1/browse")
+    uhr[0] += dauer - 2
+    beginn = uhr[0]
+    limit.vor_anfrage("https://youtube.com/youtubei/v1/browse", budget_abwarten=True)
+    assert uhr[0] == beginn + 2
+    assert limit.zustand()[f"anfragen_{fenster}"] == 1
+
+
+def test_lange_budgetpause_haelt_keine_datenbanksperre_und_bleibt_abbrechbar(uhr, monkeypatch):
+    monkeypatch.setattr(limit.settings, "youtube_anfragen_stunde", 1)
+    limit.vor_anfrage("https://youtube.com/youtubei/v1/browse")
+
+    def schlafen(_):
+        # Wuerde blockieren, wenn die Transaktion/Sperre waehrend sleep offen bliebe.
+        assert limit.zustand()["anfragen_stunde"] == 1
+        abbruch.anfordern()
+
+    monkeypatch.setattr(limit.time, "sleep", schlafen)
+    with pytest.raises(abbruch.Abgebrochen):
+        limit.vor_anfrage("https://youtube.com/youtubei/v1/browse", budget_abwarten=True)
+
+
+def test_echte_sperre_unterbricht_auch_bereits_wartende_pagination(uhr, monkeypatch):
+    monkeypatch.setattr(limit.settings, "youtube_anfragen_stunde", 1)
+    limit.vor_anfrage("https://youtube.com/youtubei/v1/browse")
+
+    def schlafen(sekunden):
+        uhr[0] += sekunden
+        limit.abweisung()
+
+    monkeypatch.setattr(limit.time, "sleep", schlafen)
+    with pytest.raises(limit.Pause, match="YouTube-Schutzpause"):
+        limit.vor_anfrage("https://youtube.com/youtubei/v1/browse", budget_abwarten=True)
+    assert limit.zustand()["anfragen_tag"] == 1

@@ -615,7 +615,12 @@ Webseiten-/Player-Anfragen gleichgesetzt. Der gemeinsame Mindestabstand
 zwischen diesen Anfragen betraegt standardmaessig 5 Sekunden.
 
 Die Warteschlange zeigt verbrauchte und wirksame Budgets, Medienanfragen und
-vorsorgliche Wartezeiten. Gespeicherte Benutzereinstellungen und gesetzte
+vorsorgliche Wartezeiten. Grosse Kanal- und Playlistabgleiche warten eigene
+Budgetgrenzen innerhalb der laufenden Extraktion ab, damit sie danach an
+derselben Position weiterlesen. Ein Containerneustart unterbricht diese
+Extraktion; der Auftrag wird ohne Fehlversuch wieder eingereiht. Ein bereits
+begonnener Vollabgleich wird dabei nicht als unveraenderter RSS-Feed abgehakt.
+Gespeicherte Benutzereinstellungen und gesetzte
 Umgebungsvariablen bleiben erhalten; neue Standardwerte ueberschreiben sie
 nicht. Die zusaetzlichen yt-dlp-Pausen betragen standardmaessig 2 Sekunden
 zwischen Extraktor-Anfragen und 5 bis 10 Sekunden vor Downloads.
