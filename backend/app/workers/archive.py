@@ -33,7 +33,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import abbruch, bundle, drosselung, jobs, media, paths, suche, ytdlp
+from app.services import abbruch, anfragelimit, bundle, drosselung, jobs, media, paths, suche, ytdlp
 
 log = logging.getLogger(__name__)
 
@@ -515,7 +515,7 @@ def archivieren(db: Session, job: Job) -> None:
         # sobald der Kanal Shorts erlaubt.
         _fehler_vermerken(db, video_id, VideoStatus.SKIPPED, str(e))
         jobs.erledigt(db, job, f"uebersprungen: {e}")
-    except ytdlp.Gedrosselt as e:
+    except (anfragelimit.Pause, ytdlp.Gedrosselt) as e:
         # Kein Fehlschlag dieses Videos, sondern eine Abweisung unserer
         # IP-Adresse. Behandelt wie das Herunterfahren: Der Auftrag geht
         # unbewertet zurueck in die Warteschlange, der Versuchszaehler bleibt
@@ -525,7 +525,7 @@ def archivieren(db: Session, job: Job) -> None:
         # betraechtlich: Bei 1800 offenen Videos brennt eine einzige Sperre die
         # ganze Warteschlange ab, weil jedes folgende Video binnen Sekunden auf
         # dieselbe Wand laeuft und sie mit jedem Versuch verlaengert.
-        hinweis = drosselung.hinweis(drosselung.melden(str(e)))
+        hinweis = ytdlp.pausenhinweis(e)
         _fortsetzmarke_setzen(arbeitsordner)
         _status(db, video, VideoStatus.QUEUED, hinweis)
         jobs.unterbrochen(db, job, hinweis)
@@ -791,8 +791,8 @@ def hochstufen(db: Session, job: Job) -> None:
         # genau dafuer gibt es ein Archiv.
         jobs.erledigt(db, job, f"bei der Quelle nicht mehr verfuegbar, Buendel bleibt: {e}")
         return
-    except ytdlp.Gedrosselt as e:
-        jobs.unterbrochen(db, job, drosselung.hinweis(drosselung.melden(str(e))))
+    except (anfragelimit.Pause, ytdlp.Gedrosselt) as e:
+        jobs.unterbrochen(db, job, ytdlp.pausenhinweis(e))
         return
     except Exception as e:
         # Muss aufgefangen werden, obwohl hier noch nichts angefasst wurde:
@@ -863,11 +863,11 @@ def hochstufen(db: Session, job: Job) -> None:
     except abbruch.Abgebrochen:
         jobs.unterbrochen(db, job, "beim Herunterfahren unterbrochen")
         raise
-    except ytdlp.Gedrosselt as e:
+    except (anfragelimit.Pause, ytdlp.Gedrosselt) as e:
         # Wie beim Archivieren: kein Fehlschlag, sondern eine Abweisung der
         # IP-Adresse. Das Video bleibt in seiner bisherigen Qualitaet
         # archiviert, der Auftrag wartet auf ruhigere Zeiten.
-        jobs.unterbrochen(db, job, drosselung.hinweis(drosselung.melden(str(e))))
+        jobs.unterbrochen(db, job, ytdlp.pausenhinweis(e))
     except Exception as e:
         # Nichts am Video anfassen: Es ist weiterhin archiviert und spielbar,
         # nur eben in der bisherigen Qualitaet.

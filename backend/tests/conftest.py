@@ -17,12 +17,21 @@ jetzt hierueber, mit denselben Einstellungen wie ``app.db.SessionLocal``.
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import set_pragmas
 from app.models import Base
+
+
+@pytest.fixture(autouse=True)
+def isoliertes_anfragebudget(tmp_path, monkeypatch):
+    """Auch reine API-Statustests duerfen keine produktive Budgetdatei anlegen."""
+    from app.services import anfragelimit
+
+    monkeypatch.setattr(anfragelimit, "_pfad", lambda: tmp_path / "youtube-anfragebudget.sqlite3")
 
 
 def neue_engine():

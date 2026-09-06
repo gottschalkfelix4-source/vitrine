@@ -41,10 +41,9 @@ Elasticsearch.
   samt allem entfernen.
 - **Warteschlange und Speicher** als eigene Ansichten - was laeuft, was wartet,
   was fehlgeschlagen ist, wie viel wo liegt.
-- **Mehrere VPN-Tunnel als getrennte Ausgaenge.** YouTube zaehlt je
-  IP-Adresse; vier WireGuard-Tunnel sind vier Budgets. Laeuft einer in die
-  Sperre, wechselt das Archiv auf den naechsten, statt anzuhalten. Ohne
-  erweiterte Container-Rechte. Siehe [Mehrere Adressen statt einer](#mehrere-adressen-statt-einer).
+- **Mehrere VPN-Tunnel als getrennte Ausgaenge.** Alle Tunnel teilen die
+  konfigurierten Anfragenbudgets und Schutzpausen. Ohne erweiterte
+  Container-Rechte. Siehe [Mehrere Adressen statt einer](#mehrere-adressen-statt-einer).
 - **Automatisch nachladen** auf Start-, Kanal-, Such- und Wiedergabeseiten.
   Bereits geladene Ergebnisse bleiben bei Verbindungsfehlern erhalten;
   das Nachladen laesst sich per Knopf wiederholen.
@@ -341,12 +340,19 @@ Oberflaeche. Die wichtigsten Variablen:
 | `YTA_HOT_MAX_BYTES` | 50 GiB | Limit des Heissspeichers (Unraid-Template: 20 GB) |
 | `YTA_HOT_TTL_HOURS` | 24 | Frist einer Heisskopie ab letztem Zugriff |
 | `YTA_HOT_TTL_AFTER_PLAYBACK_MINUTES` | 30 | Kuerzere Frist nach Wiedergabeende |
-| `YTA_DOWNLOAD_CONCURRENCY` | 1 | Bewusst 1 - YouTube drosselt pro IP |
+| `YTA_DOWNLOAD_CONCURRENCY` | 1 | Parallele Downloads teilen dasselbe YouTube-Budget |
 | `YTA_ENCODE_CONCURRENCY` | 1 | Ein Encode nutzt ohnehin alle Kerne |
 | `YTA_DEFAULT_SYNC_INTERVAL_HOURS` | 12 | Rhythmus des Kanalabgleichs |
 | `YTA_SUBTITLE_LANGUAGES` | de,en | Kommaliste; wird je Sprechzeile durchsuchbar |
 | `YTA_YTDLP_COOKIES_FILE` | - | Pfad im Container. Nur noetig, wer die Datei selbst ins Volume legt - sonst geht es bequemer ueber *Einstellungen -> YouTube-Anmeldung* |
-| `YTA_YTDLP_SLEEP_REQUESTS` | 0 | Sekunden Pause zwischen einzelnen Anfragen. Der wirksamste Hebel gegen die Bot-Pruefung |
+| `YTA_YTDLP_SLEEP_REQUESTS` | 2 | Zusaetzliche yt-dlp-Pause zwischen Extraktor-Anfragen in Sekunden |
+| `YTA_YTDLP_SLEEP_INTERVAL` | 5 | Mindestpause vor Downloads in Sekunden |
+| `YTA_YTDLP_MAX_SLEEP_INTERVAL` | 10 | Hoechstpause vor Downloads in Sekunden; mindestens die Mindestpause |
+| `YTA_YOUTUBE_ANFRAGEN_STUNDE` | 100 | Webseiten-/Player-Anfragen im gleitenden 60-Minuten-Fenster |
+| `YTA_YOUTUBE_ANFRAGEN_TAG` | 1000 | Webseiten-/Player-Anfragen im gleitenden 24-Stunden-Fenster |
+| `YTA_YOUTUBE_VIDEOS_STUNDE` | 10 | Downloadversuche einschliesslich Wiederholungen in den letzten 60 Minuten |
+| `YTA_YOUTUBE_VIDEOS_TAG` | 100 | Downloadversuche einschliesslich Wiederholungen in den letzten 24 Stunden |
+| `YTA_YOUTUBE_ANFRAGE_ABSTAND` | 5 | Gemeinsamer Mindestabstand zwischen Webseiten-/Player-Anfragen in Sekunden |
 | `YTA_YTDLP_PLAYER_CLIENTS` | - | Notausgang, z. B. `tv,web_safari`. Leer lassen, solange nichts klemmt |
 | `YTA_YTDLP_FORMAT` | - | Eigener yt-dlp-Selektor; ueberschreibt Min/Max |
 | `YTA_VPN_AKTIV` | false | WireGuard-Tunnel als Ausgaenge benutzen. Eingerichtet werden sie in der Oberflaeche |
@@ -496,9 +502,7 @@ zwei Einreihungen gleichzeitig, schluepfen beide durch.
 
 Der Schaden war nicht der falsche Zaehler. Der Archivierer sah beim Start nicht
 nach, was schon da ist - jeder dieser Auftraege haette ein fertiges Video noch
-einmal vollstaendig geholt. Das kostet nicht nur Zeit: YouTube teilt sein
-Budget je IP-Adresse zu, und verbraucht wird genau die Bandbreite, fuer die man
-sich sonst Tunnel einrichtet.
+einmal vollstaendig geholt. Das kostet Zeit, Anfragenbudget und Bandbreite.
 
 Dagegen stehen jetzt zwei Vorkehrungen:
 
@@ -596,77 +600,54 @@ und die EJS-Solver vorhanden sind.
 
 ### "Sign in to confirm you're not a bot"
 
-Der haeufigste Fehler beim ersten grossen Kanal. YouTube laesst eine Weile
-alles durch und weist dann jede weitere Anfrage ab - typischerweise nach
-einigen Dutzend Videos in kurzer Folge. Die Meldung nennt Cookies und klingt
-nach einem Fehler der einzelnen Datei; tatsaechlich gilt sie der IP-Adresse.
-Mit dem Video ist alles in Ordnung.
+Diese Meldung bedeutet, dass YouTube eine Anfrage abgewiesen hat. Sie allein
+belegt weder eine IP-Sperre noch einen Fehler des einzelnen Videos. Sofortige
+Wiederholungen werden deshalb angehalten.
 
-Entscheidend ist deshalb, was das Archiv daraufhin **nicht** tut. Frueher galt
-so ein Video als gescheitert: Auftrag rot, Versuchszaehler hoch. Bei 1800
-offenen Videos lief das naechste binnen Sekunden in dieselbe Wand, und die
-Warteschlange raeumte sich in einer halben Stunde selbst ab - jeder Versuch
-verlaengerte die Sperre.
+Unter **Einstellungen -> YouTube-Schutz** stehen gemeinsame Budgets fuer alle
+Tunnel und Worker dieser Instanz: standardmaessig 100 Webseiten-/Player-Anfragen
+in 60 Minuten und 1000 in 24 Stunden sowie 10 beziehungsweise 100 Videostarts.
+Die Standards sind vorsichtige eigene Startwerte, **keine garantierten
+YouTube-Grenzen**. Die Zeitfenster gleiten; um Mitternacht wird nichts
+zurueckgesetzt. Videostarts zaehlen Downloadversuche einschliesslich
+Wiederholungen. Mediensegmente werden separat gezaehlt und nicht mit
+Webseiten-/Player-Anfragen gleichgesetzt. Der gemeinsame Mindestabstand
+zwischen diesen Anfragen betraegt standardmaessig 5 Sekunden.
 
-Heute ist eine Abweisung kein Fehlschlag, sondern ein Halt:
+Die Warteschlange zeigt verbrauchte und wirksame Budgets, Medienanfragen und
+vorsorgliche Wartezeiten. Gespeicherte Benutzereinstellungen und gesetzte
+Umgebungsvariablen bleiben erhalten; neue Standardwerte ueberschreiben sie
+nicht. Die zusaetzlichen yt-dlp-Pausen betragen standardmaessig 2 Sekunden
+zwischen Extraktor-Anfragen und 5 bis 10 Sekunden vor Downloads.
 
-- Der Auftrag geht unbewertet zurueck in die Warteschlange, der Versuchszaehler
-  bleibt unberuehrt, ein angefangener Download bleibt liegen.
-- Der benutzte **Ausgang** pausiert und mit ihm alle Netzauftraege, die ueber
-  ihn liefen - Downloads, Kanalabgleiche und Hochstufungen. Gibt es weitere
-  Ausgaenge, laeuft das Archiv ueber die naechste Adresse weiter; erst wenn
-  keiner mehr frei ist, steht es. Recodierungen laufen ohnehin weiter, sie
-  brauchen YouTube nicht.
-- Die Pause waechst mit jeder Abweisung, die auf eine bereits abgesessene
-  folgt: 5, 15, 30, 60 Minuten. Der erste geglueckte Download setzt sie zurueck.
-- Die Fortschrittsleiste sagt, dass pausiert wird und wie lange noch. Ohne das
-  sieht eine Pause aus wie ein haengender Dienst - und die naheliegende
-  Reaktion, der Neustart, verlaengert die Sperre nur.
+Nach einer Abweisung pausiert das gesamte Archiv zunaechst eine Stunde.
+Wiederholte Abweisungen nach einer abgelaufenen Pause erhoehen die Schutzpause
+auf 6, 24 und 48 Stunden. Die wirksamen Budgets werden voruebergehend reduziert.
+Ein anderer Tunnel hebt diese gemeinsame Pause nicht auf. Der Auftrag geht
+zurueck in die Warteschlange; lokale Recodierungen koennen weiterlaufen.
+Manuelle Pausen bleiben unabhaengig davon wirksam.
 
-Wenn es haeufig passiert, in dieser Reihenfolge:
-
-1. **`YTA_DOWNLOAD_CONCURRENCY` auf 1.** Parallele Downloads machen nicht
-   schneller fertig, sie ziehen die Sperre frueher.
-2. **`YTA_YTDLP_SLEEP_REQUESTS` auf 1 bis 3.** Wirkt zwischen den einzelnen
-   HTTP-Anfragen, nicht nur zwischen Videos - und gezaehlt werden die Anfragen.
-   Ein Download stellt ein Dutzend davon.
-3. **Anmelden.** Ein angemeldeter Zugriff hat ein deutlich groesseres Budget.
-   Siehe unten - dafuer gibt es einen Assistenten in der Oberflaeche.
-4. **Mehrere Adressen.** Das ist der einzige Hebel, der die Grenze nicht
-   entschaerft, sondern vervielfacht: Sie gilt je IP-Adresse. Siehe
-   [Mehrere Adressen statt einer](#mehrere-adressen-statt-einer).
-5. **`YTA_YTDLP_PLAYER_CLIENTS`** als letzter Ausweg, wenn YouTube einen
-   Client dichtgemacht hat und yt-dlp noch nicht nachgezogen ist. Falsch
-   gesetzt richtet die Variable Schaden an - ein nicht mehr bedienter Client
-   liefert nur noch 360p.
-
-Ein Erstbestand von tausend Videos braucht ueber eine Adresse Tage. Das ist
-kein Mangel der Software, sondern die Grenze, die YouTube zieht - sie laesst
-sich nur teilen, nicht aufheben.
+Der Schutzzustand liegt dauerhaft unter `/data/youtube-anfragebudget.sqlite3`;
+ein Containerneustart setzt die Zaehler nicht zurueck. Kann die Datei nicht
+gelesen oder geschrieben werden, warten Downloads weiter. Die Oberflaeche
+zeigt dann unbekannte Zaehler als Strich und den Speicherfehler an.
 
 ### Mehrere Adressen statt einer
 
-Die Sperre gilt der IP-Adresse. Das ist der Schluessel zu allem, was oben
-steht - und zugleich der Hinweis darauf, wie man sie loswird: mit mehr als
-einer Adresse. Unter *Einstellungen -> VPN-Tunnel* lassen sich mehrere
-WireGuard-Konfigurationen hinterlegen. Jede ist ein eigener **Ausgang** mit
-eigenem Budget und eigener Sperrleiter.
-
-Wichtig zur Einordnung: Es geht um Durchsatz, nicht um Verschleierung. Das
-Archiv laedt oeffentlich abrufbare Videos; es verteilt die Anfragen nur auf die
-Adressen, die man selbst mitbringt, statt alle ueber eine zu schicken.
+Unter *Einstellungen -> VPN-Tunnel* lassen sich mehrere WireGuard-Konfigurationen
+hinterlegen. Jede ist ein eigener **Ausgang**. Alle Ausgaenge teilen weiterhin
+das gemeinsame YouTube-Budget; zusaetzliche Tunnel erhoehen es nicht.
 
 Was sich damit aendert:
 
 - Jeder Auftrag holt sich **reihum** einen freien Ausgang. Bei vier Tunneln und
   vier parallelen Downloads laufen vier verschiedene Adressen - nicht viermal
   dieselbe.
-- Weist YouTube ab, pausiert **nur dieser Ausgang**. Der Auftrag geht wie
-  bisher unbewertet zurueck in die Warteschlange, der naechste laeuft ueber den
-  naechsten Tunnel weiter. Erst wenn kein Ausgang mehr frei ist, steht das
-  Archiv - und sagt es in der Fortschrittsleiste.
-- Die Leiste unterscheidet beides: "Ausweichen - 1 von 4 Ausgaengen gesperrt"
-  ist kein Stillstand, "Pause" ist einer.
+- Weist YouTube ab, greift zusaetzlich zur Pause des betroffenen Ausgangs die
+  gemeinsame Schutzpause. Der Auftrag wartet auch dann, wenn andere Tunnel
+  bereit sind.
+- Die Leiste zeigt den Zustand der Ausgaenge und die gemeinsame Schutzpause
+  getrennt an.
 
 **Einrichten**, in dieser Reihenfolge:
 
@@ -677,8 +658,8 @@ Was sich damit aendert:
    ergeben viermal dieselbe Adresse. Das Archiv misst die tatsaechliche Adresse
    jedes Tunnels und warnt, wenn zwei gleich sind.
 3. *Tunnel benutzen* einschalten und je Tunnel auf "pruefen" klicken.
-4. **Parallele Downloads** auf die Zahl der Tunnel setzen. Mehr teilen sich
-   wieder eine Adresse.
+4. **Parallele Downloads** vorsichtig einstellen. Mehr Worker erhoehen die
+   gemeinsamen Budgets nicht; der Standard bleibt 1.
 
 **Warum keine erweiterten Rechte noetig sind.** Ein echtes WireGuard-Geraet im
 Container braeuchte `NET_ADMIN` und `/dev/net/tun` - und wuerde fuer den ganzen
@@ -754,16 +735,14 @@ den Admin-Login geschuetzt. Die YouTube-Cookies ersetzen diesen Login
 nicht. Datenverzeichnis und Backups enthalten vertrauliche Zugangsdaten und
 duerfen nicht als oeffentliche Freigabe erreichbar sein.
 
-Und die Erwartung geradegerueckt: Cookies heben die Grenze nicht auf, sie
-vergroessern nur das Budget. Bei einem Erstbestand von tausenden Videos wird
-YouTube weiter gelegentlich abweisen - das Archiv legt dann von selbst eine
-Pause ein.
+Cookies aendern die Anmeldung gegenueber YouTube, aber nicht die hier
+konfigurierten Schutzbudgets. Auch mit Cookies koennen Anfragen abgewiesen
+werden; das Archiv legt dann von selbst eine Pause ein.
 
 ### Nebenlaeufigkeit und Hardware
 
-YouTube drosselt pro IP-Adresse, nicht pro Prozess; als Gast liegt die Grenze
-bei rund 300 Videos je Stunde. `YTA_DOWNLOAD_CONCURRENCY` hochzudrehen macht
-nicht schneller fertig, sondern voruebergehend gesperrt.
+Alle Worker und Tunnel teilen dieselben Budgets unter *YouTube-Schutz*.
+`YTA_DOWNLOAD_CONCURRENCY` erhoeht die Parallelitaet, aber keine dieser Grenzen.
 
 Intel 11. bis 13. Generation (UHD 730/770) kann AV1 **nur dekodieren**. Fuer
 AV1-Encode in Hardware braucht es Intel Arc, Meteor/Lunar/Arrow Lake, NVIDIA

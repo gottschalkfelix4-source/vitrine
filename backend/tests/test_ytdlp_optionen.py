@@ -60,13 +60,14 @@ def test_jeder_ytdlp_fehler_wird_zu_ytdlperror(monkeypatch):
 # ------------------------------------------------- Notausgaenge gegen Sperren
 
 
-def test_ohne_einstellung_keine_extraktorargumente():
+def test_ohne_einstellung_keine_extraktorargumente(monkeypatch):
     """Der Normalfall: yt-dlp entscheidet selbst, welche Clients es anfragt.
 
     Das ist kein Versehen, sondern Absicht. yt-dlp zieht die Wahl bei jeder
     Version nach; eine feste Vorgabe hier wuerde diese Pflege aushebeln und
     im schlechtesten Fall dauerhaft 360p archivieren.
     """
+    monkeypatch.setattr(ytdlp.settings, "ytdlp_sleep_requests", 0)
     opts = ytdlp._base_opts()
     assert "extractor_args" not in opts
     assert "sleep_interval_requests" not in opts

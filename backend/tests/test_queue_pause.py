@@ -22,7 +22,8 @@ from app.workers import runner
 
 
 @pytest.fixture
-def sitzungen(tmp_path):
+def sitzungen(tmp_path, monkeypatch):
+    monkeypatch.setattr(drosselung.settings, "data_dir", tmp_path)
     # Datei statt StaticPool: API und Worker muessen unabhaengige
     # Verbindungen haben, damit das Rennen zwischen SELECT und UPDATE echt ist.
     engine = create_engine(

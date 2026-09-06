@@ -9,6 +9,9 @@ halben Stunde selbst abgeraeumt.
 
 from __future__ import annotations
 
+import json
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from yt_dlp.utils import YoutubeDLError
 
@@ -16,7 +19,8 @@ from app.services import drosselung, ytdlp
 
 
 @pytest.fixture(autouse=True)
-def _sauber():
+def _sauber(tmp_path, monkeypatch):
+    monkeypatch.setattr(drosselung.settings, "data_dir", tmp_path)
     drosselung.zuruecksetzen()
     yield
     drosselung.zuruecksetzen()
@@ -127,7 +131,7 @@ def test_hoechste_stufe_gilt_dauerhaft(monkeypatch):
     assert drosselung.melden("und wieder") == drosselung.STUFEN_S[-1]
 
 
-def test_erfolg_hebt_pause_und_stufe_auf(monkeypatch):
+def test_erfolg_hebt_weder_aktive_pause_noch_frische_eskalation_auf(monkeypatch):
     uhr = [1000.0]
     monkeypatch.setattr(drosselung.time, "monotonic", lambda: uhr[0])
     drosselung.melden("erste")
@@ -135,11 +139,117 @@ def test_erfolg_hebt_pause_und_stufe_auf(monkeypatch):
     drosselung.melden("zweite")
 
     drosselung.entwarnung()
-    assert drosselung.wartezeit() == 0
-    assert drosselung.zustand()["stufe"] == 0
-    # Und die naechste Abweisung beginnt wieder unten. Ohne das schleppte eine
-    # einmalige Sperre ihre Stufe wochenlang mit.
+    assert drosselung.wartezeit() == drosselung.STUFEN_S[1]
+    assert drosselung.zustand()["stufe"] == 2
+    uhr[0] += drosselung.STUFEN_S[1] + 1
+    drosselung.entwarnung()
+    assert drosselung.zustand_je_ausgang(["direkt"])["direkt"]["stufe"] == 2
+    uhr[0] += drosselung.ERHOLUNG_S
+    drosselung.entwarnung()
+    assert drosselung.zustand_je_ausgang(["direkt"])["direkt"]["stufe"] == 0
     assert drosselung.melden("spaeter mal wieder") == drosselung.STUFEN_S[0]
+
+
+def test_sperre_und_eskalation_ueberleben_einen_neustart(tmp_path, monkeypatch):
+    uhr, utc = [1000.0], [1_800_000_000.0]
+    monkeypatch.setattr(drosselung.time, "monotonic", lambda: uhr[0])
+    monkeypatch.setattr(drosselung.time, "time", lambda: utc[0])
+    drosselung.melden("HTTP Error 429", "tunnel-2")
+    datei = tmp_path / drosselung.DATEINAME
+    gespeichert = json.loads(datei.read_text(encoding="utf-8"))
+    assert gespeichert["ausgaenge"]["tunnel-2"]["bis_utc"] == utc[0] + 3600
+
+    # Der neue Prozess hat eine andere monotone Uhr; die UTC-Zeit lief weiter.
+    uhr[0], utc[0] = 50.0, utc[0] + 600
+    drosselung.zuruecksetzen()
+    assert drosselung.wartezeit("tunnel-2") == 3000
+    assert drosselung.frei(["tunnel-2", "tunnel-3"]) == ["tunnel-3"]
+    assert drosselung.kuerzeste_wartezeit(["tunnel-2"]) == 3000
+    assert drosselung.zustand(["tunnel-2"])["stufe"] == 1
+    drosselung.entwarnung("tunnel-2")
+    assert datei.read_text(encoding="utf-8") == json.dumps(gespeichert, ensure_ascii=False)
+
+    uhr[0], utc[0] = 75.0, utc[0] + 3001
+    drosselung.zuruecksetzen()
+    assert drosselung.wartezeit("tunnel-2") == 0
+    assert drosselung.melden("erneut 429", "tunnel-2") == drosselung.STUFEN_S[1]
+
+
+def test_datenverzeichniswechsel_mischt_keine_sperren(tmp_path, monkeypatch):
+    drosselung.melden("erster Speicher", "tunnel-1")
+    monkeypatch.setattr(drosselung.settings, "data_dir", tmp_path / "zweiter")
+    assert drosselung.wartezeit("tunnel-1") == 0
+    drosselung.melden("zweiter Speicher", "tunnel-2")
+    monkeypatch.setattr(drosselung.settings, "data_dir", tmp_path)
+    assert drosselung.wartezeit("tunnel-1") > 0
+    assert drosselung.wartezeit("tunnel-2") == 0
+
+
+def test_parallele_abweisung_und_alter_erfolg_aendern_aktive_frist_nicht(tmp_path, monkeypatch):
+    uhr = [1000.0]
+    monkeypatch.setattr(drosselung.time, "monotonic", lambda: uhr[0])
+    drosselung.melden("erste Abweisung", "tunnel-1")
+    datei = tmp_path / drosselung.DATEINAME
+    gespeichert = datei.read_bytes()
+    uhr[0] += 60
+
+    def rueckmeldung(nummer):
+        if nummer % 2:
+            drosselung.entwarnung("tunnel-1")
+        else:
+            assert drosselung.melden("parallele Abweisung", "tunnel-1") == 3540
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(rueckmeldung, range(40)))
+    assert drosselung.wartezeit("tunnel-1") == 3540
+    assert drosselung.zustand(["tunnel-1"])["stufe"] == 1
+    assert datei.read_bytes() == gespeichert
+
+
+def test_laufende_pause_bleibt_bei_systemuhrsprung_monoton(monkeypatch):
+    uhr, utc = [1000.0], [1_800_000_000.0]
+    monkeypatch.setattr(drosselung.time, "monotonic", lambda: uhr[0])
+    monkeypatch.setattr(drosselung.time, "time", lambda: utc[0])
+    drosselung.melden("Abweisung")
+    utc[0] += 30 * 86400
+    uhr[0] += 120
+    assert drosselung.wartezeit() == 3480
+    drosselung.entwarnung()
+    assert drosselung.wartezeit() == 3480
+
+
+def test_schreibfehler_bewahrt_bisherige_datei_und_aktive_ram_sperre(tmp_path, monkeypatch, caplog):
+    drosselung.melden("erste", "tunnel-1")
+    datei = tmp_path / drosselung.DATEINAME
+    gespeichert = datei.read_bytes()
+
+    def fehler(*_):
+        raise OSError("Datenträger nicht beschreibbar")
+
+    monkeypatch.setattr(drosselung.os, "replace", fehler)
+    drosselung.melden("zweite", "tunnel-2")
+    assert drosselung.wartezeit("tunnel-2") > 0
+    assert datei.read_bytes() == gespeichert
+    assert not list(tmp_path.glob("*.tmp"))
+    assert "nicht dauerhaft gespeichert" in caplog.text
+
+
+def test_entwarnung_wird_erst_nach_erholung_dauerhaft_gespeichert(tmp_path, monkeypatch):
+    uhr, utc = [1000.0], [1_800_000_000.0]
+    monkeypatch.setattr(drosselung.time, "monotonic", lambda: uhr[0])
+    monkeypatch.setattr(drosselung.time, "time", lambda: utc[0])
+    drosselung.melden("erste", "tunnel-1")
+    uhr[0] += drosselung.STUFEN_S[0] + 1
+    utc[0] += drosselung.STUFEN_S[0] + 1
+    drosselung.entwarnung("tunnel-1")
+    drosselung.zuruecksetzen()
+    assert drosselung.zustand_je_ausgang(["tunnel-1"])["tunnel-1"]["stufe"] == 1
+    uhr[0] += drosselung.ERHOLUNG_S
+    utc[0] += drosselung.ERHOLUNG_S
+    drosselung.entwarnung("tunnel-1")
+    drosselung.zuruecksetzen()
+    assert drosselung.zustand_je_ausgang(["tunnel-1"])["tunnel-1"]["stufe"] == 0
+    assert json.loads((tmp_path / drosselung.DATEINAME).read_text(encoding="utf-8"))["ausgaenge"] == {}
 
 
 def test_zustand_nennt_einen_zeitpunkt():
@@ -194,6 +304,7 @@ def test_abgewiesener_download_wird_nicht_als_fehlschlag_verbucht(umgebung, monk
     db = umgebung
 
     def abgewiesen(*a, **kw):
+        ytdlp._abweisung_melden("Sign in to confirm you're not a bot")
         raise ytdlp.Gedrosselt("Sign in to confirm you're not a bot")
 
     monkeypatch.setattr(ytdlp, "download_video", abgewiesen)
@@ -327,8 +438,11 @@ def test_erst_wenn_alle_gesperrt_sind_wird_pausiert(monkeypatch):
     assert z["rest_s"] == round(drosselung.STUFEN_S[0] - 100.0)
 
 
-def test_entwarnung_gilt_nur_dem_eigenen_ausgang():
+def test_entwarnung_gilt_nur_dem_eigenen_ausgang(monkeypatch):
+    uhr = [1000.0]
+    monkeypatch.setattr(drosselung.time, "monotonic", lambda: uhr[0])
     drosselung.melden("abgewiesen", ausgang="tunnel-1")
+    uhr[0] += drosselung.STUFEN_S[0] + drosselung.ERHOLUNG_S + 1
     drosselung.melden("abgewiesen", ausgang="tunnel-2")
     drosselung.entwarnung("tunnel-1")
     assert drosselung.wartezeit("tunnel-1") == 0

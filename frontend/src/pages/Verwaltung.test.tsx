@@ -67,6 +67,22 @@ it("behält den Entwurf eines anderen Feldes beim Zurücksetzen", async () => {
   expect(host.textContent).toContain("1 Änderung noch nicht gespeichert");
 });
 
+it("akzeptiert den Schutzabstand5.0 und0.1 ohne falschen Schrittfehler", async () => {
+  const schutzfeld: EinstellungsFeld = {
+    ...feld("youtube_anfrage_abstand", "5"), art: "float", gruppe: "YouTube-Schutz",
+    min: 0.1, max: 120, wert: 5,
+  };
+  vi.spyOn(api, "einstellungen").mockResolvedValue({ gruppen: ["YouTube-Schutz"], felder: [schutzfeld] });
+  await act(async () => root.render(<Einstellungenseite />));
+  await act(async () => knopf("YouTube-Schutz").click());
+  const input = host.querySelector<HTMLInputElement>("#f-youtube_anfrage_abstand")!;
+  expect(input.checkValidity()).toBe(true);
+  await eingeben(input.id, "0.1");
+  expect(input.checkValidity()).toBe(true);
+  await eingeben(input.id, "0");
+  expect(input.validity.rangeUnderflow).toBe(true);
+});
+
 it("sperrt Einstellungen während Speichern und Bestätigungsabfrage und sendet nur einmal", async () => {
   const speichern = spaeter<{ geaendert: string[]; neustart_noetig: string[] }>();
   const bestaetigung = spaeter<ReturnType<typeof einstellungen>>();

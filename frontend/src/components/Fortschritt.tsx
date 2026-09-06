@@ -51,6 +51,7 @@ export function Fortschrittsleiste() {
   const laufend = daten?.laufend ?? [];
   const wartend = daten?.wartend ?? 0;
   const drosselung = daten?.drosselung;
+  const anfragelimit = daten?.anfragelimit;
   const pause = daten?.pause;
   const ausgaenge = daten?.ausgaenge;
   // Wie viele Wege ins Netz gerade dicht sind. Mit einem einzigen Ausgang ist
@@ -59,15 +60,16 @@ export function Fortschrittsleiste() {
   const gesperrt = ausgaenge ? ausgaenge.gesamt - ausgaenge.frei : 0;
   // Absteigend, damit das Gewichtigste zuerst steht.
   const arten = Object.entries(daten?.nach_art ?? {}).sort((a, b) => b[1] - a[1]);
-  if (laufend.length === 0 && wartend === 0 && !pause?.aktiv) return null;
+  if (laufend.length === 0 && wartend === 0 && !pause?.aktiv && !anfragelimit?.pausiert) return null;
 
   return (
     <details className="fortschritt-details">
       <summary>
-        <Icon name={pause?.aktiv ? "pause" : "download"} size={20} />
+        <Icon name={pause?.aktiv || drosselung?.pausiert || anfragelimit?.pausiert ? "pause" : "download"} size={20} />
         <span>{pause?.aktiv
           ? `Download-Warteschlange pausiert${pause.bis && pause.rest_s !== null ? ` · noch ${wartedauer(pause.rest_s)}` : ""}`
-          : drosselung?.pausiert ? `Downloads pausieren · weiter in ${wartedauer(drosselung.rest_s)}` : `${laufend.length} ${laufend.length === 1 ? "Auftrag läuft" : "Aufträge laufen"}`}
+          : anfragelimit?.pausiert ? `YouTube-Schutz · ${anfragelimit.bis ? "vorsorgliche Wartezeit" : "nächste Prüfung in"} ${wartedauer(anfragelimit.rest_s)}`
+          : drosselung?.pausiert ? `Downloads pausieren · frühestens in ${wartedauer(drosselung.rest_s)}` : `${laufend.length} ${laufend.length === 1 ? "Auftrag läuft" : "Aufträge laufen"}`}
           {pause?.aktiv && pause.laufend > 0 ? ` · ${pause.laufend} ${pause.laufend === 1 ? "läuft" : "laufen"} noch` : ""}
           {wartend > 0 ? ` · ${wartend} warten` : ""}
           {gesperrt > 0 && !drosselung?.pausiert ? ` · ${gesperrt} Ausgänge gesperrt` : ""}
@@ -77,8 +79,13 @@ export function Fortschrittsleiste() {
     <Link className="fortschrittsleiste" to="/warteschlange" title="Zur Warteschlange">
       {pause?.aktiv ? <div className="fl-zeile"><div className="fl-text">
         <strong>Manuell pausiert</strong>
-        <span>{pause.bis ? "Nach Ablauf der Pause dürfen neue Downloads starten, sofern die IP nicht mehr gesperrt ist." : "Es starten keine neuen Downloads oder Kanalabgleiche, bis du die Pause beendest."}</span>
+        <span>{pause.bis ? "Nach Ablauf der Pause werden die YouTube-Budgets und weitere Pausen erneut geprüft." : "Es starten keine neuen Downloads oder Kanalabgleiche, bis du die Pause beendest."}</span>
         <span className="fl-pause-link">Zur Warteschlange und fortsetzen →</span>
+      </div></div> : null}
+      {anfragelimit ? <div className="fl-zeile"><div className="fl-text">
+        <strong>YouTube-Schutz</strong>
+        {anfragelimit.pausiert ? <span>{anfragelimit.bis ? "Vorsorgliche Wartezeit" : "Nächste Prüfung in"}: {wartedauer(anfragelimit.rest_s)}{anfragelimit.grund ? ` · ${anfragelimit.grund}` : ""} Weitere Pausen bleiben wirksam.</span> : null}
+        <span>{anfragelimit.anfragen_stunde?.toLocaleString("de-DE") ?? "—"} / {anfragelimit.limit_anfragen_stunde.toLocaleString("de-DE")} Anfragen · {anfragelimit.videos_stunde?.toLocaleString("de-DE") ?? "—"} / {anfragelimit.limit_videos_stunde.toLocaleString("de-DE")} Videostarts in 60 Minuten{anfragelimit.reduziert ? " · Budgets vorübergehend reduziert" : ""}</span>
       </div></div> : null}
       {laufend.map((a) => (
         <Zeile key={a.id} auftrag={a} />
@@ -98,23 +105,17 @@ export function Fortschrittsleiste() {
                 ? `YouTube weist alle ${ausgaenge.gesamt} Ausgänge ab`
                 : "YouTube weist gerade ab"}
             </span>
-            <span className="fl-meldung">{pause?.aktiv ? "Sperrpause endet in " : "weiter in "}{wartedauer(drosselung.rest_s)}</span>
+            <span className="fl-meldung">Sperrpause endet in {wartedauer(drosselung.rest_s)} · weitere Pausen und Budgets bleiben wirksam</span>
           </div>
         </div>
       ) : gesperrt > 0 ? (
-        /*
-          Ein gesperrter Tunnel von vieren ist keine Pause - es läuft ja
-          weiter, nur schmaler. Ohne diese Zeile wundert man sich, warum es
-          plötzlich langsamer geht, und sucht den Fehler an der falschen
-          Stelle.
-        */
         <div className="fl-zeile">
           <div className="fl-text">
-            <strong>Ausweichen</strong>
+            <strong>Ausgänge</strong>
             <span className="fl-titel">
               {gesperrt} von {ausgaenge?.gesamt} Ausgängen gesperrt
             </span>
-            <span className="fl-meldung">es wird über die übrigen geladen</span>
+            <span className="fl-meldung">Die übrigen Ausgänge sind verfügbar; gemeinsame Pausen und Budgets gelten weiterhin.</span>
           </div>
         </div>
       ) : laufend.length === 0 ? (

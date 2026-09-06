@@ -143,7 +143,7 @@ def test_leere_variablen_bedeuten_nicht_gesetzt(monkeypatch: pytest.MonkeyPatch)
     assert s.ytdlp_cookies_file is None
     assert s.ytdlp_format is None
     assert s.ytdlp_ratelimit is None
-    assert s.ytdlp_sleep_requests == 0.0
+    assert s.ytdlp_sleep_requests == 2.0
     assert s.ytdlp_player_clients == []
 
 

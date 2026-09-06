@@ -115,7 +115,7 @@ export function Einstellungenseite() {
       <div className="seiten-kopf">
         <h1>Einstellungen</h1>
         <span className="beiwerk">
-          Änderungen wirken sofort für neue Aufträge – laufende bleiben unberührt.
+          Änderungen gelten nach dem Speichern. YouTube-Budgets werden auch vor weiteren Anfragen laufender Aufträge geprüft.
         </span>
       </div>
 
@@ -274,7 +274,7 @@ function Zeile({
               value={String(wert ?? "")}
               min={feld.min ?? undefined}
               max={feld.max ?? undefined}
-              step={feld.art === "float" ? 0.5 : 1}
+              step={feld.art === "float" ? "any" : 1}
               onChange={(e) => aufAendern(e.target.value === "" ? "" : Number(e.target.value))}
             />
             {feld.einheit ? <span className="einst-einheit">{feld.einheit}</span> : null}

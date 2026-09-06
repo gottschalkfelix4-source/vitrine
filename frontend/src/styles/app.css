@@ -1667,6 +1667,18 @@
 .download-pause-aktionen select { min-height: 40px; padding: 8px 12px; background: var(--grund); border: 1px solid var(--rand); border-radius: 8px; color: var(--text); }
 .download-pause-aktionen .knopf { min-height: 40px; }
 .download-pause .download-pause-fehler { flex-basis: 100%; margin: 0; color: var(--zu-fehler); }
+.youtube-schutz { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--rand-zart); }
+.youtube-schutz h2 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+.youtube-schutz p { margin: 8px 0 0; font-size: 13px; color: var(--text-gedaempft); overflow-wrap: anywhere; }
+.youtube-schutz p a { text-decoration: underline; color: var(--text); }
+.youtube-schutz .youtube-schutz-pause { margin-bottom: 12px; }
+.youtube-schutz-pause strong { color: var(--zu-arbeit); font-weight: 500; }
+.youtube-schutz-budgets { width: 100%; max-width: 760px; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.youtube-schutz-budgets caption { text-align: left; color: var(--text-gedaempft); padding-bottom: 10px; }
+.youtube-schutz-budgets th, .youtube-schutz-budgets td { text-align: left; padding: 8px; border-bottom: 1px solid var(--rand-zart); overflow-wrap: anywhere; vertical-align: top; }
+.youtube-schutz-budgets th { font-weight: 500; }
+.youtube-schutz-budgets th:first-child { width: 40%; padding-left: 0; }
+.youtube-schutz-budgets td { font-variant-numeric: tabular-nums; }
 .fl-pause-link { text-decoration: underline; color: var(--text); }
 @media (max-width: 600px) {
   .download-pause { padding: 16px; }

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -96,16 +97,24 @@ FELDER: list[Feld] = [
     Feld("sponsorblock", "Download", "SponsorBlock-Kapitel", "Markiert Werbeabschnitte als Kapitel. Es wird nichts herausgeschnitten – ein Archiv soll das Original bewahren.", "bool"),
     Feld("write_comments", "Download", "Kommentare mitsichern", "Kann bei großen Videos sehr lange dauern.", "bool"),
     Feld("ytdlp_ratelimit", "Download", "Bandbreitenlimit", "Zum Beispiel 5M. Leer = unbegrenzt.", "text"),
-    Feld("ytdlp_sleep_interval", "Download", "Pause zwischen Videos", "Entschärft die Drosselung.", "float", min=0, max=120, einheit="Sek."),
-    Feld("ytdlp_sleep_requests", "Download", "Pause zwischen Anfragen", "Der wirksamste Hebel gegen „Sign in to confirm you’re not a bot“. Wirkt zwischen den einzelnen Anfragen, nicht nur zwischen Videos – und gezählt werden die Anfragen: Ein Download stellt ein Dutzend davon. 1 bis 3 sind ein guter Anfang, 0 ist aus.", "float", min=0, max=30, einheit="Sek."),
+    Feld("ytdlp_sleep_interval", "Download", "Pause zwischen Videos", "Zusätzliche yt-dlp-Pause vor Downloads. Das gemeinsame YouTube-Budget gilt unabhängig davon.", "float", min=0, max=120, einheit="Sek."),
+    Feld("ytdlp_max_sleep_interval", "Download", "Höchste Pause zwischen Videos", "yt-dlp wählt eine Pause zwischen dem Mindestwert und diesem Wert. Liegt er darunter, gilt die Mindestpause.", "float", min=0, max=120, einheit="Sek."),
+    Feld("ytdlp_sleep_requests", "Download", "Pause zwischen Anfragen", "Zusätzliche yt-dlp-Pause zwischen Extraktor-Anfragen. 0 schaltet diese Zusatzpause aus; die gemeinsamen Budgets und der Mindestabstand unter YouTube-Schutz bleiben aktiv.", "float", min=0, max=30, einheit="Sek."),
     Feld("ytdlp_player_clients", "Download", "YouTube-Clients", "Leer lassen. Notausgang für den Fall, dass YouTube einen Client dichtmacht und yt-dlp noch nicht nachgezogen ist, z. B. tv,web_safari. Falsch gesetzt liefert ein nicht mehr bedienter Client nur noch 360p.", "liste"),
 
+    # -------------------------------------------------------- YouTube-Schutz
+    Feld("youtube_anfragen_stunde", "YouTube-Schutz", "Anfragen in 60 Minuten", "Gemeinsames Budget für Webseiten- und Player-Anfragen aller Tunnel und Worker dieser Instanz im gleitenden 60-Minuten-Fenster. Mediensegmente zählen separat. Die Standards sind vorsichtige eigene Startwerte, keine garantierten YouTube-Grenzen.", "int", min=1, max=10000),
+    Feld("youtube_anfragen_tag", "YouTube-Schutz", "Anfragen in 24 Stunden", "Gemeinsames Budget für Webseiten- und Player-Anfragen in den jeweils letzten 24 Stunden. Es wird nicht um Mitternacht zurückgesetzt.", "int", min=1, max=100000),
+    Feld("youtube_videos_stunde", "YouTube-Schutz", "Videostarts in 60 Minuten", "Downloadversuche in den jeweils letzten 60 Minuten, einschließlich Wiederholungen. Alle Tunnel und Worker teilen dieses Budget.", "int", min=1, max=1000),
+    Feld("youtube_videos_tag", "YouTube-Schutz", "Videostarts in 24 Stunden", "Downloadversuche einschließlich Wiederholungen in den jeweils letzten 24 Stunden. Weitere Starts warten, bis wieder Budget frei ist.", "int", min=1, max=10000),
+    Feld("youtube_anfrage_abstand", "YouTube-Schutz", "Mindestabstand zwischen Anfragen", "Gemeinsamer Abstand zwischen Webseiten- und Player-Anfragen über alle Tunnel und Worker dieser Instanz. Mediensegmente werden separat gezählt.", "float", min=0.1, max=120, einheit="Sek."),
+
     # -------------------------------------------------------------------- VPN
-    Feld("vpn_aktiv", "VPN", "Tunnel benutzen", "Wirkt sofort für Netzaufträge der Warteschlange. Downloads nehmen reihum einen bereiten Tunnel. YouTube zählt je IP-Adresse; mehrere Tunnel verteilen die Anfragen. Ohne bereiten Tunnel warten die Aufträge, solange ‚Nur über Tunnel laden‘ eingeschaltet ist.", "bool"),
+    Feld("vpn_aktiv", "VPN", "Tunnel benutzen", "Wirkt sofort für Netzaufträge der Warteschlange. Downloads nehmen reihum einen bereiten Tunnel. Alle Tunnel teilen die Budgets unter YouTube-Schutz. Ohne bereiten Tunnel warten die Aufträge, solange ‚Nur über Tunnel laden‘ eingeschaltet ist.", "bool"),
     Feld("vpn_nur_tunnel", "VPN", "Nur über Tunnel laden", "An: Netzaufträge warten, wenn kein Tunnel bereit ist. Aus: Auch die eigene Leitung wird für Aufträge verwendet. Direkte Kanalabfragen, Cookie-Tests und Vorschaubilder haben eigene Verbindungen; diese Einstellung sperrt nicht den gesamten Netzwerkverkehr des Containers.", "bool"),
 
     # ----------------------------------------------------------------- Worker
-    Feld("download_concurrency", "Arbeiter", "Parallele Downloads", "Wirkt sofort. Hochsetzen greift beim nächsten wartenden Auftrag, Heruntersetzen, sobald die überzähligen Stränge fertig sind – ein laufender Download wird dafür nicht abgebrochen. YouTube drosselt pro IP-Adresse bei rund 300 Videos je Stunde, nicht pro Prozess: Hochdrehen macht nicht schneller fertig, sondern vorübergehend gesperrt. Mit VPN gilt das je Tunnel – hier lohnt sich genau so viel, wie es Tunnel gibt.", "int", min=1, max=16),
+    Feld("download_concurrency", "Arbeiter", "Parallele Downloads", "Wirkt sofort. Hochsetzen greift beim nächsten wartenden Auftrag, Heruntersetzen, sobald die überzähligen Stränge fertig sind. Alle Worker und Tunnel teilen die Budgets unter YouTube-Schutz; mehr parallele Downloads erhöhen diese Budgets nicht.", "int", min=1, max=16),
     Feld("encode_concurrency", "Arbeiter", "Parallele Recodierungen", "Wirkt sofort. Ein Encode nutzt ohnehin alle Kerne – mehr als 1 lohnt nur mit Hardware-Encoder.", "int", min=1, max=16),
     Feld("default_sync_interval_hours", "Arbeiter", "Kanalabgleich alle", "Standardrhythmus. Der Schnellcheck läuft über den RSS-Feed und kostet keinen yt-dlp-Request.", "float", min=0.5, max=720, einheit="Std."),
     Feld("reaper_interval_seconds", "Arbeiter", "Aufräumlauf alle", "", "int", min=30, max=86400, einheit="Sek."),
@@ -236,11 +245,15 @@ def _pruefen_und_wandeln(feld: Feld, wert: Any) -> Any:
             zahl = float(wert)
         except (TypeError, ValueError) as e:
             raise Ungueltig(f"{feld.titel}: Zahl erwartet, bekommen {wert!r}") from e
+        if not math.isfinite(zahl):
+            raise Ungueltig(f"{feld.titel}: endliche Zahl erwartet")
         if feld.min is not None and zahl < feld.min:
             raise Ungueltig(f"{feld.titel}: mindestens {feld.min}{' ' + feld.einheit if feld.einheit else ''}")
         if feld.max is not None and zahl > feld.max:
             raise Ungueltig(f"{feld.titel}: höchstens {feld.max}{' ' + feld.einheit if feld.einheit else ''}")
         zahl *= feld.faktor
+        if feld.art == "int" and not zahl.is_integer():
+            raise Ungueltig(f"{feld.titel}: ganze Zahl erwartet")
         return int(zahl) if feld.art == "int" else zahl
 
     if feld.art == "bool":

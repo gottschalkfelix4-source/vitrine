@@ -211,3 +211,56 @@ def test_alles_zuruecksetzen(db: Session):
     assert len(einstellungen.zuruecksetzen(db)) == 3
     assert einstellungen.gespeicherte(db) == {}
     assert settings.av1_crf == 30 and settings.av1_preset == 6
+
+
+# --------------------------------------------------------- YouTube-Schutz
+
+
+@pytest.mark.parametrize("name,standard,minimum,maximum", [
+    ("youtube_anfragen_stunde", 100, 1, 10000),
+    ("youtube_anfragen_tag", 1000, 1, 100000),
+    ("youtube_videos_stunde", 10, 1, 1000),
+    ("youtube_videos_tag", 100, 1, 10000),
+    ("youtube_anfrage_abstand", 5.0, 0.1, 120),
+])
+def test_youtube_schutz_ist_sichtbar_validiert_und_sofort_aenderbar(db, name, standard, minimum, maximum):
+    feld = next(f for f in einstellungen.lesen(db) if f["name"] == name)
+    assert feld["gruppe"] == "YouTube-Schutz"
+    assert feld["standard"] == standard
+    assert feld["min"] == minimum and feld["max"] == maximum
+    for wert in (minimum, maximum):
+        einstellungen.schreiben(db, {name: wert})
+        assert getattr(settings, name) == wert
+    for wert in (minimum - 1, maximum + 1, float("nan"), float("inf")):
+        with pytest.raises(einstellungen.Ungueltig):
+            einstellungen.schreiben(db, {name: wert})
+        assert getattr(settings, name) == maximum
+    einstellungen.zuruecksetzen(db, [name])
+    assert getattr(settings, name) == standard
+
+
+def test_videostart_budget_ist_ganzzahlig_und_speichert_nicht_teilweise(db):
+    with pytest.raises(einstellungen.Ungueltig, match="ganze Zahl"):
+        einstellungen.schreiben(db, {"youtube_anfragen_stunde": 80, "youtube_videos_stunde": 2.5})
+    assert einstellungen.gespeicherte(db) == {}
+    assert settings.youtube_anfragen_stunde == 100
+
+
+def test_vorsichtige_schlaf_defaults_bewahren_gespeicherte_werte(db):
+    assert Settings.model_fields["ytdlp_sleep_requests"].default == 2.0
+    assert Settings.model_fields["ytdlp_sleep_interval"].default == 5.0
+    assert Settings.model_fields["ytdlp_max_sleep_interval"].default == 10.0
+    for name, wert in {"ytdlp_sleep_requests": "0", "ytdlp_sleep_interval": "25", "ytdlp_max_sleep_interval": "30"}.items():
+        db.add(Setting(key=name, value=wert))
+    db.commit()
+    einstellungen.anwenden(db)
+    assert settings.ytdlp_sleep_requests == 0
+    assert settings.ytdlp_sleep_interval == 25
+    assert settings.ytdlp_max_sleep_interval == 30
+
+
+def test_youtube_budget_aus_umgebung_bleibt_nach_reset(db, monkeypatch):
+    monkeypatch.setenv("YTA_YOUTUBE_ANFRAGEN_STUNDE", "65")
+    einstellungen.schreiben(db, {"youtube_anfragen_stunde": 20})
+    einstellungen.zuruecksetzen(db, ["youtube_anfragen_stunde"])
+    assert settings.youtube_anfragen_stunde == 65

@@ -1,13 +1,10 @@
 """Mehrere WireGuard-Tunnel als Ausgaenge - und der Wechsel zwischen ihnen.
 
-Das Problem, das dieses Modul loest, ist nicht "Anonymitaet", sondern
-Bandbreite. YouTube zaehlt pro IP-Adresse: Als Gast liegt die Grenze bei rund
-300 Videos je Stunde, danach kommt "Sign in to confirm you're not a bot" und
-alles steht. Bei einem Erstbestand von tausenden Videos ist das der
-bestimmende Engpass - das Archiv wartet dann laenger, als es laedt.
-
-Vier Tunnel sind vier Adressen und damit grob das vierfache Budget. Faellt
-einer in die Sperre, wird nicht mehr angehalten, sondern gewechselt.
+Die Tunnel stellen die vom Nutzer eingerichteten Netzwege bereit. Eine
+bestimmte Downloadzahl oder Freigabe durch YouTube ist damit nicht verbunden:
+Mehrere Tunnel können dieselbe öffentliche Adresse teilen, und eine andere
+Adresse kann ebenfalls abgewiesen werden. Gemeldete Sperrpausen bleiben auch
+bei einem Tunnel-Neustart bestehen.
 
 Wie der Verkehr in den Tunnel kommt - und warum nicht mit wg-quick
 --------------------------------------------------------------------
@@ -475,12 +472,14 @@ def _durch_proxy(url: str, proxy: str | None, timeout: float = 12.0) -> str:
     spricht - und es ist derselbe Weg, den ein Download nimmt. Ein Test, der
     einen anderen Weg prueft als den spaeter benutzten, ist keiner.
     """
-    import yt_dlp
+    from app.services import ytdlp
 
     opts: dict[str, Any] = {"quiet": True, "no_warnings": True, "socket_timeout": timeout}
     if proxy:
         opts["proxy"] = proxy
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    with _werk:
+        ausgang_id = next((t.ausgang_id for t in _tunnel.values() if t.proxy == proxy), DIREKT)
+    with ytdlp._youtube_dl(opts, ausgang_id=ausgang_id) as ydl:
         antwort = ydl.urlopen(url)
         return antwort.read(256).decode("utf-8", "replace").strip()
 
@@ -629,7 +628,6 @@ def laden(db: Session, *, pruefen_nach_start: bool = True) -> None:
         for tid in list(_tunnel):
             if tid not in aktiv:
                 _beenden(_tunnel.pop(tid))
-                drosselung.entwarnung(f"tunnel-{tid}")
 
         neu: list[Tunnel] = []
         for tid, zeile in aktiv.items():
@@ -775,7 +773,6 @@ def entfernen(db: Session, tunnel_id: int) -> bool:
     for pfad in (_konfigpfad(tunnel_id), _laufkonfigpfad(tunnel_id)):
         with suppress(OSError):
             pfad.unlink(missing_ok=True)
-    drosselung.entwarnung(f"tunnel-{tunnel_id}")
     log.info("Tunnel %s entfernt", zeile.name)
     return True
 

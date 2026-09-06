@@ -3,13 +3,10 @@
 Drei getrennte Gruppen statt eines gemeinsamen Pools, weil die drei Arten von
 Arbeit voellig unterschiedliche Eigenschaften haben:
 
-*Netz* - Downloads und Kanalabgleiche. Muss schmal bleiben, weil YouTube pro
-IP-Adresse drosselt und nicht pro Prozess; als Gast liegt die Grenze bei rund
-300 Videos je Stunde. Mehr Straenge machen nicht schneller fertig, sondern
-voruebergehend gesperrt. Die einzige Ausnahme sind mehrere Adressen: Jeder
-Strang holt sich vor dem Auftrag einen freien Ausgang - die eigene Leitung
-oder einen WireGuard-Tunnel -, und mit vier Tunneln sind vier parallele
-Downloads tatsaechlich vier getrennte Budgets statt eines geteilten.
+*Netz* - Downloads und Kanalabgleiche. Alle Straenge teilen ein vorsichtiges
+Anfrage- und Videostartbudget, unabhaengig von ihren Ausgaengen. YouTube kann
+eine Adresse, ein Konto oder eine Sitzung abweisen. Mehr Tunnel erhoehen daher
+nicht die Quote und heben eine gemeinsame Schutzpause nicht auf.
 
 *Vorbereitung* - Jemand sitzt davor und wartet auf sein Video. Braucht einen
 eigenen Strang, sonst steht die Wiedergabe hinter einer stundenlangen
@@ -34,7 +31,7 @@ from dataclasses import dataclass
 from app.config import settings
 from app.db import session_scope
 from app.models import JobType
-from app.services import abbruch, jobs, pause, vpn
+from app.services import abbruch, anfragelimit, jobs, pause, vpn, ytdlp
 from app.services.ausgang import Ausgang
 
 log = logging.getLogger(__name__)
@@ -226,13 +223,25 @@ class Arbeiterwerk:
             # 1800 wartenden Videos brennt eine einzige Sperre binnen Minuten
             # die ganze Warteschlange ab, und jeder Versuch verlaengert sie.
             #
-            # Gefragt wird nach einem freien AUSGANG, nicht nach einer Pause:
-            # Mit mehreren WireGuard-Tunneln heisst "einer ist gesperrt" nicht
-            # mehr "es geht nichts". Der Strang bekommt dann den naechsten
-            # freien und arbeitet weiter; erst wenn keiner mehr frei ist, wird
-            # gewartet.
+            # Erst das gemeinsame Budget pruefen, dann einen freien Ausgang
+            # waehlen. Ein anderer Tunnel umgeht die globale Schutzpause nicht.
             ausgang = None
+            typen = gruppe.typen
             if gruppe.netz:
+                rest_global = anfragelimit.wartezeit(nur_anfragen=True)
+                if rest_global > 0:
+                    if not pausiert:
+                        log.info("[%s] Strang %d wartet %.0f Minuten auf das gemeinsame YouTube-Budget", gruppe.name, nummer + 1, rest_global / 60)
+                        pausiert = True
+                    self._stop.wait(min(rest_global, DROSSEL_TAKT_S))
+                    continue
+                # Ein erschöpftes Videostartbudget sperrt keine sparsamen
+                # Kanal-/RSS-Abgleiche, solange deren Anfragebudget frei ist.
+                if anfragelimit.wartezeit() > 0:
+                    typen = [typ for typ in typen if typ not in {JobType.VIDEO_ARCHIVE, JobType.VIDEO_UPGRADE}]
+                    if not typen:
+                        self._stop.wait(DROSSEL_TAKT_S)
+                        continue
                 ausgang = vpn.waehlen()
                 if ausgang is None:
                     # Zwei verschiedene Lagen, die nicht zu verwechseln sind:
@@ -266,7 +275,7 @@ class Arbeiterwerk:
                     pausiert = False
             try:
                 with session_scope() as db:
-                    job = jobs.claim_next(db, gruppe.typen)
+                    job = jobs.claim_next(db, typen)
                     if job is None:
                         # Auch bei einer unbefristeten manuellen Pause bleibt
                         # der Strang erreichbar. Waehrend des Wartens keine
@@ -310,6 +319,11 @@ class Arbeiterwerk:
                             gruppe.name, job.type, job.target_id or "",
                         )
                         return
+                    except (anfragelimit.Pause, ytdlp.Gedrosselt) as e:
+                        # Sicherheitsnetz fuer kuenftige Netz-Bearbeiter:
+                        # eine Schutzpause ist weder ein Fehler noch ein Retry.
+                        db.rollback()
+                        jobs.unterbrochen(db, job, ytdlp.pausenhinweis(e))
                     except Exception:
                         # Der Bearbeiter hat den Auftrag bereits als gescheitert
                         # vermerkt; hier geht es nur noch darum, den Strang am

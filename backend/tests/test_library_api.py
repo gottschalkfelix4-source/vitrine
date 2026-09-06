@@ -678,6 +678,23 @@ def test_aktive_auftraege_leer(umgebung):
     assert antwort["drosselung"]["pausiert"] is False
 
 
+def test_aktive_auftraege_zeigen_budget_ohne_unbekannte_zaehler_zu_null_zu_machen(umgebung, monkeypatch):
+    client, _ = umgebung
+    budget = {
+        "pausiert": True, "rest_s": 60, "bis": None,
+        "grund": "Der YouTube-Schutz kann seinen Zustand gerade nicht speichern.",
+        "anfragen_stunde": None, "anfragen_tag": None, "videos_stunde": None, "videos_tag": None,
+        "limit_anfragen_stunde": 100, "limit_anfragen_tag": 1000,
+        "limit_videos_stunde": 10, "limit_videos_tag": 100,
+        "medienanfragen_tag": None, "reduziert": False,
+    }
+    monkeypatch.setattr(library.anfragelimit, "zustand", lambda: budget)
+    antwort = client.get("/api/jobs/aktiv")
+    assert antwort.status_code == 200
+    assert antwort.json()["anfragelimit"] == budget
+    assert antwort.json()["pause"]["aktiv"] is False
+
+
 def test_alle_gescheiterten_auf_einmal_wiederholen(umgebung):
     """Nach einer Sperre durch YouTube stehen Dutzende Auftraege rot in der
     Liste, alle mit demselben Fehler. Sie einzeln anzuklicken ist keine

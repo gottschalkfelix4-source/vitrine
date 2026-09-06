@@ -17,17 +17,19 @@ import logging
 import re
 import unicodedata
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
 import yt_dlp
-from yt_dlp.utils import UnsupportedError, YoutubeDLError
+from yt_dlp.utils import DownloadCancelled, UnsupportedError, YoutubeDLError
 
 from app.config import settings
-from app.services import abbruch, ausgang, cookies
+from app.services import abbruch, anfragelimit, ausgang, cookies, drosselung
 
 log = logging.getLogger(__name__)
 
@@ -130,18 +132,16 @@ class VideoUnavailable(YtdlpError):
 
 
 class Gedrosselt(YtdlpError):
-    """YouTube weist die IP-Adresse ab - kein Fehler dieses Videos.
+    """YouTube weist weitere Anfragen ab - kein Fehler dieses Videos.
 
     Die bekannteste Auspraegung ist "Sign in to confirm you're not a bot",
-    daneben HTTP 429. Beides gilt der Adresse, nicht dem Video: Das naechste
-    Video traefe auf dieselbe Wand, und jeder weitere Versuch verlaengert die
-    Sperre eher, als dass er sie loest.
+    daneben HTTP 429 und "try again later". Die Abweisung kann die Adresse,
+    das Konto oder die Sitzung betreffen. Weitere Versuche ueber andere
+    Tunnel koennten dieselbe Sperre verlaengern.
 
     Deshalb ist das ausdruecklich kein Fehlschlag. Der Auftrag geht unbewertet
-    zurueck in die Warteschlange, und der benutzte Ausgang pausiert - siehe
-    :mod:`app.services.drosselung`. Gibt es weitere Ausgaenge (WireGuard-
-    Tunnel), laeuft das Archiv ueber die naechste Adresse weiter; erst wenn
-    keiner mehr frei ist, steht es.
+    zurueck in die Warteschlange. Der benutzte Ausgang und das gemeinsame
+    Anfragebudget pausieren, unabhaengig von der Zahl eingerichteter Tunnel.
     """
 
 
@@ -153,7 +153,12 @@ class Gedrosselt(YtdlpError):
 #: insbesondere nicht auf "Sign in to confirm your age" herein - eine
 #: Altersschranke ist eine Sache des Kontos, keine Drosselung, und wuerde von
 #: einer Pause kein Stueck besser.
-_DROSSEL_MARKER = ("not a bot", "http error 429", "too many requests")
+_DROSSEL_MARKER = (
+    "not a bot", "http error 429", "too many requests",
+    "this content isn't available, try again later",
+    "this content isn’t available, try again later",
+    "this content is not available, try again later",
+)
 
 #: Textmerkmale eines endgueltig verschwundenen Videos.
 _WEG_MARKER = ("private", "unavailable", "removed", "deleted", "terminated")
@@ -181,6 +186,120 @@ def _einordnen(e: YoutubeDLError) -> YtdlpError:
     return _fehlerklasse(str(e))(str(e))
 
 
+class _Schutzabbruch(DownloadCancelled):
+    """yt-dlp laesst DownloadCancelled auch mit ignoreerrors unveraendert durch."""
+
+    def __init__(self, grund: Exception):
+        super().__init__(str(grund))
+        self.grund = grund
+
+
+def _abweisung_melden(grund: str, ausgang_id: str | None = None, *, retry_after_s: float | None = None) -> None:
+    """Ein gemeinsamer Meldepunkt vor dem Verlassen der yt-dlp-Grenze."""
+    drosselung.melden(grund, ausgang=ausgang_id)
+    if retry_after_s is None:
+        anfragelimit.abweisung()
+    else:
+        anfragelimit.abweisung(retry_after_s=retry_after_s)
+
+
+def _retry_after(response: Any) -> float | None:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        headers = getattr(getattr(response, "response", None), "headers", None)
+    if headers is None:
+        return None
+    value = headers.get("Retry-After") or headers.get("retry-after")
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if value.isascii() and value.isdigit():
+        try:
+            return float(int(value))
+        except (ValueError, OverflowError):
+            return None
+    try:
+        date = parsedate_to_datetime(value)
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=UTC)
+        return max(0.0, (date - datetime.now(UTC)).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def pausenhinweis(grund: Gedrosselt | anfragelimit.Pause) -> str:
+    if isinstance(grund, anfragelimit.Pause):
+        return str(grund)
+    return drosselung.hinweis(max(drosselung.wartezeit(), anfragelimit.wartezeit()))
+
+
+def _youtube_anfrage(url: str) -> bool:
+    try:
+        host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    return any(host == domain or host.endswith("." + domain) for domain in (
+        "youtube.com", "youtube-nocookie.com", "youtu.be", "youtubei.googleapis.com", "googlevideo.com", "ytimg.com", "ggpht.com",
+    ))
+
+
+def _vor_anfrage(url: str, ausgang_id: str) -> None:
+    abbruch.pruefen()
+    # Eine YouTube-Pause darf die unabhaengige Zustandspruefung eines Tunnels
+    # nicht blockieren und ihn dadurch faelschlich als ausgefallen markieren.
+    if not _youtube_anfrage(url):
+        return
+    rest = drosselung.wartezeit(ausgang_id)
+    if rest > 0:
+        raise anfragelimit.Pause(rest, drosselung.hinweis(rest, ausgang=ausgang_id))
+    anfragelimit.vor_anfrage(url)
+    # Waehrend des globalen Mindestabstands kann ein anderer Strang eine
+    # Abweisung melden. Vor dem echten Socket-Zugriff erneut nachsehen.
+    rest = drosselung.wartezeit(ausgang_id)
+    if rest > 0:
+        raise anfragelimit.Pause(rest, drosselung.hinweis(rest, ausgang=ausgang_id))
+
+
+def _kontrollieren(ydl: Any, *, ausgang_id: str) -> None:
+    """Nur diese Instanz umschliessen; Fragmentthreads behalten ihren Ausgang."""
+    original = getattr(ydl, "urlopen", None)
+    if original is None:
+        return  # Kleine Extraktor-Doubles in Tests haben keinen Netzwerkzugriff.
+
+    def kontrolliert(request: Any, *args: Any, **kwargs: Any):
+        url = request if isinstance(request, str) else getattr(request, "url", None) or getattr(request, "full_url", "")
+        try:
+            _vor_anfrage(url, ausgang_id)
+            try:
+                response = original(request, *args, **kwargs)
+            except Exception as error:
+                if _youtube_anfrage(url) and (getattr(error, "status", None) == 429 or getattr(error, "code", None) == 429):
+                    _abweisung_melden("HTTP 429: YouTube weist weitere Anfragen ab", ausgang_id, retry_after_s=_retry_after(error))
+                    raise anfragelimit.Pause(max(drosselung.wartezeit(ausgang_id), anfragelimit.wartezeit())) from error
+                raise
+            if _youtube_anfrage(url) and getattr(response, "status", None) == 429:
+                response.close()
+                _abweisung_melden("HTTP 429: YouTube weist weitere Anfragen ab", ausgang_id, retry_after_s=_retry_after(response))
+                raise anfragelimit.Pause(max(drosselung.wartezeit(ausgang_id), anfragelimit.wartezeit()))
+            return response
+        except (anfragelimit.Pause, abbruch.Abgebrochen) as error:
+            raise _Schutzabbruch(error) from error
+
+    ydl.urlopen = kontrolliert
+
+
+@contextmanager
+def _youtube_dl(opts: dict[str, Any], *, ausgang_id: str | None = None):
+    """Zentrale Netzwerkgrenze, ohne globale Aenderung an yt_dlp."""
+    kennung = ausgang.aktiv().id if ausgang_id is None else ausgang_id
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            _kontrollieren(ydl, ausgang_id=kennung)
+            yield ydl
+    except _Schutzabbruch as error:
+        raise error.grund from error
+
+
 @dataclass(slots=True)
 class DownloadResult:
     path: Path
@@ -203,7 +322,7 @@ def _base_opts() -> dict[str, Any]:
         "extractor_retries": 3,
         # Entschaerft das Rate-Limiting - YouTube sperrt sonst zeitweise die IP.
         "sleep_interval": settings.ytdlp_sleep_interval,
-        "max_sleep_interval": settings.ytdlp_max_sleep_interval,
+        "max_sleep_interval": max(settings.ytdlp_sleep_interval, settings.ytdlp_max_sleep_interval),
     }
     # Erst pruefen, dann setzen: yt-dlp bricht bei einem unlesbaren cookiefile
     # jeden Aufruf ab, auch das blosse Auflisten eines Kanals. Ein Tippfehler im
@@ -266,9 +385,10 @@ class _Mitschrift:
     #: Die ersten paar sagen dasselbe wie alle.
     GRENZE = 5
 
-    def __init__(self) -> None:
+    def __init__(self, ausgang_id: str | None = None) -> None:
         self.fehler: list[str] = []
         self.gezaehlt = 0
+        self.ausgang_id = ausgang.aktiv().id if ausgang_id is None else ausgang_id
 
     def debug(self, msg: str) -> None:  # pragma: no cover - Rauschen
         pass
@@ -280,6 +400,9 @@ class _Mitschrift:
         log.debug("yt-dlp: %s", msg)
 
     def error(self, msg: str) -> None:
+        if _fehlerklasse(str(msg)) is Gedrosselt:
+            _abweisung_melden(str(msg), self.ausgang_id)
+            raise _Schutzabbruch(Gedrosselt(str(msg)))
         self.gezaehlt += 1
         if len(self.fehler) < self.GRENZE:
             self.fehler.append(str(msg))
@@ -292,10 +415,11 @@ class _Mitschrift:
 
 
 def _extract(url: str, opts: dict[str, Any]) -> dict[str, Any]:
-    mitschrift = _Mitschrift()
+    kennung = ausgang.aktiv().id
+    mitschrift = _Mitschrift(kennung)
     opts = opts | {"logger": mitschrift}
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with _youtube_dl(opts, ausgang_id=kennung) as ydl:
             info = ydl.extract_info(url, download=False)
             # Entfernt interne Objekte und macht das Ergebnis JSON-tauglich -
             # es landet unveraendert im Buendel.
@@ -308,7 +432,10 @@ def _extract(url: str, opts: dict[str, Any]) -> dict[str, Any]:
         # decken nicht alles ab. Ein leerer oder falscher Cookie-Pfad etwa
         # wirft CookieLoadError, und der kam ungefiltert als Serverfehler beim
         # Nutzer an, statt als lesbare Meldung.
-        raise _einordnen(e) from e
+        fehler = _einordnen(e)
+        if isinstance(fehler, Gedrosselt):
+            _abweisung_melden(str(fehler), kennung)
+        raise fehler from e
     if info is None:
         # Hierher fuehrt der Weg nur mit ``ignoreerrors``: yt-dlp hat den Grund
         # ins Log geschrieben statt zu werfen. Ohne den Mitschnitt stuende hier
@@ -445,6 +572,8 @@ def list_channel_playlists(channel_url: str) -> list[ListedPlaylist]:
     opts = _base_opts() | {"extract_flat": True}
     try:
         info = _extract(url, opts)
+    except Gedrosselt:
+        raise
     except YtdlpError as e:
         log.info("keine Playlists fuer %s: %s", channel_url, e)
         return []
@@ -526,6 +655,7 @@ def download_video(
         "subtitlesformat": "vtt",
         "progress_hooks": [_hook],
         "postprocessors": [],
+        "logger": _Mitschrift(),
     }
     if settings.sponsorblock:
         # Nur markieren, nicht schneiden: Ein Archiv soll das Original bewahren.
@@ -535,8 +665,13 @@ def download_video(
             {"key": "SponsorBlock", "categories": ["sponsor", "selfpromo", "interaction"], "when": "after_filter"}
         )
 
+    kennung = ausgang.aktiv().id
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with _youtube_dl(opts, ausgang_id=kennung) as ydl:
+            rest = drosselung.wartezeit(kennung)
+            if rest > 0:
+                raise anfragelimit.Pause(rest, drosselung.hinweis(rest, ausgang=kennung))
+            anfragelimit.vor_video()
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
             # Zwingend: Das Ergebnis eines Downloads enthaelt lebende
             # Python-Objekte - unter "__postprocessors" etwa die
@@ -551,7 +686,10 @@ def download_video(
         # wuerde der Auftrag als gescheitert vermerkt statt fortgesetzt.
         raise
     except YoutubeDLError as e:
-        raise _einordnen(e) from e
+        fehler = _einordnen(e)
+        if isinstance(fehler, Gedrosselt):
+            _abweisung_melden(str(fehler), kennung)
+        raise fehler from e
     if info is None:
         raise YtdlpError(f"Download von {video_id} lieferte nichts")
 
@@ -840,37 +978,42 @@ def _oeffnen(url: str, timeout: float):
     jeher letzteres. Ohne die Umsetzung schluepfte eine Stoerung im Tunnel an
     jeder Behandlung vorbei und liesse den Kanalabgleich als Serverfehler enden.
     """
+    kennung = ausgang.aktiv().id
     weg = ausgang.aktiv().proxy
     if weg is None:
         import urllib.request
 
-        return urllib.request.urlopen(url, timeout=timeout)
+        _vor_anfrage(url, kennung)
+        try:
+            return urllib.request.urlopen(url, timeout=timeout)
+        except OSError as error:
+            if _youtube_anfrage(url) and getattr(error, "code", None) == 429:
+                _abweisung_melden("HTTP 429: YouTube weist weitere Anfragen ab", kennung, retry_after_s=_retry_after(error))
+                raise anfragelimit.Pause(max(drosselung.wartezeit(kennung), anfragelimit.wartezeit())) from error
+            raise
 
     opts = {"quiet": True, "no_warnings": True, "socket_timeout": timeout, "proxy": weg}
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with _youtube_dl(opts, ausgang_id=kennung) as ydl:
             return ydl.urlopen(url)
     except YoutubeDLError as e:
+        if _fehlerklasse(str(e)) is Gedrosselt:
+            _abweisung_melden(str(e), kennung)
+            raise Gedrosselt(str(e)) from e
         raise OSError(str(e)) from e
 
 
 def peek_recent(channel_id: str, timeout: float = 15.0) -> list[ListedVideo]:
     """Holt die juengsten Videos eines Kanals ueber den RSS-Feed.
 
-    Der eigentliche Kniff am Kanalabgleich: Dieser Aufruf geht nicht durch
-    yt-dlp, kostet keinen der knappen YouTube-Requests und zaehlt nicht gegen
-    das Drosselungsbudget von rund 300 Videos je Stunde. Damit kann der Dienst
-    stuendlich bei jedem abonnierten Kanal nachsehen, statt nur ein- bis zweimal
-    am Tag - und der teure Vollabgleich laeuft nur noch woechentlich.
+    Der Feed spart den teureren Vollabgleich, ist aber selbst eine YouTube-
+    Anfrage und wird durch dieselbe globale Begrenzung gezaehlt und verteilt.
 
     Der Feed liefert allerdings nur etwa 15 Eintraege und keine Dauer. Er
     ersetzt den Vollabgleich also nicht, er verschiebt ihn nur nach hinten.
 
-    Auch dieser Abruf geht durch den Ausgang des Strangs. Er kostet zwar kein
-    Budget, aber er verraet dieselbe Adresse - ein RSS-Abruf im Stundentakt von
-    der Hausleitung waehrend die Downloads durch Tunnel laufen, waere ein
-    seltsames Muster und ein unnoetiger Widerspruch zur Einstellung "nur ueber
-    Tunnel".
+    Auch dieser Abruf benutzt den Ausgang des Strangs und respektiert dessen
+    Schutzpause.
     """
     import urllib.error
     import urllib.request
@@ -889,6 +1032,7 @@ def peek_recent(channel_id: str, timeout: float = 15.0) -> list[ListedVideo]:
             # Selbst der RSS-Feed wird abgewiesen. Dann ist die Adresse
             # gesperrt und nicht der Feed kaputt - und der Abgleich soll
             # warten statt es im Minutentakt erneut zu versuchen.
+            _abweisung_melden(meldung)
             raise Gedrosselt(meldung) from e
         raise YtdlpError(meldung) from e
 

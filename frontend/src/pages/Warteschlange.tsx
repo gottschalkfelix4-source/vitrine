@@ -8,7 +8,7 @@ import { AUFTRAG_TEXT, prozent, vorZeit, wartedauer } from "../lib/format";
 import { Icon } from "../components/Icons";
 import { DownloadPause } from "../components/DownloadPause";
 import { useAdmin } from "../components/Anmeldung";
-import type { WarteschlangenPause } from "../lib/api";
+import type { Anfragelimit, WarteschlangenPause } from "../lib/api";
 
 /** Laufende Auftraege aendern sich staendig - hier lohnt haeufiges Auffrischen. */
 const INTERVALL = 3000;
@@ -20,6 +20,37 @@ const STATUS_TEXT: Record<string, string> = {
   done: "erledigt",
   cancelled: "abgebrochen",
 };
+
+function YouTubeSchutz({ zustand, weiterePause }: { zustand: Anfragelimit; weiterePause: boolean }) {
+  const zahl = (wert: number | null) => wert === null ? "—" : wert.toLocaleString("de-DE");
+  return (
+    <section className="youtube-schutz" aria-labelledby="youtube-schutz-titel">
+      <h2 id="youtube-schutz-titel">YouTube-Schutz</h2>
+      {zustand.pausiert ? <p className="youtube-schutz-pause" role="status">
+        <strong>{zustand.bis ? "Vorsorgliche Wartezeit · noch " : "Schutzpause · nächste Prüfung in "}{wartedauer(zustand.rest_s)}</strong>
+        {zustand.grund ? <>. {zustand.grund}</> : null}
+        {weiterePause ? " Eine weitere Pause bleibt zusätzlich wirksam." : " Danach wird die Freigabe erneut geprüft."}
+      </p> : null}
+      {zustand.reduziert ? <p>Die Budgets sind vorübergehend reduziert. Die Tabelle zeigt die aktuell wirksamen Grenzen.</p> : null}
+      {zustand.anfragen_stunde === null ? <p>Die Zähler sind gerade nicht verfügbar. Downloads warten, bis der Schutz seinen Zustand wieder speichern kann.</p> : null}
+      <table className="youtube-schutz-budgets">
+        <caption>Verbraucht / Budget · gemeinsam für alle Tunnel und Worker dieser Instanz</caption>
+        <thead><tr><th scope="col">Zähler</th><th scope="col">Letzte 60 Minuten</th><th scope="col">Letzte 24 Stunden</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Webseiten- und Player-Anfragen</th>
+            <td>{zahl(zustand.anfragen_stunde)} / {zahl(zustand.limit_anfragen_stunde)}</td>
+            <td>{zahl(zustand.anfragen_tag)} / {zahl(zustand.limit_anfragen_tag)}</td></tr>
+          <tr><th scope="row">Videostarts</th>
+            <td>{zahl(zustand.videos_stunde)} / {zahl(zustand.limit_videos_stunde)}</td>
+            <td>{zahl(zustand.videos_tag)} / {zahl(zustand.limit_videos_tag)}</td></tr>
+        </tbody>
+      </table>
+      <p>Die Zeitfenster sind gleitend. Videostarts zählen Versuche einschließlich Wiederholungen.</p>
+      <p>Medienanfragen in den letzten 24 Stunden: {zahl(zustand.medienanfragen_tag)}. Mediensegmente werden separat gezählt.</p>
+      <p>Die Standards sind vorsichtige eigene Startwerte, keine garantierten YouTube-Grenzen. <Link to="/einstellungen">Budgets in den Einstellungen ändern</Link></p>
+    </section>
+  );
+}
 
 export function Warteschlangeseite() {
   const admin = useAdmin();
@@ -75,6 +106,7 @@ export function Warteschlangeseite() {
         aktivNeuLaden();
       }} /> : aktiv?.pause?.aktiv ? <Hinweis>Downloads sind pausiert.</Hinweis> : null}
       {aktivFehler ? <Fehler text={`Der Pausenstatus konnte nicht aktualisiert werden: ${aktivFehler}`} erneut={aktivNeuLaden} /> : null}
+      {aktiv?.anfragelimit ? <YouTubeSchutz zustand={aktiv.anfragelimit} weiterePause={Boolean(pause?.aktiv || drosselung?.pausiert)} /> : null}
       <div className="chips" aria-label="Aufträge filtern">
         {[["alle", "Alle"], ["aktiv", "In Arbeit"], ["failed", "Fehlgeschlagen"], ["done", "Abgeschlossen"], ["cancelled", "Abgebrochen"]].map(([wert, text]) => (
           <button key={wert} className="chip" data-aktiv={filter === wert} aria-pressed={filter === wert}
@@ -102,23 +134,15 @@ export function Warteschlangeseite() {
         </Hinweis>
       ) : null}
 
-      {/*
-        Erklärung statt roter Liste. "Sign in to confirm you're not a bot" ist
-        keine Auskunft über das Video, sondern über unsere IP-Adresse - und die
-        naheliegende Reaktion (alles sofort nochmal) ist genau die falsche: Sie
-        verlängert die Sperre. Deshalb steht hier, was passiert und wann es von
-        selbst weitergeht.
-      */}
       {drosselung?.pausiert ? (
         <Hinweis art="arbeit">
           <strong>YouTube weist gerade ab – Downloads pausieren.</strong>
           <div style={{ color: "var(--text-gedaempft)", marginTop: 4 }}>
             {pause?.aktiv
               ? `Die automatische Sperrpause läuft noch ${wartedauer(drosselung.rest_s)}. Downloads starten erst, wenn zusätzlich die manuelle Pause beendet ist.`
-              : `Es geht frühestens in ${wartedauer(drosselung.rest_s)} von selbst weiter; nichts geht verloren.`}{" "}
-            Die Sperre gilt der IP-Adresse, nicht den Videos. Tritt sie oft auf, helfen weniger
-            parallele Downloads, eine Pause zwischen den Anfragen oder eine Cookie-Datei aus
-            einem Wegwerf-Konto.
+              : `Die automatische Sperrpause endet frühestens in ${wartedauer(drosselung.rest_s)}. Anschließend werden auch die YouTube-Budgets erneut geprüft.`}{" "}
+            YouTube hat Anfragen abgewiesen. Die Meldung allein belegt keine IP-Sperre.
+            Vermeide sofortige Wiederholungen und prüfe die Einstellungen unter YouTube-Schutz.
           </div>
         </Hinweis>
       ) : null}

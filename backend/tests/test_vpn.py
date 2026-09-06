@@ -1,9 +1,7 @@
 """Die WireGuard-Tunnel: Konfiguration lesen, Ausgaenge waehlen, wechseln.
 
-Der Zweck der Funktion ist Bandbreite, nicht Verschleierung: YouTube zaehlt je
-IP-Adresse und laesst als Gast rund 300 Videos in der Stunde durch. Vier Tunnel
-sind vier Budgets - aber nur, wenn zwei Dinge stimmen, und beide werden hier
-geprueft:
+Die Tests prüfen die konfigurierten Netzwege und lokale Sperrregeln. Eine
+bestimmte Downloadmenge oder unabhängige YouTube-Budgets versprechen sie nicht.
 
 * Eine Konfiguration vom Anbieter muss ohne Nacharbeit angenommen werden, und
   eine kaputte muss beim Hochladen auffallen statt beim ersten Download.
@@ -138,7 +136,8 @@ Endpoint = 10.9.8.7:51820
 
 
 @pytest.fixture
-def sauber():
+def sauber(tmp_path, monkeypatch):
+    monkeypatch.setattr(vpn.settings, "data_dir", tmp_path)
     drosselung.zuruecksetzen()
     ausgang.zuruecksetzen()
     vpn._tunnel.clear()
@@ -466,3 +465,40 @@ def test_zwei_straenge_greifen_nicht_denselben_tunnel(sauber, monkeypatch):
     erster = vpn.waehlen()      # noch nicht belegt: der Auftrag wird gerade geholt
     zweiter = vpn.waehlen()
     assert erster.id != zweiter.id
+
+
+def test_tunnel_abschalten_und_healthcheck_heben_youtube_pause_nicht_auf(sauber, monkeypatch):
+    from unittest.mock import Mock
+
+    from tests.conftest import neue_sitzung
+
+    tunnel = _tunnel_vortaeuschen(1)[0]
+    tunnel.prozess = Mock()
+    tunnel.prozess.poll.return_value = None
+    tunnel.gestartet = True
+    drosselung.melden("Abweisung", "tunnel-1")
+    monkeypatch.setattr(vpn, "exit_ip_ermitteln", lambda _: "203.0.113.10")
+    assert vpn.pruefen(1)["erfolg"] is True
+    assert drosselung.wartezeit("tunnel-1") > 0
+    monkeypatch.setattr(vpn.settings, "vpn_aktiv", False)
+    monkeypatch.setattr(vpn, "_beenden", lambda _: None)
+    with neue_sitzung() as db:
+        vpn.laden(db, pruefen_nach_start=False)
+    assert not vpn._tunnel
+    drosselung.zuruecksetzen()
+    assert drosselung.wartezeit("tunnel-1") > 0
+
+
+def test_tunnel_entfernen_loescht_keine_bestehende_sperrfrist(sauber, monkeypatch):
+    from app.models import VpnTunnel
+    from tests.conftest import neue_sitzung
+
+    _tunnel_vortaeuschen(1)
+    monkeypatch.setattr(vpn, "_beenden", lambda _: None)
+    drosselung.melden("Abweisung", "tunnel-1")
+    with neue_sitzung() as db:
+        db.add(VpnTunnel(id=1, name="Test"))
+        db.commit()
+        assert vpn.entfernen(db, 1) is True
+    drosselung.zuruecksetzen()
+    assert drosselung.wartezeit("tunnel-1") > 0

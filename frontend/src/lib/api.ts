@@ -139,6 +139,24 @@ export interface WarteschlangenPause {
   laufend: number;
 }
 
+/** Vorsorgliche gemeinsame Budgets; keine Aussage über eine YouTube-Sperre. */
+export interface Anfragelimit {
+  pausiert: boolean;
+  rest_s: number;
+  bis: string | null;
+  grund: string | null;
+  anfragen_stunde: number | null;
+  anfragen_tag: number | null;
+  videos_stunde: number | null;
+  videos_tag: number | null;
+  limit_anfragen_stunde: number;
+  limit_anfragen_tag: number;
+  limit_videos_stunde: number;
+  limit_videos_tag: number;
+  medienanfragen_tag: number | null;
+  reduziert: boolean;
+}
+
 /**
  * Zustand der hinterlegten Cookie-Datei.
  *
@@ -481,6 +499,7 @@ export const api = {
       /** Wartende Aufträge je Art - ein Video erzeugt im Lauf seines Lebens mehrere. */
       nach_art: Record<string, number>;
       drosselung?: Drosselung;
+      anfragelimit?: Anfragelimit;
       pause: WarteschlangenPause;
       /** Wie viele Wege ins Netz es gibt und wie viele davon gerade frei sind. */
       ausgaenge?: { gesamt: number; frei: number };

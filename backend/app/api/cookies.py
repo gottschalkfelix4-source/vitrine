@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.models import Video, VideoStatus
-from app.services import cookies, drosselung, ytdlp
+from app.services import anfragelimit, cookies, drosselung, ytdlp
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/cookies", tags=["cookies"])
@@ -92,7 +92,8 @@ def probelauf(db: Session = Depends(get_db)) -> dict[str, Any]:
     nur eine verstuemmelte Formatauswahl liefern - dann sind 360p das Ergebnis,
     und man merkt es erst beim Zuschauen.
     """
-    rest = drosselung.wartezeit()
+    rest_global = anfragelimit.wartezeit(nur_anfragen=True)
+    rest = max(drosselung.wartezeit(), rest_global)
     if rest > 0:
         # Jetzt zu testen waere doppelt falsch: Das Ergebnis waere unabhaengig
         # von den Cookies ein Fehlschlag, und die Anfrage verlaengerte die
@@ -100,7 +101,7 @@ def probelauf(db: Session = Depends(get_db)) -> dict[str, Any]:
         return {
             "erfolg": False,
             "pausiert": True,
-            "meldung": drosselung.hinweis(rest),
+            "meldung": str(anfragelimit.Pause(rest)) if rest_global > 0 else drosselung.hinweis(rest),
         }
 
     video = db.scalar(
@@ -110,11 +111,12 @@ def probelauf(db: Session = Depends(get_db)) -> dict[str, Any]:
 
     try:
         info = ytdlp.fetch_video_info(video_id)
-    except ytdlp.Gedrosselt as e:
+    except anfragelimit.Pause as e:
+        return {"erfolg": False, "pausiert": True, "video_id": video_id, "meldung": str(e)}
+    except ytdlp.Gedrosselt:
         # Die aussagekraeftigste Antwort ueberhaupt: Mit diesen Cookies weist
         # YouTube uns weiterhin ab. Entweder sind sie rotiert, oder sie stammen
         # aus einer abgemeldeten Sitzung.
-        drosselung.melden(str(e))
         return {
             "erfolg": False,
             "video_id": video_id,

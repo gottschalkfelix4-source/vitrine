@@ -3,9 +3,8 @@
 Der Abgleich laeuft in zwei Geschwindigkeiten, weil YouTube-Requests knapp
 sind:
 
-*Schnellcheck* ueber den RSS-Feed. Geht an yt-dlp vorbei, zaehlt nicht gegen
-das Drosselungsbudget, liefert aber nur die juengsten ~15 Eintraege. Kann
-deshalb stuendlich laufen.
+*Schnellcheck* ueber den RSS-Feed. Eine budgetierte Anfrage liefert die
+juengsten ~15 Eintraege und spart viele Extraktorabrufe.
 
 *Vollabgleich* ueber die ``UU``-Uploads-Playlist. Teuer, dafuer vollstaendig.
 Laeuft selten.
@@ -38,7 +37,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import drosselung, jobs, ytdlp
+from app.services import anfragelimit, drosselung, jobs, ytdlp
 
 log = logging.getLogger(__name__)
 
@@ -254,7 +253,7 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
     voll = jobs.payload_of(job).get("voll", False)
 
     try:
-        # ---- Schnellcheck: kostet keinen yt-dlp-Request
+        # ---- Schnellcheck: eine budgetierte RSS-Anfrage
         jobs.fortschritt(db, job, 0.05, "Schnellcheck ueber RSS")
         neu_gesehen = 0
         try:
@@ -354,14 +353,14 @@ def kanal_abgleichen(db: Session, job: Job) -> None:
         drosselung.entwarnung()
         jobs.erledigt(db, job, f"{neu} neue Videos gefunden")
 
-    except ytdlp.Gedrosselt as e:
+    except (anfragelimit.Pause, ytdlp.Gedrosselt) as e:
         # Keine Auskunft ueber diesen Kanal, sondern ueber unsere IP-Adresse.
         # Der Abgleich wird unbewertet zurueckgelegt, und - entscheidend -
         # last_synced_at bleibt stehen: Ein halb gelesener Kanal darf nicht
         # als frisch abgeglichen gelten, sonst faellt er fuer Stunden aus dem
         # Rhythmus und seine neuen Videos bleiben liegen.
         db.rollback()
-        jobs.unterbrochen(db, job, drosselung.hinweis(drosselung.melden(str(e))))
+        jobs.unterbrochen(db, job, ytdlp.pausenhinweis(e))
     except Exception as e:
         # jobs.gescheitert setzt die Sitzung selbst zurueck - noetig, weil ein
         # Schreibfehler sie sonst blockiert und die Fehlermeldung verschluckt.
@@ -382,15 +381,19 @@ def playlist_abgleichen(db: Session, job: Job) -> None:
     if kanal is None:
         raise ValueError(f"Playlist {playlist_id} hat keinen Kanal")
 
-    _sammlung_abgleichen(
-        db, kanal,
-        playlist_id=playlist_id,
-        titel=liste.title,
-        art=liste.kind,
-        url=ytdlp.playlist_url(playlist_id),
-        einreihen=jobs.payload_of(job).get("einreihen", False),
-    )
-    jobs.erledigt(db, job, "abgeglichen")
+    try:
+        _sammlung_abgleichen(
+            db, kanal,
+            playlist_id=playlist_id,
+            titel=liste.title,
+            art=liste.kind,
+            url=ytdlp.playlist_url(playlist_id),
+            einreihen=jobs.payload_of(job).get("einreihen", False),
+        )
+        jobs.erledigt(db, job, "abgeglichen")
+    except (anfragelimit.Pause, ytdlp.Gedrosselt) as e:
+        db.rollback()
+        jobs.unterbrochen(db, job, ytdlp.pausenhinweis(e))
 
 
 def faellige_kanaele_einreihen() -> int:

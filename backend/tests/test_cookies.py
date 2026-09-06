@@ -289,6 +289,7 @@ def test_probelauf_meldet_fortbestehende_abweisung(client, monkeypatch):
     c, _ = client
 
     def abgewiesen(_vid):
+        ytdlp._abweisung_melden("Sign in to confirm you're not a bot")
         raise ytdlp.Gedrosselt("Sign in to confirm you're not a bot")
 
     monkeypatch.setattr(ytdlp, "fetch_video_info", abgewiesen)

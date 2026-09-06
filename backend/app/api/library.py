@@ -10,6 +10,7 @@ will, was ihm fehlt, muss es sehen koennen.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 from pathlib import Path
@@ -36,7 +37,7 @@ from app.models import (
     VideoStatus,
     utcnow,
 )
-from app.services import cache, drosselung, jobs, paths, pause, vpn, ytdlp
+from app.services import anfragelimit, cache, drosselung, jobs, paths, pause, vpn, ytdlp
 from app.services import suche as volltext
 
 log = logging.getLogger(__name__)
@@ -243,6 +244,11 @@ def kanal_anlegen(daten: KanalAnlegen, db: Session = Depends(get_db)) -> KanalKu
         # Auch an der Schreibgrenze pruefen: Extraktor-Ergebnisse sind externe
         # Daten, und die Kennung wird spaeter als Verzeichnisname verwendet.
         ytdlp.validate_channel_id(info.id)
+    except anfragelimit.Pause as e:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(e), headers={"Retry-After": str(max(1, math.ceil(e.rest_s)))}) from e
+    except ytdlp.Gedrosselt as e:
+        rest = max(drosselung.wartezeit(), anfragelimit.wartezeit())
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, ytdlp.pausenhinweis(e), headers={"Retry-After": str(max(1, math.ceil(rest)))}) from e
     except ytdlp.YtdlpError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Kanal nicht lesbar: {e}") from e
 
@@ -1020,6 +1026,7 @@ def laufende_auftraege(db: Session = Depends(get_db), admin: bool = Depends(admi
     return {
         **result,
         "drosselung": drosselung.zustand(ids),
+        "anfragelimit": anfragelimit.zustand(),
         "ausgaenge": {
             "gesamt": len(ids),
             "frei": len(drosselung.frei(ids)),

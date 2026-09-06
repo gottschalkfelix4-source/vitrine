@@ -165,13 +165,20 @@ class Settings(BaseSettings):
     #: Bandbreitenlimit je Download, z.B. "5M". Leer = unbegrenzt.
     ytdlp_ratelimit: str | None = None
     #: Wartezeit zwischen Videos, entschaerft Rate-Limiting.
-    ytdlp_sleep_interval: float = 2.0
-    ytdlp_max_sleep_interval: float = 6.0
-    #: Wartezeit zwischen einzelnen HTTP-Anfragen an YouTube, nicht nur zwischen
-    #: Videos. Der wirksamere Hebel gegen "Sign in to confirm you're not a bot":
-    #: Ein einziger Download stellt ein Dutzend Anfragen, und gezaehlt werden
-    #: die, nicht die Videos. 0 = aus.
-    ytdlp_sleep_requests: float = 0.0
+    ytdlp_sleep_interval: float = 5.0
+    ytdlp_max_sleep_interval: float = 10.0
+    #: Zusaetzliche yt-dlp-Pause zwischen Extraktor-Anfragen. 0 = aus.
+    #: Das globale Anfragenbudget bleibt unabhaengig davon aktiv.
+    ytdlp_sleep_requests: float = 2.0
+    #: Eigene vorsichtige Startwerte, keine garantierten YouTube-Grenzen.
+    #: Gleitende Fenster gelten gemeinsam fuer alle Tunnel und Worker dieser
+    #: Instanz. Mediensegmente werden getrennt von Webseiten/Playern gezaehlt.
+    youtube_anfragen_stunde: int = Field(default=100, ge=1, le=10000)
+    youtube_anfragen_tag: int = Field(default=1000, ge=1, le=100000)
+    #: Videostarts sind Versuche, einschliesslich Wiederholungen.
+    youtube_videos_stunde: int = Field(default=10, ge=1, le=1000)
+    youtube_videos_tag: int = Field(default=100, ge=1, le=10000)
+    youtube_anfrage_abstand: float = Field(default=5.0, ge=0.1, le=120, allow_inf_nan=False)
     #: Welche YouTube-Clients yt-dlp anfragen soll, z.B. "tv,web_safari".
     #: Leer = yt-dlp entscheidet selbst, und das ist der Normalfall.
     #:
@@ -192,10 +199,8 @@ class Settings(BaseSettings):
     #: Hauptschalter fuer die WireGuard-Tunnel. Aus heisst: genau ein Ausgang,
     #: naemlich die eigene Leitung - der Zustand vor dieser Funktion.
     #:
-    #: Der Sinn ist Bandbreite, nicht Verschleierung: YouTube zaehlt je
-    #: IP-Adresse und laesst als Gast rund 300 Videos in der Stunde durch. Vier
-    #: Tunnel sind vier Adressen. Faellt einer in die Sperre, wird gewechselt
-    #: statt angehalten.
+    #: Tunnel teilen weiterhin dasselbe globale Anfragenbudget; zusaetzliche
+    #: Ausgaenge erhoehen die konfigurierten Stunden-/Tagesbudgets nicht.
     vpn_aktiv: bool = False
     #: Bei eingeschaltetem VPN die eigene Leitung NICHT mitbenutzen.
     #:
@@ -209,10 +214,8 @@ class Settings(BaseSettings):
     wireproxy_path: str = "wireproxy"
 
     # ------------------------------------------------------------- Worker
-    #: Parallele Downloads. Bewusst niedrig: YouTube drosselt pro IP-Adresse,
-    #: nicht pro Prozess - als Gast liegt die Grenze bei rund 300 Videos je
-    #: Stunde. Wer hier hochdreht, wird nicht schneller fertig, sondern
-    #: voruebergehend gesperrt.
+    #: Parallele Downloads. Bewusst niedrig: Mehr Worker erhoehen weder das
+    #: gemeinsame Anfragenbudget noch das Budget fuer Videostarts.
     download_concurrency: int = Field(default=1, ge=1, le=16)
     encode_concurrency: int = Field(default=1, ge=1, le=16)
     #: Standardintervall fuer den Kanal-Abgleich in Stunden.
