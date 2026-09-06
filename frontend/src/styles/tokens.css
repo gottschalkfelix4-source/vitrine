@@ -44,6 +44,9 @@
   /* --- Masse ------------------------------------------------------------ */
   --kopf-hoehe: 56px;
   --kopf-gesamt: calc(var(--kopf-hoehe) + env(safe-area-inset-top, 0px));
+  --mobil-navigation-hoehe: 50px;
+  --mobil-navigation-abstand: env(safe-area-inset-bottom, 0px);
+  --mobil-navigation-gesamt: calc(var(--mobil-navigation-hoehe) + 1px + var(--mobil-navigation-abstand));
   --leiste-breite: 240px;
   --leiste-schmal: 72px;
   --radius-klein: 8px;
