@@ -277,3 +277,11 @@
   .watch-seite .steuer-knopf, .watch-seite .steuer-knopf.steuer-text { flex-basis: 44px; width: 44px; }
   .watch-seite .steuer-ton { display: none; }
 }
+
+/* Diagnoseanzeige zum Ablesen auf dem Gerät; nimmt selbst keine Berührung an. */
+.player-diagnose {
+  position: fixed; inset: 0 0 auto; z-index: 1000; margin: 0;
+  padding: max(6px, env(safe-area-inset-top, 0px)) 8px 6px;
+  font: 11px/1.35 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: #8f8; background: #000c; pointer-events: none;
+}

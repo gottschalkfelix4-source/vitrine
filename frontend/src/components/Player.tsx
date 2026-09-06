@@ -13,6 +13,7 @@ import { dauer } from "../lib/format";
 import { lokalFortschrittMerken } from "../lib/wiedergabeFortschritt";
 import { playerTouchAbschliessen } from "../lib/playerTouch";
 import { flaecheNeuAufbauen, trefferflaecheVersetzt } from "../lib/trefferflaeche";
+import { PlayerDiagnose } from "./PlayerDiagnose";
 import { wiedergabeStarten, wiedergabeMelden, wiedergabeBeenden, type Wiedergabesitzung, type WiedergabeQualitaet, type Qualitaetsangebot } from "../lib/wiedergabe";
 import {
   istVollbild,
@@ -160,6 +161,9 @@ export function Player({
   const zieht = useRef(false);
   const wischStart = useRef<{ x: number; y: number } | null>(null);
   const gesteMitTouch = useRef(false);
+  // Diagnoseanzeige: fünfmal auf die Zeitanzeige tippen oder ?diagnose aufrufen.
+  const [diagnose, setDiagnose] = useState(() => typeof location !== "undefined" && /[?&]diagnose/.test(location.search));
+  const diagnoseTipps = useRef<number[]>([]);
   const { sichtbar: steuerungSichtbar, zeigen, ausblenden, ereignisse } = usePlayerSteuerung({
     laeuft, bereit: lage.art === "bereit", minimiert, menueOffen: menue !== null, vollbild,
   });
@@ -862,6 +866,7 @@ export function Player({
       </div> : null}
       {lage.art === "bereit" && wartet && laeuft ? <div className="player-lader" aria-hidden="true" /> : null}
       {hinweis ? <div className="player-hinweis" role="status">{hinweis}</div> : null}
+      {diagnose ? <PlayerDiagnose huelle={huelleRef} oberflaeche={oberflaecheRef} appVollbild={appVollbild} nativesVollbild={nativesVollbild} quer={ausrichtung.quer} /> : null}
 
       <PlayerTaste className="player-gross" hidden={lage.art !== "bereit" || !steuerungSichtbar || menue !== null || (!minimiert && laeuft && !ausrichtung.touch)}
         onClick={() => { umschalten(); zeigen(); }} aria-label={laeuft ? "Pause" : "Abspielen"}>
@@ -1009,7 +1014,11 @@ export function Player({
             />
           </div>
 
-          <span className="steuer-zeit">
+          <span className="steuer-zeit" onPointerUp={() => {
+            const jetzt = Date.now();
+            diagnoseTipps.current = [...diagnoseTipps.current.filter((t) => jetzt - t < 2000), jetzt];
+            if (diagnoseTipps.current.length >= 5) { diagnoseTipps.current = []; setDiagnose((d) => !d); }
+          }}>
             {dauer(zeit)} <span className="steuer-zeit-trenner">/</span> {dauer(gesamt)}
           </span>
 
