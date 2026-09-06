@@ -28,13 +28,15 @@ export function PlayerDiagnose({ huelle, oberflaeche, appVollbild, nativesVollbi
     };
     const lesen = () => {
       const vv = window.visualViewport;
+      const de = document.documentElement;
       const taste = huelle.current?.querySelector('button[aria-label="Wiedergabeeinstellungen"]') ?? null;
       const tr = taste?.getBoundingClientRect();
       const treffer = tr ? document.elementFromPoint(tr.left + tr.width / 2, tr.top + tr.height / 2) : null;
       setZeilen([
         `lage ${screen.orientation?.type ?? "?"} quer=${quer} app=${appVollbild} nativ=${nativesVollbild} pwa=${alsAppGestartet()}`,
         `innen ${window.innerWidth}×${window.innerHeight} sichtbar ${vv ? `${Math.round(vv.width)}×${Math.round(vv.height)} +${Math.round(vv.offsetTop)} skala ${vv.scale.toFixed(2)}` : "–"}`,
-        `var ${getComputedStyle(document.documentElement).getPropertyValue("--app-viewport-hoehe") || "–"} scrollY ${Math.round(window.scrollY)} inhalt ${Math.round(document.querySelector(".inhalt")?.scrollTop ?? -1)}`,
+        `layout ${de.clientWidth}×${de.clientHeight} dokument h ${de.scrollHeight} scroll ${Math.round(de.scrollTop)}/${Math.round(document.body.scrollTop)}`,
+        `var ${getComputedStyle(de).getPropertyValue("--app-viewport-hoehe") || "–"} scrollY ${Math.round(window.scrollY)} inhalt ${Math.round(document.querySelector(".inhalt")?.scrollTop ?? -1)}`,
         `huelle ${kasten(document.querySelector(".huelle"))}`,
         `player ${kasten(huelle.current)}`,
         `ebene ${kasten(oberflaeche.current)} versetzt=${oberflaeche.current ? trefferflaecheVersetzt(oberflaeche.current) : "–"}`,

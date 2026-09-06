@@ -2,13 +2,15 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { appViewportBeobachten } from "./appViewport";
 
-let viewport: EventTarget & { height: number; offsetTop: number; scale: number };
+let viewport: EventTarget & { width: number; height: number; offsetTop: number; scale: number };
 let beenden: (() => void) | undefined;
 const hoehe = () => document.documentElement.style.getPropertyValue("--app-viewport-hoehe");
+/** jsdom kennt keine Layoutbreite; sie wird für die Zoom-Erkennung vorgegeben. */
+const layoutBreite = (px: number) => Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, get: () => px });
 
 beforeEach(() => {
   vi.useFakeTimers();
-  viewport = Object.assign(new EventTarget(), { height: 894, offsetTop: 0, scale: 1 });
+  viewport = Object.assign(new EventTarget(), { width: 440, height: 894, offsetTop: 0, scale: 1 });
   vi.stubGlobal("visualViewport", viewport);
   vi.stubGlobal("innerHeight", 894);
   vi.stubGlobal("matchMedia", () => ({ matches: true }));
@@ -21,6 +23,7 @@ afterEach(() => {
   beenden = undefined;
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(document.documentElement, "clientWidth");
 });
 
 it("begrenzt die App auf das Webview, auch wenn der Bildschirm höher ist", () => {
@@ -67,12 +70,39 @@ it("hält die Navigation bei Tastatur und verschobenem Viewport sichtbar", () =>
 });
 
 it("lässt Pinch-Zoom zu, ohne das Layout zu verkleinern", () => {
+  layoutBreite(440);
   beenden = appViewportBeobachten();
-  viewport.scale = 2;
-  viewport.height = 447;
+  Object.assign(viewport, { scale: 2, width: 220, height: 447 });
   viewport.dispatchEvent(new Event("resize"));
   vi.runAllTimers();
   expect(hoehe()).toBe("894px");
+});
+
+it("misst nach dem Drehen auch dann, wenn iOS eine falsche Skala meldet", () => {
+  // Das iPhone meldet in der PWA quer dauerhaft scale = Breite/Höhe, obwohl
+  // nichts vergrößert ist: Ausschnitt und Layout sind gleich breit.
+  layoutBreite(440);
+  beenden = appViewportBeobachten();
+  layoutBreite(956);
+  vi.stubGlobal("innerHeight", 440);
+  Object.assign(viewport, { scale: 956 / 440, width: 956, height: 440 });
+  window.dispatchEvent(new Event("orientationchange"));
+  vi.runAllTimers();
+  expect(hoehe()).toBe("440px");
+});
+
+it("übergeht beim Drehen die Bilder, in denen der Ausschnitt noch die alte Breite hat", () => {
+  layoutBreite(440);
+  beenden = appViewportBeobachten();
+  layoutBreite(956);
+  vi.stubGlobal("innerHeight", 440);
+  viewport.height = 440;
+  window.dispatchEvent(new Event("orientationchange"));
+  vi.advanceTimersByTime(100);
+  expect(hoehe()).toBe("894px");
+  viewport.width = 956;
+  vi.runAllTimers();
+  expect(hoehe()).toBe("440px");
 });
 
 it("behält bei ungültigen Start- oder Wechselwerten die letzte gültige Höhe", () => {

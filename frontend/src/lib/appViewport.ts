@@ -8,6 +8,25 @@ import { alsAppGestartet } from "../pwa";
  *  und der jeweils neueste Wert übernommen. */
 const NACHLAUF_BILDER = 60;
 
+/** Pinch-Zoom verkleinert den sichtbaren Ausschnitt, nicht das App-Layout;
+ *  solange er anhält, bleibt die zuletzt gemessene Höhe stehen.
+ *
+ *  Erkannt wird er an den Breiten, nicht an viewport.scale. Das iPhone meldet
+ *  in der PWA nach dem Drehen ins Querformat dauerhaft eine Skala von Breite
+ *  geteilt durch Höhe (956/440 = 2,17), obwohl nichts vergrößert ist: Fenster,
+ *  sichtbarer Ausschnitt und Layout sind alle 956 breit. Mit der Skala als
+ *  Maßstab galt quer jede Messung als Zoom, die Höhe blieb bei den 894 des
+ *  Hochformats, und die Hülle ragte 454 Pixel unter den Bildschirmrand - die
+ *  Seite wurde scrollbar, obwohl sie das nie sein soll. Ein echter Zoom zeigt
+ *  sich daran, dass der sichtbare Ausschnitt schmaler ist als das Layout;
+ *  während des Drehens kann der Ausschnitt ein paar Bilder lang noch die alte
+ *  Breite haben, das übergeht die Schleife von selbst. */
+function gezoomt(viewport: VisualViewport): boolean {
+  const layout = document.documentElement.clientWidth;
+  if (layout > 0) return viewport.width < layout * 0.99;
+  return Math.abs(viewport.scale - 1) > 0.01;
+}
+
 /** Hält die PWA samt unterer Navigation innerhalb des sichtbaren Webviews. */
 export function appViewportBeobachten(): () => void {
   if (!alsAppGestartet()) return () => {};
@@ -19,8 +38,7 @@ export function appViewportBeobachten(): () => void {
   let beendet = false;
 
   function messen() {
-    // Pinch-Zoom verkleinert den sichtbaren Ausschnitt, nicht das App-Layout.
-    if (viewport && Math.abs(viewport.scale - 1) > 0.01) return;
+    if (viewport && gezoomt(viewport)) return;
     // offsetTop berücksichtigt das Verschieben beim Öffnen der Tastatur.
     // Nie über innerHeight hinausgehen, auch wenn iOS einen veralteten
     // VisualViewport meldet. Safe Areas sind bereits Teil dieser Höhe.

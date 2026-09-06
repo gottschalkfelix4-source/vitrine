@@ -232,6 +232,26 @@ test("bedient Kopf- und Vollbildtasten auch während laufender Wiedergabe", asyn
   await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(false);
 });
 
+test("misst die Höhe nach dem Drehen auch bei falsch gemeldeter Skala", async ({ page }) => {
+  // Das iPhone meldet in der PWA quer dauerhaft scale = Breite/Höhe, obwohl
+  // nichts vergrößert ist. Galt das als Zoom, blieb die Hülle bei der Höhe
+  // des Hochformats und die Seite wurde scrollbar.
+  await page.addInitScript(() => {
+    const vv = window.visualViewport;
+    if (vv) Object.defineProperty(vv, "scale", { get: () => window.innerWidth / window.innerHeight });
+  });
+  await archiv(page);
+  const variable = () => page.evaluate(() => document.documentElement.style.getPropertyValue("--app-viewport-hoehe"));
+  await expect.poll(variable).toBe("844px");
+  await drehen(page, true);
+  await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "true");
+  await expect.poll(variable).toBe("390px");
+  expect(await page.locator('.huelle').evaluate(el => el.getBoundingClientRect().height)).toBe(390);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(390);
+  await drehen(page, false);
+  await expect.poll(variable).toBe("844px");
+});
+
 test("bleibt im Quer-Vollbild am Bildschirm, auch bei veralteter Viewport-Messung", async ({ page }) => {
   await archiv(page);
   await drehen(page, true);
