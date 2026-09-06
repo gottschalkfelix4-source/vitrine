@@ -12,6 +12,7 @@ import { ApiFehler } from "../lib/auth";
 import { dauer } from "../lib/format";
 import { lokalFortschrittMerken } from "../lib/wiedergabeFortschritt";
 import { playerTouchAbschliessen } from "../lib/playerTouch";
+import { flaecheNeuAufbauen, trefferflaecheVersetzt } from "../lib/trefferflaeche";
 import { wiedergabeStarten, wiedergabeMelden, wiedergabeBeenden, type Wiedergabesitzung, type WiedergabeQualitaet, type Qualitaetsangebot } from "../lib/wiedergabe";
 import {
   istVollbild,
@@ -131,6 +132,7 @@ export function Player({
   const quellenwechsel = useRef(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const huelleRef = useRef<HTMLDivElement>(null);
+  const oberflaecheRef = useRef<HTMLDivElement>(null);
   const leisteRef = useRef<HTMLDivElement>(null);
   const gesprungen = useRef(false);
 
@@ -488,6 +490,29 @@ export function Player({
     if (istVollbild(videoRef.current)) void umschaltenVollbild(huelleRef.current, videoRef.current).catch(() => {});
   }, [minimiert]);
 
+  // Nach einer Drehung kann WebKit die Trefferflächen der Bedienebene an der
+  // alten Stelle stehen lassen: Gezeichnet wird richtig, getroffen woanders.
+  // Von aussen sieht der Player dann tadellos aus, reagiert aber neben seinen
+  // Symbolen, und von selbst geht das nie wieder weg. Nur der Player ist
+  // betroffen - er ist der einzige Teil der App, der beim Drehen zwischen
+  // Vollbild und Fluss wechselt und dabei ein Videoelement mitführt. Also
+  // misst er nach, solange die Drehung sich setzt, und baut seine Ebene neu
+  // auf, wenn die Messung einen Versatz zeigt. Ein offenes Menü verdeckt die
+  // Ebene und würde die Messung verfälschen.
+  useEffect(() => {
+    if (menue !== null) return;
+    const ebene = oberflaecheRef.current;
+    if (!ebene) return;
+    let reparaturen = 0;
+    const timer = [0, 150, 400, 800].map((ms) => window.setTimeout(() => {
+      if (reparaturen < 3 && trefferflaecheVersetzt(ebene)) {
+        reparaturen++;
+        flaecheNeuAufbauen(ebene);
+      }
+    }, ms));
+    return () => timer.forEach(window.clearTimeout);
+  }, [ausrichtung.quer, ausrichtung.touch, appVollbild, minimiert, theater, menue]);
+
   useEffect(() => {
     if (!appVollbild) return;
     const el = huelleRef.current;
@@ -779,7 +804,7 @@ export function Player({
           in jedem Browser zuverlässig durchlassen - genau daran scheitert es
           auf iOS. Alles, was die Ebene selbst trifft, ist freies Bild; jedes
           Bedienelement ist ein Kind und bekommt die Berührung zuerst. */}
-      <div className="player-oberflaeche"
+      <div className="player-oberflaeche" ref={oberflaecheRef}
         onPointerDown={(e) => {
           if (e.target !== e.currentTarget) return;
           gesteMitTouch.current = false;
