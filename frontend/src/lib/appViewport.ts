@@ -1,5 +1,13 @@
 import { alsAppGestartet } from "../pwa";
 
+/** Wie lange nach einem Größenwechsel weiter nachgemessen wird. iOS meldet
+ *  direkt nach dem Drehen noch die Maße der alten Lage - teils mehrere hundert
+ *  Millisekunden lang. Wer nur einmal misst, schreibt genau diesen falschen
+ *  Wert fest, und niemand korrigiert ihn je wieder: Ein weiteres Ereignis
+ *  kommt ja nicht. Deshalb wird über die ganze Umbauphase jedes Bild gemessen
+ *  und der jeweils neueste Wert übernommen. */
+const NACHLAUF_BILDER = 60;
+
 /** Hält die PWA samt unterer Navigation innerhalb des sichtbaren Webviews. */
 export function appViewportBeobachten(): () => void {
   if (!alsAppGestartet()) return () => {};
@@ -7,6 +15,8 @@ export function appViewportBeobachten(): () => void {
   const stil = document.documentElement.style;
   const viewport = window.visualViewport;
   let frame: number | null = null;
+  let offen = 0;
+  let beendet = false;
 
   function messen() {
     // Pinch-Zoom verkleinert den sichtbaren Ausschnitt, nicht das App-Layout.
@@ -19,19 +29,31 @@ export function appViewportBeobachten(): () => void {
     if (Number.isFinite(hoehe) && hoehe > 0) stil.setProperty("--app-viewport-hoehe", `${hoehe}px`);
   }
 
+  function schleife() {
+    frame = null;
+    if (beendet) return;
+    messen();
+    if (--offen > 0) frame = window.requestAnimationFrame(schleife);
+  }
+
   function aktualisieren() {
-    if (frame !== null) return;
-    frame = window.requestAnimationFrame(() => { frame = null; messen(); });
+    offen = NACHLAUF_BILDER;
+    if (frame === null && !beendet) frame = window.requestAnimationFrame(schleife);
   }
 
   messen();
   window.addEventListener("resize", aktualisieren);
+  window.addEventListener("orientationchange", aktualisieren);
   window.addEventListener("pageshow", aktualisieren);
+  window.screen?.orientation?.addEventListener("change", aktualisieren);
   viewport?.addEventListener("resize", aktualisieren);
   viewport?.addEventListener("scroll", aktualisieren);
   return () => {
+    beendet = true;
     window.removeEventListener("resize", aktualisieren);
+    window.removeEventListener("orientationchange", aktualisieren);
     window.removeEventListener("pageshow", aktualisieren);
+    window.screen?.orientation?.removeEventListener("change", aktualisieren);
     viewport?.removeEventListener("resize", aktualisieren);
     viewport?.removeEventListener("scroll", aktualisieren);
     if (frame !== null) window.cancelAnimationFrame(frame);

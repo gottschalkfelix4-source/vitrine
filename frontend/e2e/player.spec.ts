@@ -231,3 +231,24 @@ test("bedient Kopf- und Vollbildtasten auch während laufender Wiedergabe", asyn
   await expect(page.locator('.player')).toHaveAttribute("data-mini", "true");
   await expect.poll(() => page.locator('video').evaluate(v => v.paused)).toBe(false);
 });
+
+test("bleibt im Quer-Vollbild am Bildschirm, auch bei veralteter Viewport-Messung", async ({ page }) => {
+  await archiv(page);
+  await drehen(page, true);
+  await expect(page.locator('.player')).toHaveAttribute("data-app-vollbild", "true");
+  // Genau das meldet iOS nach dem Drehen für einen Moment: die alte Lage.
+  // Der Player darf sich davon nicht aus dem Bildschirm schieben lassen.
+  await page.evaluate(() => document.documentElement.style.setProperty("--app-viewport-hoehe", "844px"));
+  const schirm = page.viewportSize()!;
+  const kasten = (await page.locator('.player').boundingBox())!;
+  expect(Math.round(kasten.y)).toBe(0);
+  expect(Math.round(kasten.height)).toBe(schirm.height);
+  // Und jede sichtbare Taste muss an ihrer eigenen Mitte getroffen werden.
+  const danebenn = await page.locator('.player button').evaluateAll(tasten => tasten.filter(taste => {
+    const r = taste.getBoundingClientRect();
+    if (!r.width || !r.height || getComputedStyle(taste).visibility === "hidden") return false;
+    const ziel = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return !ziel || !taste.contains(ziel);
+  }).map(taste => taste.getAttribute("aria-label")));
+  expect(danebenn).toEqual([]);
+});

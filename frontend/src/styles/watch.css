@@ -207,10 +207,18 @@
 .watch-seite .player-einstellungen { z-index: 10; }
 
 /* In-App-Vollbild funktioniert beim Drehen ohne eine neue Klick-Erlaubnis.
-   Die reservierte Player-Spalte verhindert Sprünge der vorherigen Ansicht. */
+   Die reservierte Player-Spalte verhindert Sprünge der vorherigen Ansicht.
+
+   Die Fläche spannt sich über inset, nicht über die gemessene Viewporthöhe.
+   Genau die ist beim Drehen für einen Moment noch die der alten Lage, und
+   eine feste Höhe daraus macht daraus einen bleibenden Fehler: Das Bild
+   säße quer mitten in einem viel zu hohen Kasten, also zu tief und unten
+   abgeschnitten, und die Bedienelemente säßen an dessen Rändern statt an
+   denen des Bildschirms - die Trefferflächen lägen weit neben den Symbolen.
+   Mit inset ergibt der Browser die Maße selbst und immer aktuell. */
 .watch-seite .buehne[data-app-vollbild="true"] {
-  position: fixed; z-index: 100; inset: 0 0 auto;
-  width: 100%; height: var(--app-viewport-hoehe, 100dvh); max-height: none;
+  position: fixed; z-index: 100; inset: 0;
+  width: auto; height: auto; max-height: none;
   margin: 0; border-radius: 0; aspect-ratio: auto;
 }
 .watch-seite .buehne[data-vollbild="true"] .player-kopf {
@@ -228,7 +236,7 @@
 }
 
 /* Portrait-Menüs liegen über der App statt in einem nur 200px hohen Video. */
-.player-menue-blatt { position: fixed; inset: 0 0 auto; height: var(--app-viewport-hoehe, 100dvh); z-index: 120; }
+.player-menue-blatt { position: fixed; inset: 0; z-index: 120; }
 .player-menue-hintergrund { position: absolute; inset: 0; width: 100%; background: #0007; }
 .player-menue-blatt .steuer-menue.player-einstellungen {
   inset: auto 0 0; width: 100%; max-height: min(70%, 520px); margin: 0;
@@ -244,7 +252,10 @@
   --mini-breite: min(320px, calc(100vw - 24px));
   --mini-abstand: max(12px, env(safe-area-inset-bottom, 0px));
   position: fixed; z-index: 45; right: max(12px, env(safe-area-inset-right, 0px));
-  top: calc(var(--app-viewport-hoehe, 100dvh) - var(--mini-abstand) - var(--mini-breite) * 9 / 16);
+  /* Von unten her verankert statt aus der gemessenen Viewporthöhe gerechnet:
+     Ein beim Drehen kurz veralteter Messwert dürfte den Miniplayer nicht
+     dauerhaft neben den Bildschirmrand setzen. */
+  bottom: var(--mini-abstand);
   width: var(--mini-breite);
   border-radius: 10px; box-shadow: 0 4px 24px #0008;
 }

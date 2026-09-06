@@ -115,3 +115,27 @@ it("entfernt Listener und ausstehende Messungen beim Beenden", () => {
   vi.runAllTimers();
   expect(hoehe()).toBe("");
 });
+
+it("misst nach dem Drehen weiter, bis iOS die neue Lage meldet", () => {
+  beenden = appViewportBeobachten();
+  expect(hoehe()).toBe("894px");
+  // iOS meldet direkt nach dem Ereignis noch die Maße der alten Lage.
+  window.dispatchEvent(new Event("orientationchange"));
+  vi.advanceTimersByTime(100);
+  expect(hoehe()).toBe("894px");
+  // Erst einige Bilder später steht der Umbau.
+  vi.stubGlobal("innerHeight", 440);
+  viewport.height = 440;
+  vi.runAllTimers();
+  expect(hoehe()).toBe("440px");
+});
+
+it("nimmt eine späte Korrektur auch ohne weiteres Ereignis noch mit", () => {
+  beenden = appViewportBeobachten();
+  viewport.dispatchEvent(new Event("resize"));
+  vi.advanceTimersByTime(320);
+  vi.stubGlobal("innerHeight", 500);
+  viewport.height = 500;
+  vi.runAllTimers();
+  expect(hoehe()).toBe("500px");
+});
