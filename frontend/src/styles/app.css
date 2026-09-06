@@ -1729,10 +1729,12 @@
 /* Gemeinsame App-Oberfläche: feste Navigation, ein klarer Scrollbereich. */
 .huelle { grid-template-rows: var(--kopf-gesamt) minmax(0, 1fr); }
 @media (display-mode: standalone) {
-  /* Die installierte App füllt ihren Viewport direkt. iOS kann für 100dvh
-     und den verfügbaren Bereich unterschiedliche Höhen liefern. Die Safe
-     Areas werden innerhalb des Grids von Kopf und Navigation reserviert. */
-  .huelle { position: fixed; inset: 0; height: auto; }
+  /* In iOS-PWAs kann der durch inset: 0 aufgespannte Bereich um die
+     Systemleisten verkürzt sein. 100vh umfasst hier den ganzen Bildschirm
+     (bugs.webkit.org/show_bug.cgi?id=254868#c2). Die Unterkante deshalb aus
+     dieser Höhe bestimmen, nicht aus bottom: 0 oder 100dvh. Safe Areas
+     bleiben innerhalb des Grids und werden nicht von der App-Höhe abgezogen. */
+  .huelle { position: fixed; inset: 0 0 auto; height: 100vh; }
   @supports (-webkit-touch-callout: none) {
     /* WebKit kann in PWAs die ausgeblendete Browserleiste zum unteren
        Inset addieren (bugs.webkit.org/show_bug.cgi?id=301172#c8).
